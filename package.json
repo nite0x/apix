@@ -1,0 +1,25 @@
+{
+  "name": "sentris",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "concurrently -k --names frontend,backend,tauri --prefix-colors cyan,green,magenta \"pnpm dev:frontend\" \"pnpm dev:backend\" \"pnpm dev:tauri\"",
+    "dev:frontend": "pnpm --filter @sentris/desktop dev",
+    "dev:backend": "node scripts/dev-runtime.mjs",
+    "dev:tauri": "pnpm build:sidecar && wait-on http://127.0.0.1:1420 tcp:127.0.0.1:4317 && pnpm --dir src-tauri tauri dev",
+    "dev:desktop": "pnpm dev",
+    "dev:web": "pnpm dev:frontend",
+    "dev:runtime": "pnpm dev:backend",
+    "build": "pnpm --dir src-tauri tauri build",
+    "build:web": "pnpm --dir apps/desktop build",
+    "build:sidecar": "node scripts/build-sidecar.mjs",
+    "typecheck": "pnpm --dir apps/desktop typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^5.7.2",
+    "wait-on": "^9.0.5"
+  }
+}

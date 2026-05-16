@@ -1,0 +1,20 @@
+node_modules/
+dist/
+target/
+src-tauri/binaries/
+services/runtime/runtime
+
+.DS_Store
+.env
+.env.*
+!.env.example
+
+*.log
+*.db
+*.db-shm
+*.db-wal
+
+# Editor & tools
+.vscode/
+.claude/
+memory/
