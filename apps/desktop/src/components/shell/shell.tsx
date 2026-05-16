@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useWebSocket } from '../../hooks/use-websocket'
 import { useSessionStore } from '../../store/session-store'
 import { Sidebar } from '../sidebar/sidebar'
@@ -10,7 +11,13 @@ export function Shell() {
 
   const sessions = useSessionStore((s) => s.sessions)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
+  const loadState = useSessionStore((s) => s.loadState)
+  const loadSessions = useSessionStore((s) => s.loadSessions)
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
+
+  useEffect(() => {
+    void loadSessions()
+  }, [loadSessions])
 
   return (
     <div className="app">
@@ -18,10 +25,14 @@ export function Shell() {
       <div className="main">
         <Topbar session={activeSession} />
         <div className="content">
-          {activeSession ? (
+          {loadState === 'loading' ? (
+            <div className="tl-empty">Loading sessions...</div>
+          ) : loadState === 'error' ? (
+            <div className="tl-empty">Runtime unavailable</div>
+          ) : activeSession ? (
             <Timeline session={activeSession} />
           ) : (
-            <div className="tl-empty">Select a session from the sidebar</div>
+            <div className="tl-empty">No sessions yet</div>
           )}
           <SessionPanel session={activeSession} />
         </div>

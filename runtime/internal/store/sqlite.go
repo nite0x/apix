@@ -101,6 +101,44 @@ func (s *SQLiteStore) ListSessions() []*core.Session {
 	return list
 }
 
+func (s *SQLiteStore) LoadSteps(sessionID string) []*core.Step {
+	rows, err := s.db.Query(`SELECT id, session_id, idx, type, status, tool, input, output,
+		thought, error, rule_id, duration_ms, started_at, ended_at
+		FROM steps WHERE session_id = ? ORDER BY idx`, sessionID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var list []*core.Step
+	for rows.Next() {
+		step := &core.Step{}
+		var input, output string
+		if err := rows.Scan(
+			&step.ID,
+			&step.SessionID,
+			&step.Index,
+			&step.Type,
+			&step.Status,
+			&step.Tool,
+			&input,
+			&output,
+			&step.Thought,
+			&step.Error,
+			&step.RuleID,
+			&step.DurationMs,
+			&step.StartedAt,
+			&step.EndedAt,
+		); err != nil {
+			continue
+		}
+		json.Unmarshal([]byte(input), &step.Input)   //nolint:errcheck
+		json.Unmarshal([]byte(output), &step.Output) //nolint:errcheck
+		list = append(list, step)
+	}
+	return list
+}
+
 func (s *SQLiteStore) SaveStep(step *core.Step) {
 	input, _ := json.Marshal(step.Input)
 	output, _ := json.Marshal(step.Output)
