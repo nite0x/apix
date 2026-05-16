@@ -5,6 +5,7 @@ const frontendUrl = "http://127.0.0.1:1420";
 
 await waitForFrontend();
 openBrowser(frontendUrl);
+setInterval(() => {}, 2 ** 31 - 1);
 
 function waitForFrontend() {
   return new Promise((resolveReady) => {
