@@ -158,7 +158,8 @@ The Go service owns local SQLite access and exposes local APIs for the desktop a
 - HTTP base URL: `http://127.0.0.1:4317`
 - Health endpoint: `GET /health`
 - Log stream: `GET /ws/logs` WebSocket
-- Default SQLite file: `runtime/sentris.db` when launched from the runtime directory, or `sentris.db` relative to the caller
+- Desktop app SQLite file: the platform app-local-data directory under `dev.sentris.desktop/sentris.db`
+- Standalone runtime SQLite file: `sentris.db` relative to the caller, unless `SENTRIS_DB_PATH` is set
 
 ## Notes
 

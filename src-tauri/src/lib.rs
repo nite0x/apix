@@ -1,4 +1,5 @@
 use std::{
+    fs,
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
     sync::Mutex,
@@ -74,7 +75,15 @@ fn start_runtime_sidecar<R: tauri::Runtime>(
         return Ok(RuntimeSidecar::empty());
     }
 
-    let (_rx, child) = app.shell().sidecar(RUNTIME_SIDECAR)?.spawn()?;
+    let app_local_data_dir = app.path().app_local_data_dir()?;
+    fs::create_dir_all(&app_local_data_dir)?;
+    let db_path = app_local_data_dir.join("sentris.db");
+
+    let (_rx, child) = app
+        .shell()
+        .sidecar(RUNTIME_SIDECAR)?
+        .env("SENTRIS_DB_PATH", db_path)
+        .spawn()?;
     let runtime = RuntimeSidecar::new(child);
 
     if wait_for_runtime(Duration::from_secs(5)) {
