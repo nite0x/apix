@@ -1,6 +1,6 @@
-# Sentris Runtime
+# Apix Runtime
 
-Local Go runtime service for Sentris.
+Local Go runtime service for Apix.
 
 ## Development
 
@@ -10,8 +10,8 @@ go run main.go
 
 The service listens on `127.0.0.1:4317`.
 
-By default the runtime stores SQLite data in `sentris.db` relative to the
-current working directory. Set `SENTRIS_DB_PATH` to use an explicit database
+By default the runtime stores SQLite data in `apix.db` relative to the
+current working directory. Set `APIX_DB_PATH` to use an explicit database
 file path instead; the desktop app does this when it launches the bundled
 runtime sidecar.
 

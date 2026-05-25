@@ -1,10 +1,10 @@
-# Sentris
+# Apix
 
-Sentris is a local-first desktop developer tool for MCP-assisted API debugging, workflow execution, and run console logs.
+Apix is a local-first desktop developer tool for MCP-assisted API debugging, workflow execution, and run console logs.
 
 ## Status
 
-Sentris is an early public release. The current codebase includes the desktop
+Apix is an early public release. The current codebase includes the desktop
 shell, local runtime, WebSocket event stream, HTTP collection management, and
 manual request execution. Expect the product surface and internal contracts to
 evolve quickly while the core workflow settles.
@@ -12,7 +12,7 @@ evolve quickly while the core workflow settles.
 ## Repository Layout
 
 ```text
-sentris/
+apix/
   apps/desktop         React + TypeScript + Vite UI
   src-tauri            Tauri desktop shell and sidecar wiring
   runtime              Go local runtime service, HTTP API, WebSocket logs, SQLite owner
@@ -141,7 +141,7 @@ conventions, and pull request guidance.
 
 ## License
 
-Sentris is licensed under the GNU Affero General Public License v3.0 only.
+Apix is licensed under the GNU Affero General Public License v3.0 only.
 See [LICENSE](LICENSE).
 
 ## Ports
@@ -158,11 +158,11 @@ The Go service owns local SQLite access and exposes local APIs for the desktop a
 - HTTP base URL: `http://127.0.0.1:4317`
 - Health endpoint: `GET /health`
 - Log stream: `GET /ws/logs` WebSocket
-- Desktop app SQLite file: the platform app-local-data directory under `dev.sentris.desktop/sentris.db`
-- Standalone runtime SQLite file: `sentris.db` relative to the caller, unless `SENTRIS_DB_PATH` is set
+- Desktop app SQLite file: the platform app-local-data directory under `dev.apix.desktop/apix.db`
+- Standalone runtime SQLite file: `apix.db` relative to the caller, unless `APIX_DB_PATH` is set
 
 ## Notes
 
-- Tauri is configured to package the Go service as a sidecar via `src-tauri/binaries/sentris-runtime-*`.
+- Tauri is configured to package the Go service as a sidecar via `src-tauri/binaries/apix-runtime-*`.
 - Feature modules can be added under `apps/desktop/src`.
 - Monaco Editor and React Flow can be introduced later without changing the module boundaries.

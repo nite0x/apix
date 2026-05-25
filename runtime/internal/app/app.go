@@ -6,11 +6,11 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sentris/sentris/runtime/internal/api"
-	"github.com/sentris/sentris/runtime/internal/core"
-	"github.com/sentris/sentris/runtime/internal/httpapi"
-	mcpserver "github.com/sentris/sentris/runtime/internal/mcp"
-	"github.com/sentris/sentris/runtime/internal/store"
+	"github.com/apix/apix/runtime/internal/api"
+	"github.com/apix/apix/runtime/internal/core"
+	"github.com/apix/apix/runtime/internal/httpapi"
+	mcpserver "github.com/apix/apix/runtime/internal/mcp"
+	"github.com/apix/apix/runtime/internal/store"
 )
 
 func Run(_ []string) error {
@@ -48,7 +48,7 @@ func Run(_ []string) error {
 	api.SetupWebSocket(r, hub)
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
-			"service": "sentris-runtime",
+			"service": "apix-runtime",
 			"status":  "ok",
 		})
 	})
@@ -60,21 +60,21 @@ func Run(_ []string) error {
 
 	// 6. Start HTTP server
 	go func() {
-		log.Println("Sentris API listening on :4317")
+		log.Println("Apix API listening on :4317")
 		if err := r.Run(":4317"); err != nil {
 			log.Fatal(err)
 		}
 	}()
 
 	// 7. MCP Server (stdio, blocking — Claude Desktop connects here)
-	log.Println("Sentris MCP Server starting...")
+	log.Println("Apix MCP Server starting...")
 	return mcp.ServeStdio(context.Background())
 }
 
 func sqlitePath() string {
-	if path := os.Getenv("SENTRIS_DB_PATH"); path != "" {
+	if path := os.Getenv("APIX_DB_PATH"); path != "" {
 		return path
 	}
 
-	return "sentris.db"
+	return "apix.db"
 }

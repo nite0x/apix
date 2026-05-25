@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/sentris/sentris/runtime/internal/app"
+	"github.com/apix/apix/runtime/internal/app"
 )
 
 func main() {

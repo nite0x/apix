@@ -12,7 +12,7 @@ use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
 const RUNTIME_ADDR: &str = "127.0.0.1:4317";
-const RUNTIME_SIDECAR: &str = "sentris-runtime";
+const RUNTIME_SIDECAR: &str = "apix-runtime";
 
 struct RuntimeSidecar {
     child: Mutex<Option<CommandChild>>,
@@ -57,7 +57,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("failed to run Sentris desktop application");
+        .expect("failed to run Apix desktop application");
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::Exit = event {
@@ -77,12 +77,12 @@ fn start_runtime_sidecar<R: tauri::Runtime>(
 
     let app_local_data_dir = app.path().app_local_data_dir()?;
     fs::create_dir_all(&app_local_data_dir)?;
-    let db_path = app_local_data_dir.join("sentris.db");
+    let db_path = app_local_data_dir.join("apix.db");
 
     let (_rx, child) = app
         .shell()
         .sidecar(RUNTIME_SIDECAR)?
-        .env("SENTRIS_DB_PATH", db_path)
+        .env("APIX_DB_PATH", db_path)
         .spawn()?;
     let runtime = RuntimeSidecar::new(child);
 
@@ -137,6 +137,6 @@ fn runtime_is_healthy() -> bool {
 
     let response = String::from_utf8_lossy(&buffer[..bytes_read]);
     response.starts_with("HTTP/1.1 200")
-        && response.contains("\"service\":\"sentris-runtime\"")
+        && response.contains("\"service\":\"apix-runtime\"")
         && response.contains("\"status\":\"ok\"")
 }
