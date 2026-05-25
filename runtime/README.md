@@ -1,6 +1,6 @@
-# Sentris Runtime
+# Apix Runtime
 
-Local Go runtime service for Sentris.
+Local Go runtime service for Apix.
 
 ## Development
 

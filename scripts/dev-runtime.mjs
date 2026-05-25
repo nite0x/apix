@@ -18,7 +18,7 @@ if (runtimeArgs[0] === "--") {
 }
 
 if (runtimeArgs.length === 0 && (await runtimeIsHealthy())) {
-  console.log("sentris-runtime is already listening on http://127.0.0.1:4317");
+  console.log("apix-runtime is already listening on http://127.0.0.1:4317");
   setInterval(() => {}, 2 ** 31 - 1);
 } else {
   startRuntime(runtimeArgs);
@@ -58,7 +58,7 @@ function runtimeIsHealthy() {
       response.on("end", () => {
         resolveHealthy(
           response.statusCode === 200 &&
-            body.includes('"service":"sentris-runtime"') &&
+            body.includes('"service":"apix-runtime"') &&
             body.includes('"status":"ok"')
         );
       });
