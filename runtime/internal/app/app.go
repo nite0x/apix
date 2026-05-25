@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/apix/apix/runtime/internal/api"
@@ -14,7 +15,7 @@ import (
 
 func Run(_ []string) error {
 	// 1. Storage
-	db := store.NewSQLiteStore("apix.db")
+	db := store.NewSQLiteStore(sqlitePath())
 
 	// 2. Core modules
 	hub := core.NewHub()
@@ -68,4 +69,12 @@ func Run(_ []string) error {
 	// 7. MCP Server (stdio, blocking — Claude Desktop connects here)
 	log.Println("Apix MCP Server starting...")
 	return mcp.ServeStdio(context.Background())
+}
+
+func sqlitePath() string {
+	if path := os.Getenv("APIX_DB_PATH"); path != "" {
+		return path
+	}
+
+	return "apix.db"
 }

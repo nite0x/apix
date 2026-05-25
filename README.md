@@ -75,6 +75,15 @@ This starts the React/Vite dev server, the Go runtime service, and the Tauri
 desktop shell together. `concurrently` keeps all process logs in one terminal
 and stops the group when one process exits.
 
+For browser-first development without launching Tauri:
+
+```bash
+pnpm dev:browser
+```
+
+This starts the React/Vite frontend and Go runtime only, then opens
+`http://127.0.0.1:1420` in your default browser.
+
 ## Start Modules Independently
 
 Run the React frontend only:
@@ -110,7 +119,8 @@ pnpm dev:desktop
 ```
 
 `pnpm dev:tauri` expects the frontend and backend ports to be available. For
-normal development, prefer `pnpm dev`.
+desktop development, prefer `pnpm dev`. For UI and runtime work that does not
+need native shell behavior, prefer `pnpm dev:browser`.
 
 ## Build
 
@@ -148,7 +158,8 @@ The Go service owns local SQLite access and exposes local APIs for the desktop a
 - HTTP base URL: `http://127.0.0.1:4317`
 - Health endpoint: `GET /health`
 - Log stream: `GET /ws/logs` WebSocket
-- Default SQLite file: `runtime/apix.db` when launched from the runtime directory, or `apix.db` relative to the caller
+- Desktop app SQLite file: the platform app-local-data directory under `dev.apix.desktop/apix.db`
+- Standalone runtime SQLite file: `apix.db` relative to the caller, unless `APIX_DB_PATH` is set
 
 ## Notes
 

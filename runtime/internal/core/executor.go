@@ -49,7 +49,14 @@ func (e *Executor) Execute(
 ) (any, error) {
 
 	// 1. Get or create session
-	session := e.sessions.GetOrCreate(sessionID, task, "claude-desktop")
+	session, existed := e.sessions.Get(sessionID)
+	if !existed {
+		session = e.sessions.GetOrCreate(sessionID, task, "claude-desktop")
+		e.hub.Push(session.ID, Event{
+			Type:    EventSessionStart,
+			Payload: session,
+		})
+	}
 
 	// 2. Create step
 	now := time.Now()

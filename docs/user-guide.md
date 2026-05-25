@@ -17,6 +17,12 @@ Start the full development stack:
 pnpm dev
 ```
 
+Start browser-first development without launching Tauri:
+
+```bash
+pnpm dev:browser
+```
+
 Run modules independently:
 
 ```bash

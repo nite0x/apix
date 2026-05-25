@@ -150,6 +150,7 @@ type Store interface {
 	SaveSession(s *Session)
 	GetSession(id string) (*Session, bool)
 	ListSessions() []*Session
+	LoadSteps(sessionID string) []*Step
 	SaveStep(s *Step)
 	LoadRules() []*Rule
 	SaveRules(rules []*Rule)

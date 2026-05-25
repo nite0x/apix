@@ -1,6 +1,7 @@
 package core
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -14,18 +15,30 @@ type SessionManager struct {
 }
 
 func NewSessionManager(store Store) *SessionManager {
-	return &SessionManager{
+	sm := &SessionManager{
 		sessions: make(map[string]*Session),
 		store:    store,
 	}
+	for _, session := range store.ListSessions() {
+		session.Steps = store.LoadSteps(session.ID)
+		sm.sessions[session.ID] = session
+	}
+	return sm
 }
 
 func (sm *SessionManager) Create(sessionType SessionType, task string, source string) *Session {
+	return sm.create("", sessionType, task, source)
+}
+
+func (sm *SessionManager) create(id string, sessionType SessionType, task string, source string) *Session {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	if id == "" {
+		id = uuid.New().String()
+	}
 	s := &Session{
-		ID:        uuid.New().String(),
+		ID:        id,
 		Type:      sessionType,
 		Status:    SessionRunning,
 		Task:      task,
@@ -51,7 +64,7 @@ func (sm *SessionManager) GetOrCreate(id string, task string, source string) *Se
 	if s, ok := sm.Get(id); ok {
 		return s
 	}
-	return sm.Create(SessionTypeAI, task, source)
+	return sm.create(id, SessionTypeAI, task, source)
 }
 
 func (sm *SessionManager) UpdateStatus(id string, status SessionStatus) {
@@ -71,5 +84,8 @@ func (sm *SessionManager) List() []*Session {
 	for _, s := range sm.sessions {
 		list = append(list, s)
 	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.After(list[j].CreatedAt)
+	})
 	return list
 }

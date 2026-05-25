@@ -1,13 +1,24 @@
 import { useEffect, useRef } from 'react'
-import { useSessionStore } from '../store/session-store'
-import type { Session, Step } from '../store/session-store'
+import {
+  mapBackendSession,
+  mapBackendStep,
+  useSessionStore,
+  type BackendSession,
+  type BackendStep,
+} from '../store/session-store'
 
 const WS_URL = 'ws://127.0.0.1:4317/ws/logs'
+
+interface RuntimeEvent {
+  type: string
+  session_id: string
+  step_id?: string
+  payload?: Record<string, unknown>
+}
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const store = useSessionStore.getState()
 
   useEffect(() => {
     function connect() {
@@ -21,100 +32,36 @@ export function useWebSocket() {
 
         ws.onmessage = (event) => {
           try {
-            const msg = JSON.parse(event.data as string) as {
-              type: string
-              sessionId: string
-              stepId?: string
-              payload?: Record<string, unknown>
-            }
-            const s = useSessionStore.getState()
+            const msg = JSON.parse(event.data as string) as RuntimeEvent
+            const store = useSessionStore.getState()
 
             switch (msg.type) {
               case 'session:start': {
-                const p = (msg.payload ?? {}) as Partial<Session>
-                s.addSession({
-                  id: msg.sessionId,
-                  type: 'ai',
-                  name: (p.task as string) ?? 'AI session',
-                  status: 'running',
-                  startedAt: Date.now(),
-                  steps: [],
-                  source: (p.source as string) ?? 'claude-desktop',
-                  task: p.task as string | undefined,
-                  environment: p.environment as string | undefined,
-                })
-                s.setActiveSession(msg.sessionId)
+                const session = mapBackendSession(msg.payload as unknown as BackendSession)
+                store.addSession(session)
+                store.setActiveSession(session.id)
                 break
               }
-              case 'session:done': {
-                const p = (msg.payload ?? {}) as Record<string, unknown>
-                s.updateSession(msg.sessionId, {
-                  status: 'done',
-                  summary: p.summary as string | undefined,
-                })
+              case 'session:done':
+                store.updateSession(msg.session_id, { status: 'done' })
                 break
-              }
               case 'session:error':
-                s.updateSession(msg.sessionId, { status: 'failed' })
+              case 'session:stopped':
+                store.updateSession(msg.session_id, { status: 'failed' })
                 break
-              case 'think:start': {
-                if (!msg.stepId) break
-                const p = (msg.payload ?? {}) as Record<string, unknown>
-                s.addStep(msg.sessionId, {
-                  id: msg.stepId,
-                  type: 'think',
-                  status: 'running',
-                  text: p.text as string | undefined,
-                } as Step)
+              case 'think:start':
+              case 'step:start':
+                if (!msg.step_id) break
+                store.addStep(msg.session_id, mapBackendStep(msg.payload as unknown as BackendStep))
                 break
-              }
-              case 'step:start': {
-                if (!msg.stepId) break
-                const p = (msg.payload ?? {}) as Record<string, unknown>
-                s.addStep(msg.sessionId, {
-                  id: msg.stepId,
-                  type: 'http',
-                  status: 'running',
-                  method: p.method as string | undefined,
-                  url: p.url as string | undefined,
-                } as Step)
+              case 'step:done':
+              case 'step:error':
+                if (!msg.step_id) break
+                store.updateStep(msg.session_id, msg.step_id, mapBackendStep(msg.payload as unknown as BackendStep))
                 break
-              }
-              case 'step:done': {
-                if (!msg.stepId) break
-                const p = (msg.payload ?? {}) as Record<string, unknown>
-                s.updateStep(msg.sessionId, msg.stepId, {
-                  status: 'done',
-                  statusCode: p.statusCode as number | undefined,
-                  durationMs: p.durationMs as number | undefined,
-                  responseBody:
-                    typeof p.responseBody === 'string'
-                      ? p.responseBody
-                      : p.responseBody
-                        ? JSON.stringify(p.responseBody, null, 2)
-                        : undefined,
-                })
-                break
-              }
-              case 'step:error': {
-                if (!msg.stepId) break
-                const p = (msg.payload ?? {}) as Record<string, unknown>
-                s.updateStep(msg.sessionId, msg.stepId, {
-                  status: 'error',
-                  statusCode: p.statusCode as number | undefined,
-                  durationMs: p.durationMs as number | undefined,
-                  responseBody:
-                    typeof p.responseBody === 'string'
-                      ? p.responseBody
-                      : p.responseBody
-                        ? JSON.stringify(p.responseBody, null, 2)
-                        : undefined,
-                })
-                break
-              }
             }
           } catch {
-            // ignore parse errors
+            // Ignore malformed runtime events.
           }
         }
 
@@ -137,8 +84,5 @@ export function useWebSocket() {
       wsRef.current?.close()
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  void store
 }
