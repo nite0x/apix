@@ -6,8 +6,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/sentris/sentris/runtime/internal/core"
-	"github.com/sentris/sentris/runtime/internal/httpapi"
+	"github.com/apix/apix/runtime/internal/core"
+	"github.com/apix/apix/runtime/internal/httpapi"
 )
 
 type Server struct {
@@ -19,7 +19,7 @@ func NewServer(executor *core.Executor) *Server {
 	return &Server{
 		executor: executor,
 		mcp: server.NewMCPServer(
-			"sentris",
+			"apix",
 			"0.1.0",
 			server.WithToolCapabilities(true),
 		),

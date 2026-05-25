@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Sentris.
+Thanks for helping improve Apix.
 
 ## Before You Start
 

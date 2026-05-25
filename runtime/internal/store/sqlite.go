@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/sentris/sentris/runtime/internal/core"
+	"github.com/apix/apix/runtime/internal/core"
 	_ "modernc.org/sqlite"
 )
 

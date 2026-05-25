@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Sentris",
+  "productName": "Apix",
   "version": "0.1.0",
-  "identifier": "dev.sentris.desktop",
+  "identifier": "dev.apix.desktop",
   "build": {
     "beforeBuildCommand": "pnpm --dir .. build:sidecar && pnpm --dir ../apps/desktop build",
     "devUrl": "http://127.0.0.1:1420",
@@ -11,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "Sentris",
+        "title": "Apix",
         "width": 1280,
         "height": 820,
         "minWidth": 960,
@@ -25,7 +25,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/sentris-runtime"],
+    "externalBin": ["binaries/apix-runtime"],
     "icon": []
   }
 }
