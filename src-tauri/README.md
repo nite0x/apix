@@ -1,4 +1,4 @@
-# Sentris Tauri
+# Apix Tauri
 
 Tauri desktop shell for `apps/desktop`.
 
@@ -40,7 +40,7 @@ In dev mode, Tauri loads the frontend from:
 http://127.0.0.1:1420
 ```
 
-The Rust app checks `http://127.0.0.1:4317/health` on startup. If the runtime is already running, Tauri reuses it. Otherwise it starts the bundled `sentris-runtime` sidecar and stops that child process when the app exits.
+The Rust app checks `http://127.0.0.1:4317/health` on startup. If the runtime is already running, Tauri reuses it. Otherwise it starts the bundled `apix-runtime` sidecar and stops that child process when the app exits.
 
 ## Build
 

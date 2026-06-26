@@ -1,8 +1,8 @@
-# Sentris User Guide
+# Apix User Guide
 
-Sentris is a local-first desktop tool for observing and controlling AI-driven execution flows.
+Apix (**Agent Programmable Interface eXecution**) is a local-first desktop tool for observing and controlling AI-driven execution flows.
 
-## What Sentris Does
+## What Apix Does
 
 - Streams runtime activity into a desktop timeline.
 - Lets users inspect each execution step in real time.
@@ -54,7 +54,7 @@ Variables capture reusable values from one step and make them available to later
 
 ### Rules
 
-Rules describe when Sentris should pause or require user confirmation before an operation continues.
+Rules describe when Apix should pause or require user confirmation before an operation continues.
 
 ## Current Capabilities
 

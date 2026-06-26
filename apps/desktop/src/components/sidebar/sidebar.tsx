@@ -51,7 +51,7 @@ export function Sidebar() {
     <div className="sb">
       <div className="sb-brand">
         <div className="bmark"><IconBolt size={13} color="#fff" /></div>
-        <span className="bname">Sentris</span>
+        <span className="bname">Apix</span>
         <span className="bver">v1</span>
       </div>
 

@@ -1,13 +1,13 @@
 [package]
-name = "sentris"
+name = "apix"
 version = "0.1.0"
-description = "Sentris desktop shell"
-authors = ["Sentris Contributors"]
+description = "Apix desktop shell"
+authors = ["Apix Contributors"]
 edition = "2021"
 license = "AGPL-3.0-only"
 
 [lib]
-name = "sentris_lib"
+name = "apix_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

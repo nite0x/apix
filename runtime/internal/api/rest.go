@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sentris/sentris/runtime/internal/core"
+	"github.com/apix/apix/runtime/internal/core"
 )
 
 func SetupRoutes(r *gin.Engine, executor *core.Executor) {
