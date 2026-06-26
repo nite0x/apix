@@ -21,12 +21,12 @@ const key = `${process.platform}-${process.arch}`;
 const targetTriple = triples[key];
 
 if (!targetTriple) {
-  throw new Error(`Unsupported platform for Sentris runtime sidecar: ${key}`);
+  throw new Error(`Unsupported platform for Apix runtime sidecar: ${key}`);
 }
 
 mkdirSync(binariesDir, { recursive: true });
 
-const binaryName = `sentris-runtime-${targetTriple}${process.platform === "win32" ? ".exe" : ""}`;
+const binaryName = `apix-runtime-${targetTriple}${process.platform === "win32" ? ".exe" : ""}`;
 const outputPath = resolve(binariesDir, binaryName);
 const goEnv = { ...process.env };
 

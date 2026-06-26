@@ -5,7 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/sentris/sentris/runtime/internal/core"
+	"github.com/apix/apix/runtime/internal/core"
 )
 
 type HTTPService struct {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sentris/sentris/runtime/internal/core"
+	"github.com/apix/apix/runtime/internal/core"
 )
 
 func sendRequest(ctx context.Context, input map[string]any, vars *core.Variables) (any, error) {

@@ -1,4 +1,4 @@
-module github.com/sentris/sentris/runtime
+module github.com/apix/apix/runtime
 
 go 1.23
 
