@@ -4,17 +4,23 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/apix/apix/runtime/internal/core"
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 type HTTPService struct {
-	store *collectionStore
-	db    *sql.DB
+	db        *sql.DB
+	repo      *repository
+	execution *executionService
 }
 
 func New() *HTTPService {
-	return &HTTPService{store: newCollectionStore()}
+	return &HTTPService{}
+}
+
+func (s *HTTPService) initRepositories() {
+	s.repo = newRepository(s.db)
+	s.execution = newExecutionService(s.repo)
 }
 
 func (s *HTTPService) ExecutionTools() []ExecutionToolDef {
@@ -68,9 +74,48 @@ For sequences: first GET/list to discover IDs, then use them in subsequent calls
 func (s *HTTPService) Execute(ctx context.Context, tool string, input map[string]any, vars *core.Variables) (any, error) {
 	switch tool {
 	case "send_request":
-		return sendRequest(ctx, input, vars)
+		method, _ := input["method"].(string)
+		requestURL, _ := input["url"].(string)
+		body, _ := input["body"].(string)
+		request := RequestData{Method: method, URL: requestURL, Body: body}
+		if body != "" {
+			request.BodyType = "json"
+		}
+		if headers, ok := input["headers"].(map[string]any); ok {
+			for name, value := range headers {
+				if text, ok := value.(string); ok {
+					request.Headers = append(request.Headers, KeyValue{Name: name, Value: text, Enabled: true})
+				}
+			}
+		}
+		run, err := s.execution.Run(ctx, RunCommand{
+			SessionID:     inputString(input, "session_id"),
+			StepID:        inputString(input, "step_id"),
+			TriggerType:   "ai",
+			InlineRequest: &request,
+		}, vars)
+		if run == nil {
+			return nil, err
+		}
+		var status any
+		if run.ResponseStatus != nil {
+			status = *run.ResponseStatus
+		}
+		result := map[string]any{
+			"run_id":   run.ID,
+			"status":   status,
+			"body":     run.ResponseBody,
+			"duration": run.DurationMS,
+			"headers":  run.ResponseHeaders,
+		}
+		return result, err
 	}
 	return nil, nil
+}
+
+func inputString(input map[string]any, key string) string {
+	value, _ := input[key].(string)
+	return value
 }
 
 // ExtractVars automatically pulls common variables from responses for later steps.

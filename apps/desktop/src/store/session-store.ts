@@ -1,13 +1,23 @@
 import { create } from 'zustand'
 
-export type SessionStatus = 'running' | 'done' | 'failed' | 'idle'
+export type SessionStatus = 'running' | 'paused' | 'done' | 'failed' | 'stopped' | 'idle' | 'draft'
 export type SessionType = 'ai' | 'manual'
-export type StepStatus = 'running' | 'done' | 'error' | 'skipped'
-export type StepType = 'think' | 'http' | 'manual-input'
+export type StepStatus = 'pending' | 'running' | 'paused' | 'done' | 'error' | 'skipped'
+export type StepType = 'think' | 'http' | 'manual-input' | 'sql'
 
 export interface ExtractedVar {
   name: string
   scope: string
+  source?: string
+  valuePreview?: string
+  direction?: 'in' | 'out'
+}
+
+export interface MatchedRule {
+  id: string
+  name: string
+  description: string
+  enabled?: boolean
 }
 
 export interface Step {
@@ -21,7 +31,13 @@ export interface Step {
   requestBody?: string
   responseBody?: string
   extractedVars?: ExtractedVar[]
+  resolvedVars?: ExtractedVar[]
   text?: string
+  ruleId?: string
+  ruleName?: string
+  riskSummary?: string
+  dataScope?: string
+  apiRequestId?: string
 }
 
 export interface Session {
@@ -35,6 +51,11 @@ export interface Session {
   task?: string
   environment?: string
   summary?: string
+  currentStep?: number
+  totalSteps?: number
+  elapsedMs?: number
+  variables?: ExtractedVar[]
+  matchedRule?: MatchedRule
 }
 
 interface AppStore {
@@ -45,6 +66,10 @@ interface AppStore {
   updateSession: (id: string, patch: Partial<Session>) => void
   addStep: (sessionId: string, step: Step) => void
   updateStep: (sessionId: string, stepId: string, patch: Partial<Step>) => void
+  startNewFlow: () => string
+  appendManualStep: (sessionId: string, request?: { method?: string; url?: string; apiRequestId?: string }) => string
+  configureManualStep: (sessionId: string, stepId: string, request: { method?: string; url?: string; apiRequestId?: string }) => void
+  resolvePausedStep: (sessionId: string, stepId: string, action: 'continue' | 'skip' | 'stop') => void
   wsStatus: 'connected' | 'disconnected'
   setWsStatus: (s: 'connected' | 'disconnected') => void
 }
@@ -54,11 +79,21 @@ const DEMO_SESSIONS: Session[] = [
     id: 'ai1',
     type: 'ai',
     name: 'Login + fetch admins',
-    status: 'running',
+    status: 'paused',
     startedAt: Date.now() - 60000,
     source: 'claude-desktop',
     task: 'Login then get all admin users and summarise',
     environment: 'Production',
+    currentStep: 3,
+    totalSteps: 5,
+    elapsedMs: 566,
+    matchedRule: {
+      id: 'r-prod-users',
+      name: 'Pause before GET /users',
+      description: 'Production user-list requests need manual confirmation.',
+      enabled: true,
+    },
+    variables: [{ name: 'token', scope: 'global', source: 'POST /auth/login · .token', valuePreview: 'eyJhbGciOiJIUzI1NiJ9…', direction: 'out' }],
     steps: [
       { id: 's1', type: 'think', status: 'done', text: 'I need to POST /auth/login to get a bearer token, then use it on GET /users?role=admin.' },
       {
@@ -68,7 +103,15 @@ const DEMO_SESSIONS: Session[] = [
         extractedVars: [{ name: 'token', scope: 'global' }],
       },
       { id: 's3', type: 'think', status: 'done', text: 'Token obtained — building GET /users' },
-      { id: 's4', type: 'http', status: 'running', method: 'GET', url: '/users?role=admin' },
+      {
+        id: 's4', type: 'http', status: 'paused', method: 'GET', url: '/users?role=admin',
+        requestBody: 'GET https://api.example.com/users?role=admin\nAuthorization: Bearer {{token}}',
+        resolvedVars: [{ name: 'token', scope: 'global', source: 'POST /auth/login', direction: 'in' }],
+        ruleId: 'r-prod-users', ruleName: 'Pause before GET /users in prod',
+        riskSummary: 'Send this request, then continue the remaining 2 steps.',
+        dataScope: 'Reads production users filtered by role=admin.',
+        apiRequestId: 'list-users',
+      },
     ],
   },
   {
@@ -144,6 +187,75 @@ export const useSessionStore = create<AppStore>((set) => ({
           ? { ...s, steps: s.steps.map((st) => (st.id === stepId ? { ...st, ...patch } : st)) }
           : s,
       ),
+    })),
+
+  startNewFlow: () => {
+    const id = `manual-${Date.now()}`
+    const stepId = `${id}-input`
+    set((state) => ({
+      activeSessionId: id,
+      sessions: [{
+        id,
+        type: 'manual',
+        name: 'Untitled flow',
+        status: 'draft',
+        startedAt: Date.now(),
+        environment: 'Production',
+        currentStep: 1,
+        totalSteps: 1,
+        steps: [{ id: stepId, type: 'manual-input', status: 'pending' }],
+      }, ...state.sessions],
+    }))
+    return id
+  },
+
+  appendManualStep: (sessionId, request = {}) => {
+    const stepId = `${sessionId}-manual-${Date.now()}`
+    set((state) => ({
+      sessions: state.sessions.map((session) => session.id === sessionId ? {
+        ...session,
+        status: session.status === 'paused' ? session.status : 'idle',
+        totalSteps: (session.totalSteps ?? session.steps.length) + 1,
+        steps: [...session.steps, {
+          id: stepId,
+          type: 'manual-input',
+          status: 'pending',
+          method: request.method,
+          url: request.url,
+          apiRequestId: request.apiRequestId,
+        }],
+      } : session),
+    }))
+    return stepId
+  },
+
+  configureManualStep: (sessionId, stepId, request) =>
+    set((state) => ({
+      sessions: state.sessions.map((session) => session.id === sessionId ? {
+        ...session,
+        name: request.url ? `${request.method ?? 'GET'} ${request.url}` : session.name,
+        status: 'idle',
+        steps: session.steps.map((step) => step.id === stepId ? {
+          ...step,
+          status: 'running',
+          method: request.method ?? step.method ?? 'GET',
+          url: request.url ?? step.url,
+          apiRequestId: request.apiRequestId ?? step.apiRequestId,
+        } : step),
+      } : session),
+    })),
+
+  resolvePausedStep: (sessionId, stepId, action) =>
+    set((state) => ({
+      sessions: state.sessions.map((session) => session.id === sessionId ? {
+        ...session,
+        status: action === 'stop' ? 'stopped' : 'running',
+        matchedRule: action === 'continue' ? undefined : session.matchedRule,
+        steps: session.steps.map((step) => step.id === stepId ? {
+          ...step,
+          status: action === 'skip' ? 'skipped' : action === 'stop' ? 'error' : 'running',
+        } : step),
+      } : session),
     })),
 
   setWsStatus: (wsStatus) => set({ wsStatus }),

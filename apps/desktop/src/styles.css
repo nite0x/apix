@@ -460,7 +460,39 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* Manual request form */
-.mr-wrap { padding: 10px; }
+.mr-wrap { padding: 10px 10px 6px; }
+
+.mr-state-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.mr-save-state { font-size: 10px; color: #9a9691; }
+.mr-save-state.saved { color: #16803a; }
+.mr-save-state.modified, .mr-save-state.error { color: #c2410c; }
+
+.mr-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid #dedbd7;
+  border-radius: 5px;
+  background: #fff;
+  color: #333;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.mr-save:hover { background: #f6f5f3; }
+.mr-save:disabled { color: #aaa; cursor: default; }
+
+.mr-import-msg { margin: -2px 0 6px 81px; font-size: 10px; }
+.mr-import-msg.ok { color: #16803a; }
+.mr-import-msg.err { color: #dc2626; }
 
 .mr-urlrow {
   display: flex;
@@ -477,7 +509,13 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid #e0dedd;
   background: #fff;
   color: #111;
-  width: 70px;
+  width: 76px;
+  flex-shrink: 0;
+}
+
+.mr-sel:disabled {
+  background: #f9f9f8;
+  color: #bbb;
 }
 
 .mr-inp {
@@ -511,6 +549,7 @@ a { color: inherit; text-decoration: none; }
 
 .mr-ta:focus { border-color: #3b82f6; }
 .mr-ta:disabled { background: #f9f9f8; color: #bbb; }
+.mr-headers { color: #444; }
 
 .mr-send {
   padding: 5px 13px;

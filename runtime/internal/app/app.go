@@ -4,12 +4,12 @@ import (
 	"context"
 	"log"
 
-	"github.com/gin-gonic/gin"
 	"github.com/apix/apix/runtime/internal/api"
 	"github.com/apix/apix/runtime/internal/core"
 	"github.com/apix/apix/runtime/internal/httpapi"
 	mcpserver "github.com/apix/apix/runtime/internal/mcp"
 	"github.com/apix/apix/runtime/internal/store"
+	"github.com/gin-gonic/gin"
 )
 
 func Run(_ []string) error {
@@ -34,7 +34,7 @@ func Run(_ []string) error {
 	r := gin.Default()
 	r.Use(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -54,8 +54,7 @@ func Run(_ []string) error {
 
 	// 5. Register HTTP endpoints for both MCP and the frontend.
 	mcp.RegisterHTTPTools(httpService)
-	httpService.Routes(r.Group("/api/http"))
-	httpService.ManualRoutes(r)
+	httpService.Routes(r.Group("/api"))
 
 	// 6. Start HTTP server
 	go func() {

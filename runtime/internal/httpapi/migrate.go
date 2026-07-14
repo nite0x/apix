@@ -1,184 +1,197 @@
 package httpapi
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+)
 
-// MigrateSchema prepares the HTTP data model and stores the shared database handle.
+const httpSchemaVersion = 2
+
+// MigrateSchema installs the current HTTP domain schema. Older HTTP schemas are
+// deliberately destroyed instead of migrated: this project treats v2 as a clean
+// model replacement with no compatibility layer.
 func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 	s.db = db
+
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_metadata (
+		name       TEXT PRIMARY KEY,
+		version    INTEGER NOT NULL,
+		updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+	)`); err != nil {
+		return err
+	}
+
+	var version int
+	err := db.QueryRow(`SELECT version FROM schema_metadata WHERE name = 'http_domain'`).Scan(&version)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if err == nil && version == httpSchemaVersion {
+		s.initRepositories()
+		return nil
+	}
+
+	if err := rebuildHTTPSchema(db); err != nil {
+		return err
+	}
+	s.initRepositories()
+	return nil
+}
+
+func rebuildHTTPSchema(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Drop the replaced HTTP model, including any partially-created v2 schema.
+	drops := []string{
+		`DROP TABLE IF EXISTS api_examples`,
+		`DROP TABLE IF EXISTS api_fields`,
+		`DROP TABLE IF EXISTS api_responses`,
+		`DROP TABLE IF EXISTS api_params`,
+		`DROP TABLE IF EXISTS api_executions`,
+		`DROP TABLE IF EXISTS apis`,
+		`DROP TABLE IF EXISTS collections`,
+		`DROP TABLE IF EXISTS api_runs`,
+		`DROP TABLE IF EXISTS api_working_copies`,
+		`DROP TABLE IF EXISTS api_requests`,
+		`DROP TABLE IF EXISTS api_collections`,
+	}
+	for _, stmt := range drops {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("drop old HTTP schema: %w", err)
+		}
+	}
+
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS projects (
-			id          TEXT     PRIMARY KEY,
-			name        TEXT     NOT NULL,
+			id          TEXT PRIMARY KEY,
+			name        TEXT NOT NULL,
 			description TEXT,
 			created_at  DATETIME NOT NULL DEFAULT (datetime('now')),
 			updated_at  DATETIME NOT NULL DEFAULT (datetime('now'))
 		)`,
-
 		`CREATE TABLE IF NOT EXISTS environments (
-			id          TEXT     PRIMARY KEY,
-			project_id  TEXT     NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			name        TEXT     NOT NULL,
-			base_url    TEXT     NOT NULL DEFAULT '',
-			env_type    TEXT     NOT NULL DEFAULT 'dev'
-			              CHECK (env_type IN ('production', 'staging', 'dev')),
-			sort_order  INTEGER  NOT NULL DEFAULT 0,
+			id          TEXT PRIMARY KEY,
+			project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			name        TEXT NOT NULL,
+			base_url    TEXT NOT NULL DEFAULT '',
+			env_type    TEXT NOT NULL DEFAULT 'dev' CHECK (env_type IN ('production','staging','dev')),
+			sort_order  INTEGER NOT NULL DEFAULT 0,
 			created_at  DATETIME NOT NULL DEFAULT (datetime('now')),
 			updated_at  DATETIME NOT NULL DEFAULT (datetime('now'))
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_environments_project ON environments (project_id)`,
-
 		`CREATE TABLE IF NOT EXISTS env_variables (
-			id             TEXT     PRIMARY KEY,
-			environment_id TEXT     NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
-			key            TEXT     NOT NULL,
-			value          TEXT     NOT NULL DEFAULT '',
-			is_secret      INTEGER  NOT NULL DEFAULT 0,
+			id             TEXT PRIMARY KEY,
+			environment_id TEXT NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+			key            TEXT NOT NULL,
+			value          TEXT NOT NULL DEFAULT '',
+			is_secret      INTEGER NOT NULL DEFAULT 0,
 			created_at     DATETIME NOT NULL DEFAULT (datetime('now')),
 			updated_at     DATETIME NOT NULL DEFAULT (datetime('now')),
 			UNIQUE (environment_id, key)
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_env_variables_env ON env_variables (environment_id)`,
-
-		`CREATE TABLE IF NOT EXISTS collections (
-			id          TEXT     PRIMARY KEY,
-			project_id  TEXT     NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-			name        TEXT     NOT NULL,
+		`CREATE TABLE api_collections (
+			id          TEXT PRIMARY KEY,
+			project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			parent_id   TEXT REFERENCES api_collections(id) ON DELETE CASCADE,
+			name        TEXT NOT NULL,
 			description TEXT,
-			sort_order  INTEGER  NOT NULL DEFAULT 0,
+			sort_order  INTEGER NOT NULL DEFAULT 0,
+			status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
 			created_by  TEXT,
-			created_at  DATETIME NOT NULL DEFAULT (datetime('now')),
-			updated_at  DATETIME NOT NULL DEFAULT (datetime('now'))
+			created_at  DATETIME NOT NULL,
+			updated_at  DATETIME NOT NULL,
+			archived_at DATETIME
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_collections_project ON collections (project_id)`,
-
-		`CREATE TABLE IF NOT EXISTS apis (
-			id                TEXT     PRIMARY KEY,
-			collection_id     TEXT     NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
-			name              TEXT     NOT NULL,
-			method            TEXT     NOT NULL CHECK (method IN ('GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS')),
-			path              TEXT     NOT NULL,
-			description       TEXT,
-			request_body_type TEXT     NOT NULL DEFAULT 'json'
-			                    CHECK (request_body_type IN ('json', 'form', 'multipart', 'none')),
-			intent            TEXT     NOT NULL DEFAULT '[]',
-			risk              TEXT     NOT NULL DEFAULT 'LOW' CHECK (risk IN ('LOW', 'MEDIUM', 'HIGH')),
-			need_confirmation INTEGER  NOT NULL DEFAULT 0,
-			side_effect       INTEGER  NOT NULL DEFAULT 0,
-			retry_strategy    TEXT     NOT NULL DEFAULT 'default'
-			                    CHECK (retry_strategy IN ('default', 'disabled', 'idempotent')),
-			context           TEXT     NOT NULL DEFAULT '[]',
-			metadata          TEXT,
-			created_by        TEXT,
-			created_at        DATETIME NOT NULL DEFAULT (datetime('now')),
-			updated_at        DATETIME NOT NULL DEFAULT (datetime('now')),
-			UNIQUE (collection_id, method, path)
+		`CREATE INDEX idx_api_collections_project ON api_collections(project_id, status, sort_order)`,
+		`CREATE UNIQUE INDEX uq_api_collections_name ON api_collections(project_id, COALESCE(parent_id, ''), name) WHERE status = 'active'`,
+		`CREATE TABLE api_requests (
+			id            TEXT PRIMARY KEY,
+			collection_id TEXT NOT NULL REFERENCES api_collections(id) ON DELETE CASCADE,
+			name          TEXT NOT NULL,
+			description   TEXT,
+			method        TEXT NOT NULL CHECK (method IN ('GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS')),
+			url           TEXT NOT NULL,
+			query_params  TEXT NOT NULL DEFAULT '[]',
+			headers       TEXT NOT NULL DEFAULT '[]',
+			body_type     TEXT NOT NULL DEFAULT 'none' CHECK (body_type IN ('none','json','text','form','multipart','binary')),
+			body          TEXT,
+			auth_config   TEXT,
+			source_type   TEXT NOT NULL DEFAULT 'manual' CHECK (source_type IN ('manual','curl_import','history_restore','duplicate')),
+			status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+			sort_order    INTEGER NOT NULL DEFAULT 0,
+			created_by    TEXT,
+			updated_by    TEXT,
+			created_at    DATETIME NOT NULL,
+			updated_at    DATETIME NOT NULL,
+			archived_at   DATETIME
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_apis_collection ON apis (collection_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_apis_risk       ON apis (risk)`,
-
-		`CREATE TABLE IF NOT EXISTS api_params (
-			id          TEXT    PRIMARY KEY,
-			api_id      TEXT    NOT NULL REFERENCES apis(id) ON DELETE CASCADE,
-			location    TEXT    NOT NULL DEFAULT 'query'
-			              CHECK (location IN ('query', 'path', 'header', 'cookie')),
-			name        TEXT    NOT NULL,
-			type        TEXT    NOT NULL DEFAULT 'string'
-			              CHECK (type IN ('string', 'integer', 'number', 'boolean')),
-			required    INTEGER NOT NULL DEFAULT 0,
-			description TEXT,
-			example     TEXT,
-			sort_order  INTEGER NOT NULL DEFAULT 0
+		`CREATE INDEX idx_api_requests_collection ON api_requests(collection_id, status, sort_order)`,
+		`CREATE INDEX idx_api_requests_updated ON api_requests(updated_at DESC)`,
+		`CREATE TABLE api_working_copies (
+			id                TEXT PRIMARY KEY,
+			project_id        TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			owner_id          TEXT NOT NULL,
+			api_request_id    TEXT REFERENCES api_requests(id) ON DELETE CASCADE,
+			environment_id    TEXT REFERENCES environments(id) ON DELETE SET NULL,
+			name              TEXT,
+			request_data      TEXT NOT NULL,
+			source_type       TEXT NOT NULL DEFAULT 'manual' CHECK (source_type IN ('manual','curl_import','history_restore','duplicate')),
+			status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','discarded','expired')),
+			content_hash      TEXT NOT NULL,
+			base_content_hash TEXT,
+			edit_version      INTEGER NOT NULL DEFAULT 1,
+			created_at        DATETIME NOT NULL,
+			updated_at        DATETIME NOT NULL,
+			expires_at        DATETIME,
+			discarded_at      DATETIME
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_api_params_api ON api_params (api_id)`,
-
-		`CREATE TABLE IF NOT EXISTS api_responses (
-			id           TEXT    PRIMARY KEY,
-			api_id       TEXT    NOT NULL REFERENCES apis(id) ON DELETE CASCADE,
-			status_code  INTEGER NOT NULL,
-			description  TEXT,
-			content_type TEXT    NOT NULL DEFAULT 'application/json',
-			sort_order   INTEGER NOT NULL DEFAULT 0,
-			UNIQUE (api_id, status_code)
+		`CREATE INDEX idx_working_copies_recent ON api_working_copies(project_id, owner_id, updated_at DESC) WHERE status = 'active'`,
+		`CREATE INDEX idx_working_copies_expiration ON api_working_copies(expires_at) WHERE status = 'active'`,
+		`CREATE UNIQUE INDEX uq_working_copy_request_owner ON api_working_copies(owner_id, api_request_id) WHERE status = 'active' AND api_request_id IS NOT NULL`,
+		`CREATE TABLE api_runs (
+			id                 TEXT PRIMARY KEY,
+			project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			api_request_id     TEXT REFERENCES api_requests(id) ON DELETE SET NULL,
+			working_copy_id    TEXT REFERENCES api_working_copies(id) ON DELETE SET NULL,
+			environment_id     TEXT REFERENCES environments(id) ON DELETE SET NULL,
+			session_id         TEXT,
+			step_id            TEXT,
+			trigger_type       TEXT NOT NULL CHECK (trigger_type IN ('manual','retry','ai','test')),
+			status             TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','timed_out','cancelled')),
+			request_snapshot   TEXT NOT NULL,
+			response_status    INTEGER,
+			response_headers   TEXT,
+			response_body      TEXT,
+			response_size      INTEGER,
+			response_truncated INTEGER NOT NULL DEFAULT 0,
+			duration_ms        INTEGER,
+			error_code         TEXT,
+			error_message      TEXT,
+			is_pinned          INTEGER NOT NULL DEFAULT 0,
+			started_at         DATETIME NOT NULL,
+			finished_at        DATETIME,
+			expires_at         DATETIME
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_api_responses_api ON api_responses (api_id)`,
-
-		// response_id IS NULL  -> request body field
-		// response_id NOT NULL -> response body field for that status code
-		// parent_id   IS NULL  -> root node for the current scope
-		// name        IS NULL  -> array item node
-		`CREATE TABLE IF NOT EXISTS api_fields (
-			id          TEXT    PRIMARY KEY,
-			api_id      TEXT    NOT NULL REFERENCES apis(id) ON DELETE CASCADE,
-			response_id TEXT    REFERENCES api_responses(id) ON DELETE CASCADE,
-			parent_id   TEXT    REFERENCES api_fields(id) ON DELETE CASCADE,
-			name        TEXT,
-			type        TEXT    NOT NULL DEFAULT 'string'
-			              CHECK (type IN ('string', 'integer', 'number', 'boolean', 'object', 'array')),
-			format      TEXT,
-			required    INTEGER NOT NULL DEFAULT 0,
-			description TEXT,
-			example     TEXT,
-			enum_values TEXT,
-			constraints TEXT,
-			sort_order  INTEGER NOT NULL DEFAULT 0
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_api_fields_api      ON api_fields (api_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_api_fields_response ON api_fields (response_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_api_fields_parent   ON api_fields (parent_id)`,
-
-		// example_id is a logical foreign key to avoid a cycle with api_examples.
-		`CREATE TABLE IF NOT EXISTS api_executions (
-			id              TEXT     PRIMARY KEY,
-			api_id          TEXT     REFERENCES apis(id) ON DELETE SET NULL,
-			environment_id  TEXT     REFERENCES environments(id) ON DELETE SET NULL,
-			example_id      TEXT,
-			session_id      TEXT,
-			step_id         TEXT,
-			triggered_by    TEXT     NOT NULL DEFAULT 'manual'
-			                  CHECK (triggered_by IN ('manual', 'ai')),
-			req_method      TEXT     NOT NULL,
-			req_url         TEXT     NOT NULL,
-			req_headers     TEXT,
-			req_body        TEXT,
-			res_status      INTEGER,
-			res_headers     TEXT,
-			res_body        TEXT,
-			res_duration_ms INTEGER,
-			res_error       TEXT,
-			created_at      DATETIME NOT NULL DEFAULT (datetime('now'))
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_executions_api     ON api_executions (api_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_executions_session ON api_executions (session_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_executions_example ON api_executions (example_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_executions_time    ON api_executions (created_at DESC)`,
-
-		`CREATE TABLE IF NOT EXISTS api_examples (
-			id                  TEXT     PRIMARY KEY,
-			api_id              TEXT     NOT NULL REFERENCES apis(id) ON DELETE CASCADE,
-			environment_id      TEXT     REFERENCES environments(id) ON DELETE SET NULL,
-			name                TEXT     NOT NULL,
-			description         TEXT,
-			is_default          INTEGER  NOT NULL DEFAULT 0,
-			path_params         TEXT,
-			query_params        TEXT,
-			headers             TEXT,
-			body                TEXT,
-			res_status          INTEGER,
-			res_headers         TEXT,
-			res_body            TEXT,
-			source_execution_id TEXT     REFERENCES api_executions(id) ON DELETE SET NULL,
-			sort_order          INTEGER  NOT NULL DEFAULT 0,
-			created_by          TEXT,
-			created_at          DATETIME NOT NULL DEFAULT (datetime('now')),
-			updated_at          DATETIME NOT NULL DEFAULT (datetime('now'))
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_api_examples_api ON api_examples (api_id)`,
+		`CREATE INDEX idx_api_runs_request ON api_runs(api_request_id, started_at DESC)`,
+		`CREATE INDEX idx_api_runs_working_copy ON api_runs(working_copy_id, started_at DESC)`,
+		`CREATE INDEX idx_api_runs_project ON api_runs(project_id, started_at DESC)`,
+		`CREATE INDEX idx_api_runs_expiration ON api_runs(expires_at) WHERE is_pinned = 0`,
+		`INSERT OR IGNORE INTO projects(id, name, description) VALUES ('default', 'My APIs', 'Default local project')`,
 	}
-
 	for _, stmt := range stmts {
-		if _, err := db.Exec(stmt); err != nil {
-			return err
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("create HTTP schema: %w", err)
 		}
 	}
-	return nil
+
+	if _, err := tx.Exec(`INSERT INTO schema_metadata(name, version, updated_at)
+		VALUES ('http_domain', ?, datetime('now'))
+		ON CONFLICT(name) DO UPDATE SET version = excluded.version, updated_at = excluded.updated_at`, httpSchemaVersion); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
