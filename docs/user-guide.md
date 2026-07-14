@@ -1,6 +1,6 @@
 # Apix User Guide
 
-Apix is a local-first desktop tool for observing and controlling AI-driven execution flows.
+Apix (**Agentic Procedural Interface eXecution**) is a local-first desktop tool for observing and controlling AI-driven execution flows.
 
 ## What Apix Does
 

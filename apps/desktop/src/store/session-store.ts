@@ -1,13 +1,23 @@
 import { create } from 'zustand'
 
-export type SessionStatus = 'running' | 'done' | 'failed' | 'idle'
+export type SessionStatus = 'running' | 'paused' | 'done' | 'failed' | 'stopped' | 'idle' | 'draft'
 export type SessionType = 'ai' | 'manual'
-export type StepStatus = 'running' | 'done' | 'error' | 'skipped'
-export type StepType = 'think' | 'http' | 'manual-input'
+export type StepStatus = 'pending' | 'running' | 'paused' | 'done' | 'error' | 'skipped'
+export type StepType = 'think' | 'http' | 'manual-input' | 'sql'
 
 export interface ExtractedVar {
   name: string
   scope: string
+  source?: string
+  valuePreview?: string
+  direction?: 'in' | 'out'
+}
+
+export interface MatchedRule {
+  id: string
+  name: string
+  description: string
+  enabled?: boolean
 }
 
 export interface Step {
@@ -21,7 +31,13 @@ export interface Step {
   requestBody?: string
   responseBody?: string
   extractedVars?: ExtractedVar[]
+  resolvedVars?: ExtractedVar[]
   text?: string
+  ruleId?: string
+  ruleName?: string
+  riskSummary?: string
+  dataScope?: string
+  apiRequestId?: string
 }
 
 export interface Session {
@@ -35,6 +51,11 @@ export interface Session {
   task?: string
   environment?: string
   summary?: string
+  currentStep?: number
+  totalSteps?: number
+  elapsedMs?: number
+  variables?: ExtractedVar[]
+  matchedRule?: MatchedRule
 }
 
 export interface BackendStep {
@@ -45,6 +66,7 @@ export interface BackendStep {
   output?: Record<string, unknown>
   thought?: string
   error?: string
+  rule_id?: string
   duration_ms?: number
 }
 
@@ -55,7 +77,11 @@ export interface BackendSession {
   task?: string
   source?: string
   steps?: BackendStep[]
-  created_at: string
+  variables?: {
+    global?: Record<string, { name?: string; scope?: string; source?: string }>
+    session?: Record<string, { name?: string; scope?: string; source?: string }>
+  }
+  created_at?: string
 }
 
 interface AppStore {
@@ -69,11 +95,43 @@ interface AppStore {
   addStep: (sessionId: string, step: Step) => void
   updateStep: (sessionId: string, stepId: string, patch: Partial<Step>) => void
   loadSessions: () => Promise<void>
+  startNewFlow: () => string
+  appendManualStep: (sessionId: string, request?: { method?: string; url?: string; apiRequestId?: string }) => string
+  configureManualStep: (sessionId: string, stepId: string, request: { method?: string; url?: string; apiRequestId?: string }) => void
+  resolvePausedStep: (sessionId: string, stepId: string, action: 'continue' | 'skip' | 'stop') => void
   wsStatus: 'connected' | 'disconnected'
   setWsStatus: (status: 'connected' | 'disconnected') => void
 }
 
 const API_BASE_URL = 'http://127.0.0.1:4317'
+
+function mapStepStatus(status: BackendStep['status']): StepStatus {
+  if (status === 'done' || status === 'error' || status === 'skipped' || status === 'paused' || status === 'pending') {
+    return status
+  }
+  return 'running'
+}
+
+function mapSessionStatus(status: BackendSession['status']): SessionStatus {
+  if (status === 'paused') return 'paused'
+  if (status === 'done') return 'done'
+  if (status === 'error' || status === 'stopped') return 'failed'
+  return 'running'
+}
+
+function mapBackendVariables(session: BackendSession): ExtractedVar[] | undefined {
+  const values = [
+    ...Object.values(session.variables?.global ?? {}),
+    ...Object.values(session.variables?.session ?? {}),
+  ]
+  if (values.length === 0) return undefined
+  return values.map((variable) => ({
+    name: variable.name ?? 'variable',
+    scope: variable.scope ?? 'session',
+    source: variable.source,
+    valuePreview: '••••••••••••',
+  }))
+}
 
 export function mapBackendStep(step: BackendStep): Step {
   const input = step.input ?? {}
@@ -83,14 +141,7 @@ export function mapBackendStep(step: BackendStep): Step {
   return {
     id: step.id,
     type: step.type === 'request' ? 'http' : step.type === 'manual' ? 'manual-input' : 'think',
-    status:
-      step.status === 'done'
-        ? 'done'
-        : step.status === 'error'
-          ? 'error'
-          : step.status === 'skipped'
-            ? 'skipped'
-            : 'running',
+    status: mapStepStatus(step.status),
     method: typeof input.method === 'string' ? input.method : undefined,
     url: typeof input.url === 'string' ? input.url : undefined,
     requestBody: typeof input.body === 'string' ? input.body : undefined,
@@ -108,25 +159,23 @@ export function mapBackendStep(step: BackendStep): Step {
           ? JSON.stringify(rawBody, null, 2)
           : step.error,
     text: step.thought,
+    ruleId: step.rule_id,
+    ruleName: step.rule_id ? `Matched rule ${step.rule_id}` : undefined,
   }
 }
 
 export function mapBackendSession(session: BackendSession): Session {
-  const startedAt = Date.parse(session.created_at)
+  const startedAt = session.created_at ? Date.parse(session.created_at) : Number.NaN
   return {
     id: session.id,
-    type: session.type,
+    type: session.type === 'manual' ? 'manual' : 'ai',
     name: session.task || 'Untitled session',
-    status:
-      session.status === 'done'
-        ? 'done'
-        : session.status === 'error' || session.status === 'stopped'
-          ? 'failed'
-          : 'running',
+    status: mapSessionStatus(session.status),
     startedAt: Number.isNaN(startedAt) ? Date.now() : startedAt,
     steps: (session.steps ?? []).map(mapBackendStep),
     source: session.source,
     task: session.task,
+    variables: mapBackendVariables(session),
   }
 }
 
@@ -198,6 +247,75 @@ export const useSessionStore = create<AppStore>((set, get) => ({
       set({ loadState: 'error' })
     }
   },
+
+  startNewFlow: () => {
+    const id = `manual-${Date.now()}`
+    const stepId = `${id}-input`
+    set((state) => ({
+      activeSessionId: id,
+      sessions: [{
+        id,
+        type: 'manual',
+        name: 'Untitled flow',
+        status: 'draft',
+        startedAt: Date.now(),
+        environment: 'Production',
+        currentStep: 1,
+        totalSteps: 1,
+        steps: [{ id: stepId, type: 'manual-input', status: 'pending' }],
+      }, ...state.sessions],
+    }))
+    return id
+  },
+
+  appendManualStep: (sessionId, request = {}) => {
+    const stepId = `${sessionId}-manual-${Date.now()}`
+    set((state) => ({
+      sessions: state.sessions.map((session) => session.id === sessionId ? {
+        ...session,
+        status: session.status === 'paused' ? session.status : 'idle',
+        totalSteps: (session.totalSteps ?? session.steps.length) + 1,
+        steps: [...session.steps, {
+          id: stepId,
+          type: 'manual-input',
+          status: 'pending',
+          method: request.method,
+          url: request.url,
+          apiRequestId: request.apiRequestId,
+        }],
+      } : session),
+    }))
+    return stepId
+  },
+
+  configureManualStep: (sessionId, stepId, request) =>
+    set((state) => ({
+      sessions: state.sessions.map((session) => session.id === sessionId ? {
+        ...session,
+        name: request.url ? `${request.method ?? 'GET'} ${request.url}` : session.name,
+        status: 'idle',
+        steps: session.steps.map((step) => step.id === stepId ? {
+          ...step,
+          status: 'running',
+          method: request.method ?? step.method ?? 'GET',
+          url: request.url ?? step.url,
+          apiRequestId: request.apiRequestId ?? step.apiRequestId,
+        } : step),
+      } : session),
+    })),
+
+  resolvePausedStep: (sessionId, stepId, action) =>
+    set((state) => ({
+      sessions: state.sessions.map((session) => session.id === sessionId ? {
+        ...session,
+        status: action === 'stop' ? 'stopped' : 'running',
+        matchedRule: action === 'continue' ? undefined : session.matchedRule,
+        steps: session.steps.map((step) => step.id === stepId ? {
+          ...step,
+          status: action === 'skip' ? 'skipped' : action === 'stop' ? 'error' : 'running',
+        } : step),
+      } : session),
+    })),
 
   setWsStatus: (wsStatus) => set({ wsStatus }),
 }))

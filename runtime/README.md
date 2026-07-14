@@ -34,15 +34,25 @@ runtime sidecar.
 **Manual execution**
 - `POST /manual` — execute one direct HTTP request from the desktop UI
 
-**HTTP collections**
-- `GET /api/http/collections` — list collections
-- `POST /api/http/collections` — create collection
-- `GET /api/http/collections/:cid` — get collection
-- `PUT /api/http/collections/:cid` — update collection
-- `DELETE /api/http/collections/:cid` — delete collection
-- `POST /api/http/collections/:cid/requests` — add request
-- `PUT /api/http/collections/:cid/requests/:rid` — update request
-- `DELETE /api/http/collections/:cid/requests/:rid` — delete request
+**HTTP domain (v2)**
+- `GET /api/collections` — list collections
+- `POST /api/collections` — create collection
+- `PATCH /api/collections/:id` — update collection
+- `DELETE /api/collections/:id` — archive collection
+- `GET /api/requests?collection_id=` — list requests in a collection
+- `POST /api/requests` — create request
+- `GET /api/requests/:id` — get request
+- `PUT /api/requests/:id` — update request
+- `DELETE /api/requests/:id` — archive request
+- `POST /api/working-copies` — create working copy
+- `GET /api/working-copies/:id` — get working copy
+- `PUT /api/working-copies/:id` — update working copy
+- `POST /api/working-copies/:id/save` — save working copy to a request
+- `POST /api/working-copies/:id/discard` — discard working copy
+- `POST /api/runs` — execute a saved request or working copy
+- `GET /api/runs` — list recent runs
+- `GET /api/runs/:id` — get one run
+- `POST /api/import/curl` — import curl into a working copy
 
 **WebSocket**
 - `GET /ws/logs` — live event stream

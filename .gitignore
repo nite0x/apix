@@ -18,3 +18,5 @@ services/runtime/runtime
 .vscode/
 .claude/
 memory/
+.codegraph/*
+.cursor/

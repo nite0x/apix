@@ -102,6 +102,10 @@ func (e *Executor) Execute(
 
 	// 5. Execute
 	step.Status = StepRunning
+	// Execution adapters use these identifiers to link protocol-level work to
+	// the authoritative run record without maintaining a second history model.
+	input["session_id"] = session.ID
+	input["step_id"] = step.ID
 	e.hub.Push(session.ID, Event{
 		Type:    EventStepStart,
 		StepID:  step.ID,
@@ -112,6 +116,12 @@ func (e *Executor) Execute(
 	endTime := time.Now()
 	step.EndedAt = &endTime
 	step.DurationMs = endTime.Sub(now).Milliseconds()
+	if reference := runReference(output); reference != nil {
+		// api_runs owns HTTP request/response history. Steps retain only the
+		// relationship so secrets and response bodies are never persisted twice.
+		step.Input = reference
+		step.Output = reference
+	}
 
 	if err != nil {
 		return nil, e.failStep(session, step, err.Error())
@@ -141,7 +151,9 @@ func (e *Executor) Execute(
 
 	// 8. Done
 	step.Status = StepDone
-	step.Output = output
+	if step.Output == nil {
+		step.Output = output
+	}
 	e.hub.Push(session.ID, Event{
 		Type:    EventStepDone,
 		StepID:  step.ID,
@@ -150,6 +162,18 @@ func (e *Executor) Execute(
 	e.store.SaveStep(step)
 
 	return output, nil
+}
+
+func runReference(output any) map[string]any {
+	values, ok := output.(map[string]any)
+	if !ok {
+		return nil
+	}
+	runID, ok := values["run_id"].(string)
+	if !ok || runID == "" {
+		return nil
+	}
+	return map[string]any{"api_run_id": runID}
 }
 
 // pauseAndWait suspends execution and blocks until the user acts in the App.

@@ -1,5 +1,7 @@
 # Apix
 
+**Apix — Agentic Procedural Interface eXecution**
+
 Apix is a local-first desktop developer tool for MCP-assisted API debugging, workflow execution, and run console logs.
 
 ## Status
