@@ -165,6 +165,10 @@ const postApis: ApiDefinition[] = [
   },
 ]
 
+/**
+ * Sample catalog for local UI work only.
+ * Never loaded by default — enable with VITE_USE_FIXTURE_CATALOG=true.
+ */
 export const fixtureCatalog: ApiCollectionGroup[] = [
   { id: 'auth', name: 'Auth Service', icon: 'lock', apis: authApis },
   { id: 'users', name: 'Users API', icon: 'users', apis: userApis },

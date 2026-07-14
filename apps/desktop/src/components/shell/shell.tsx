@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { fixtureCatalog, allApis, type ApiCollectionGroup, type ApiDefinition } from '../../data/api-catalog'
+import { allApis, type ApiDefinition } from '../../data/api-catalog'
 import { useWebSocket } from '../../hooks/use-websocket'
-import { loadCatalog, resumeStep } from '../../services/api-client'
+import { resumeStep } from '../../services/api-client'
+import { catalogStatusMessage, useCatalogStore } from '../../store/catalog-store'
 import { useSessionStore, type Step } from '../../store/session-store'
 import { ApiDrawer } from '../api/api-drawer'
 import { ApiLibrary } from '../api/api-library'
@@ -40,7 +41,12 @@ export function Shell() {
   const resolvePausedStep = useSessionStore((s) => s.resolvePausedStep)
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
 
-  const [catalog, setCatalog] = useState<ApiCollectionGroup[]>(fixtureCatalog)
+  const catalog = useCatalogStore((s) => s.groups)
+  const catalogState = useCatalogStore((s) => s.loadState)
+  const catalogError = useCatalogStore((s) => s.error)
+  const refreshCatalog = useCatalogStore((s) => s.refresh)
+  const catalogStatus = catalogStatusMessage(catalogState, catalogError)
+
   const [overlay, setOverlay] = useState<'library' | 'search' | null>(null)
   const [drawer, setDrawer] = useState<DrawerState | null>(null)
   const [picker, setPicker] = useState<PickerState | null>(null)
@@ -51,8 +57,8 @@ export function Shell() {
   }, [loadSessions])
 
   useEffect(() => {
-    void loadCatalog().then(setCatalog)
-  }, [])
+    void refreshCatalog()
+  }, [refreshCatalog])
 
   const closeLayers = useCallback(() => {
     setOverlay(null)
@@ -179,10 +185,33 @@ export function Shell() {
           <SessionPanel session={activeSession} activeTab={panelTab} onTabChange={setPanelTab} />
         </div>
 
-        {overlay === 'search' && <ApiSearch catalog={catalog} onClose={() => setOverlay(null)} onSelect={selectSearchApi} />}
-        {overlay === 'library' && <ApiLibrary catalog={catalog} onClose={() => setOverlay(null)} onJumpToSession={() => setOverlay(null)} />}
+        {overlay === 'search' && (
+          <ApiSearch
+            catalog={catalog}
+            statusMessage={catalogStatus}
+            onClose={() => setOverlay(null)}
+            onSelect={selectSearchApi}
+          />
+        )}
+        {overlay === 'library' && (
+          <ApiLibrary
+            catalog={catalog}
+            statusMessage={catalogStatus}
+            onClose={() => setOverlay(null)}
+            onJumpToSession={() => setOverlay(null)}
+            onCatalogChanged={() => void refreshCatalog()}
+          />
+        )}
         {drawer && <ApiDrawer {...drawer} onClose={() => setDrawer(null)} onJumpToSession={() => setDrawer(null)} />}
-        {picker && <RequestPicker mode={picker.mode} catalog={catalog} onClose={() => setPicker(null)} onSelect={handlePickerSelection} />}
+        {picker && (
+          <RequestPicker
+            mode={picker.mode}
+            catalog={catalog}
+            statusMessage={catalogStatus}
+            onClose={() => setPicker(null)}
+            onSelect={handlePickerSelection}
+          />
+        )}
       </main>
     </div>
   )

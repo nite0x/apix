@@ -8,14 +8,16 @@ import {
   IconUsers,
   IconX,
 } from '@tabler/icons-react'
-import type { ApiCollectionGroup, ApiDefinition } from '../../data/api-catalog'
+import type { ApiCollectionGroup } from '../../data/api-catalog'
 import { importCurl } from '../../services/api-client'
 import { ApiDetail } from './api-detail'
 
 interface Props {
   catalog: ApiCollectionGroup[]
+  statusMessage?: string | null
   onClose: () => void
   onJumpToSession: () => void
+  onCatalogChanged?: () => void
 }
 
 function CollectionIcon({ icon }: { icon: ApiCollectionGroup['icon'] }) {
@@ -24,9 +26,9 @@ function CollectionIcon({ icon }: { icon: ApiCollectionGroup['icon'] }) {
   return <IconFileText size={13} />
 }
 
-export function ApiLibrary({ catalog, onClose, onJumpToSession }: Props) {
-  const [collectionId, setCollectionId] = useState(catalog[1]?.id ?? catalog[0]?.id ?? '')
-  const [apiId, setApiId] = useState<string | null>(catalog[1]?.apis[0]?.id ?? catalog[0]?.apis[0]?.id ?? null)
+export function ApiLibrary({ catalog, statusMessage, onClose, onJumpToSession, onCatalogChanged }: Props) {
+  const [collectionId, setCollectionId] = useState(catalog[0]?.id ?? '')
+  const [apiId, setApiId] = useState<string | null>(catalog[0]?.apis[0]?.id ?? null)
   const [query, setQuery] = useState('')
   const [importOpen, setImportOpen] = useState(false)
   const [importContent, setImportContent] = useState('')
@@ -52,6 +54,7 @@ export function ApiLibrary({ catalog, onClose, onJumpToSession }: Props) {
     try {
       await importCurl(importContent)
       setImportState('done')
+      onCatalogChanged?.()
     } catch {
       setImportState('error')
     }
@@ -83,43 +86,47 @@ export function ApiLibrary({ catalog, onClose, onJumpToSession }: Props) {
           </div>
         )}
 
-        <div className="lib-body">
-          <div className="col-coll">
-            <div className="col-coll-head"><span className="col-hl">Collections</span><button type="button" aria-label="New collection"><IconPlus size={12} /></button></div>
-            <div className="coll-list">
-              {catalog.map((item) => (
-                <button type="button" className={`coll-it${item.id === collection?.id ? ' active' : ''}`} key={item.id} onClick={() => chooseCollection(item.id)}>
-                  <span className={`coll-icon coll-icon-${item.icon}`}><CollectionIcon icon={item.icon} /></span>
-                  <span className="coll-info">
-                    <span className="coll-nm">{item.name}</span>
-                    <span className="coll-cnt">{item.apis.length} apis{item.apis.some((api) => api.aiUsage) ? ` · AI ${item.apis.reduce((sum, api) => sum + (api.aiUsage?.count ?? 0), 0)}×` : ''}</span>
-                  </span>
-                </button>
-              ))}
+        {statusMessage && catalog.length === 0 ? (
+          <div className="catalog-status" role="status">{statusMessage}</div>
+        ) : (
+          <div className="lib-body">
+            <div className="col-coll">
+              <div className="col-coll-head"><span className="col-hl">Collections</span><button type="button" aria-label="New collection"><IconPlus size={12} /></button></div>
+              <div className="coll-list">
+                {catalog.map((item) => (
+                  <button type="button" className={`coll-it${item.id === collection?.id ? ' active' : ''}`} key={item.id} onClick={() => chooseCollection(item.id)}>
+                    <span className={`coll-icon coll-icon-${item.icon}`}><CollectionIcon icon={item.icon} /></span>
+                    <span className="coll-info">
+                      <span className="coll-nm">{item.name}</span>
+                      <span className="coll-cnt">{item.apis.length} apis{item.apis.some((api) => api.aiUsage) ? ` · AI ${item.apis.reduce((sum, api) => sum + (api.aiUsage?.count ?? 0), 0)}×` : ''}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="col-apis">
+              <div className="col-apis-head"><span className="col-apis-title">{collection?.name ?? 'APIs'}</span><button type="button" aria-label="New API"><IconPlus size={12} /></button></div>
+              <div className="api-list">
+                {filteredApis.length === 0 && <div className="api-list-empty">No matching APIs</div>}
+                {filteredApis.map((api) => (
+                  <button type="button" className={`api-it${api.id === selectedApi?.id ? ' active' : ''}`} key={api.id} onClick={() => setApiId(api.id)}>
+                    <span className={`api-m am-${api.method.toLowerCase()}`}>{api.method === 'DELETE' ? 'DEL' : api.method}</span>
+                    <span className="api-nm">{api.name}</span>
+                    {api.aiUsage && <span className="api-ai" title="Used by AI" />}
+                  </button>
+                ))}
+              </div>
+              <div className="col-apis-footer"><button type="button" className="api-add-btn"><IconPlus size={12} /> 新建接口</button></div>
+            </div>
+
+            <div className="col-det">
+              {selectedApi ? <ApiDetail key={selectedApi.id} api={selectedApi} context="library" onJumpToSession={onJumpToSession} /> : (
+                <div className="det-empty"><IconFileText size={28} /><p>选择左侧接口</p></div>
+              )}
             </div>
           </div>
-
-          <div className="col-apis">
-            <div className="col-apis-head"><span className="col-apis-title">{collection?.name ?? 'APIs'}</span><button type="button" aria-label="New API"><IconPlus size={12} /></button></div>
-            <div className="api-list">
-              {filteredApis.length === 0 && <div className="api-list-empty">No matching APIs</div>}
-              {filteredApis.map((api) => (
-                <button type="button" className={`api-it${api.id === selectedApi?.id ? ' active' : ''}`} key={api.id} onClick={() => setApiId(api.id)}>
-                  <span className={`api-m am-${api.method.toLowerCase()}`}>{api.method === 'DELETE' ? 'DEL' : api.method}</span>
-                  <span className="api-nm">{api.name}</span>
-                  {api.aiUsage && <span className="api-ai" title="Used by AI" />}
-                </button>
-              ))}
-            </div>
-            <div className="col-apis-footer"><button type="button" className="api-add-btn"><IconPlus size={12} /> 新建接口</button></div>
-          </div>
-
-          <div className="col-det">
-            {selectedApi ? <ApiDetail key={selectedApi.id} api={selectedApi} context="library" onJumpToSession={onJumpToSession} /> : (
-              <div className="det-empty"><IconFileText size={28} /><p>选择左侧接口</p></div>
-            )}
-          </div>
-        </div>
+        )}
       </section>
     </div>
   )

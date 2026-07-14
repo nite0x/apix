@@ -10,11 +10,12 @@ interface RequestSelection {
 interface Props {
   mode: 'flow' | 'step'
   catalog: ApiCollectionGroup[]
+  statusMessage?: string | null
   onClose: () => void
   onSelect: (selection: RequestSelection) => void
 }
 
-export function RequestPicker({ mode, catalog, onClose, onSelect }: Props) {
+export function RequestPicker({ mode, catalog, statusMessage, onClose, onSelect }: Props) {
   const [tab, setTab] = useState<'blank' | 'library'>('blank')
   const [method, setMethod] = useState('GET')
   const [url, setUrl] = useState('')
@@ -58,26 +59,32 @@ export function RequestPicker({ mode, catalog, onClose, onSelect }: Props) {
 
       {tab === 'library' && (
         <div className="nr-pane active">
-          <label className="nr-search"><IconSearch size={12} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索接口…" /></label>
-          <div className="nr-api-list">
-            {catalog.map((collection) => {
-              const collectionApis = results.filter((api) => api.collectionId === collection.id)
-              if (collectionApis.length === 0) return null
-              return (
-                <div key={collection.id}>
-                  <div className="nr-sec-lbl">{collection.name}</div>
-                  {collectionApis.map((api) => (
-                    <button type="button" className={`nr-api-it${selectedId === api.id ? ' selected' : ''}`} key={api.id} onClick={() => setSelectedId(api.id)}>
-                      <span className={`api-m am-${api.method.toLowerCase()}`}>{api.method}</span>{api.name}
-                    </button>
-                  ))}
-                </div>
-              )
-            })}
-          </div>
-          <button type="button" className="nr-use-btn" disabled={!selectedApi} onClick={() => selectedApi && onSelect({ method: selectedApi.method, url: selectedApi.url, api: selectedApi })}>
-            {mode === 'step' ? <IconApi size={12} /> : <IconSend size={12} />} {mode === 'step' ? 'Add selected API' : 'Start with selected API'}
-          </button>
+          {statusMessage && catalog.length === 0 ? (
+            <div className="catalog-status compact" role="status">{statusMessage}</div>
+          ) : (
+            <>
+              <label className="nr-search"><IconSearch size={12} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索接口…" /></label>
+              <div className="nr-api-list">
+                {catalog.map((collection) => {
+                  const collectionApis = results.filter((api) => api.collectionId === collection.id)
+                  if (collectionApis.length === 0) return null
+                  return (
+                    <div key={collection.id}>
+                      <div className="nr-sec-lbl">{collection.name}</div>
+                      {collectionApis.map((api) => (
+                        <button type="button" className={`nr-api-it${selectedId === api.id ? ' selected' : ''}`} key={api.id} onClick={() => setSelectedId(api.id)}>
+                          <span className={`api-m am-${api.method.toLowerCase()}`}>{api.method}</span>{api.name}
+                        </button>
+                      ))}
+                    </div>
+                  )
+                })}
+              </div>
+              <button type="button" className="nr-use-btn" disabled={!selectedApi} onClick={() => selectedApi && onSelect({ method: selectedApi.method, url: selectedApi.url, api: selectedApi })}>
+                {mode === 'step' ? <IconApi size={12} /> : <IconSend size={12} />} {mode === 'step' ? 'Add selected API' : 'Start with selected API'}
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

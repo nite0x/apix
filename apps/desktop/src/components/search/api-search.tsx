@@ -4,10 +4,11 @@ import { allApis, type ApiCollectionGroup, type ApiDefinition } from '../../data
 
 interface Props {
   catalog: ApiCollectionGroup[]
+  statusMessage?: string | null
   onClose: () => void
   onSelect: (api: ApiDefinition) => void
 }
-export function ApiSearch({ catalog, onClose, onSelect }: Props) {
+export function ApiSearch({ catalog, statusMessage, onClose, onSelect }: Props) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -33,6 +34,12 @@ export function ApiSearch({ catalog, onClose, onSelect }: Props) {
     if (event.key === 'Enter' && results[activeIndex]) onSelect(results[activeIndex])
   }
 
+  const emptyLabel = statusMessage && catalog.length === 0
+    ? statusMessage
+    : results.length === 0
+      ? 'No matching APIs'
+      : null
+
   return (
     <section className="search-modal open" role="dialog" aria-modal="true" aria-label="Search APIs">
       <div className="sm-inp-row">
@@ -42,7 +49,7 @@ export function ApiSearch({ catalog, onClose, onSelect }: Props) {
       </div>
       <div className="sm-section">
         <div className="sm-sec-lbl">接口</div>
-        {results.length === 0 && <div className="search-empty">No matching APIs</div>}
+        {emptyLabel && <div className="search-empty" role="status">{emptyLabel}</div>}
         {results.map((api, index) => (
           <button
             type="button"

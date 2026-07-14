@@ -1,29 +1,57 @@
 import { fixtureCatalog, type ApiCollectionGroup, type ApiDefinition, type ApiMethod } from '../data/api-catalog'
 
-const API_BASE = 'http://127.0.0.1:4317/api'
+export const API_BASE = 'http://127.0.0.1:4317/api'
 
-interface BackendCollection {
-  id: string
-  name: string
+/** Opt-in only. Default production/dev path never merges fixtures into catalog. */
+export function useFixtureCatalog(): boolean {
+  return import.meta.env.VITE_USE_FIXTURE_CATALOG === 'true'
 }
 
-interface BackendKeyValue {
+export interface BackendCollection {
+  id: string
+  project_id: string
+  parent_id?: string | null
+  name: string
+  description?: string
+  sort_order: number
+  status: string
+  created_by?: string
+  created_at: string
+  updated_at: string
+  archived_at?: string | null
+}
+
+export interface BackendKeyValue {
+  id?: string
   name: string
   value: string
   enabled: boolean
 }
 
-interface BackendRequest {
+export interface BackendRequestData {
+  method: string
+  url: string
+  query_params?: BackendKeyValue[]
+  headers?: BackendKeyValue[]
+  body_type?: string
+  body?: string
+  auth_config?: Record<string, unknown>
+}
+
+export interface BackendRequest {
   id: string
   collection_id: string
   name: string
   description?: string
-  request: {
-    method: string
-    url: string
-    query_params?: BackendKeyValue[]
-    headers?: BackendKeyValue[]
-  }
+  request: BackendRequestData
+  source_type?: string
+  status?: string
+  sort_order?: number
+  created_by?: string
+  updated_by?: string
+  created_at?: string
+  updated_at?: string
+  archived_at?: string | null
 }
 
 export interface TryResult {
@@ -32,6 +60,18 @@ export interface TryResult {
   size: string
   body: unknown
   demo: boolean
+}
+
+export type CatalogFailureKind = 'offline' | 'error'
+
+export class CatalogError extends Error {
+  readonly kind: CatalogFailureKind
+
+  constructor(kind: CatalogFailureKind, message: string) {
+    super(message)
+    this.name = 'CatalogError'
+    this.kind = kind
+  }
 }
 
 async function json<T>(response: Response): Promise<T> {
@@ -45,13 +85,22 @@ function methodOf(value: string): ApiMethod {
   return upper === 'POST' || upper === 'PUT' || upper === 'PATCH' || upper === 'DELETE' ? upper : 'GET'
 }
 
-function toDefinition(collection: BackendCollection, request: BackendRequest): ApiDefinition {
+function collectionIcon(index: number): ApiCollectionGroup['icon'] {
+  if (index % 3 === 0) return 'lock'
+  if (index % 3 === 1) return 'users'
+  return 'file'
+}
+
+export function toDefinition(collection: Pick<BackendCollection, 'id' | 'name'>, request: BackendRequest): ApiDefinition {
   const parameters = [
     ...(request.request.query_params ?? []).filter((item) => item.enabled).map((item) => ({
       name: item.name, location: 'query' as const, type: 'string', defaultValue: item.value,
     })),
     ...(request.request.headers ?? []).filter((item) => item.enabled).map((item) => ({
-      name: item.name, location: 'header' as const, type: 'string', defaultValue: item.name.toLowerCase() === 'authorization' ? '••••••••' : item.value,
+      name: item.name,
+      location: 'header' as const,
+      type: 'string',
+      defaultValue: item.name.toLowerCase() === 'authorization' ? '••••••••' : item.value,
     })),
   ]
   return {
@@ -70,34 +119,39 @@ function toDefinition(collection: BackendCollection, request: BackendRequest): A
   }
 }
 
+function classifyFetchError(error: unknown): CatalogError {
+  if (error instanceof CatalogError) return error
+  const message = error instanceof Error ? error.message : 'Failed to load catalog'
+  const offline = error instanceof TypeError
+    || /failed to fetch|networkerror|load failed/i.test(message)
+  return new CatalogError(offline ? 'offline' : 'error', offline ? 'Runtime unavailable' : message)
+}
+
+/**
+ * Loads the durable catalog from the local runtime.
+ * Never silently merges fixture data. Set VITE_USE_FIXTURE_CATALOG=true to opt in.
+ */
 export async function loadCatalog(): Promise<ApiCollectionGroup[]> {
+  if (useFixtureCatalog()) {
+    return fixtureCatalog
+  }
+
   try {
     const collections = await fetch(`${API_BASE}/collections`).then(json<BackendCollection[]>)
-    if (collections.length === 0) return fixtureCatalog
     const groups = await Promise.all(collections.map(async (collection, index) => {
-      const requests = await fetch(`${API_BASE}/requests?collection_id=${encodeURIComponent(collection.id)}`).then(json<BackendRequest[]>)
+      const requests = await fetch(
+        `${API_BASE}/requests?collection_id=${encodeURIComponent(collection.id)}`,
+      ).then(json<BackendRequest[]>)
       return {
         id: collection.id,
         name: collection.name,
-        icon: (index % 3 === 0 ? 'lock' : index % 3 === 1 ? 'users' : 'file') as ApiCollectionGroup['icon'],
+        icon: collectionIcon(index),
         apis: requests.map((request) => toDefinition(collection, request)),
       }
     }))
-    if (!groups.some((group) => group.apis.length > 0)) return fixtureCatalog
-
-    // Keep real saved requests visible while retaining the richer Phase 4 sample
-    // catalog. This lets the UI stay useful before every backend collection has
-    // been populated, and fixture requests remain clearly marked as previews.
-    return fixtureCatalog.map((fixtureGroup) => {
-      const backendGroup = groups.find((group) => group.id === fixtureGroup.id)
-      if (!backendGroup) return fixtureGroup
-      const fixtureApis = fixtureGroup.apis.filter(
-        (fixtureApi) => !backendGroup.apis.some((backendApi) => backendApi.id === fixtureApi.id),
-      )
-      return { ...fixtureGroup, apis: [...backendGroup.apis, ...fixtureApis] }
-    }).concat(groups.filter((group) => !fixtureCatalog.some((fixtureGroup) => fixtureGroup.id === group.id)))
-  } catch {
-    return fixtureCatalog
+    return groups
+  } catch (error) {
+    throw classifyFetchError(error)
   }
 }
 
