@@ -1,4 +1,11 @@
-import { fixtureCatalog, type ApiCollectionGroup, type ApiDefinition, type ApiMethod } from '../data/api-catalog'
+import {
+  fixtureCatalog,
+  type ApiCollectionGroup,
+  type ApiDefinition,
+  type ApiMethod,
+  type RequestData,
+  type RequestKeyValue,
+} from '../data/api-catalog'
 
 export const API_BASE = 'http://127.0.0.1:4317/api'
 
@@ -21,22 +28,8 @@ export interface BackendCollection {
   archived_at?: string | null
 }
 
-export interface BackendKeyValue {
-  id?: string
-  name: string
-  value: string
-  enabled: boolean
-}
-
-export interface BackendRequestData {
-  method: string
-  url: string
-  query_params?: BackendKeyValue[]
-  headers?: BackendKeyValue[]
-  body_type?: string
-  body?: string
-  auth_config?: Record<string, unknown>
-}
+export type BackendKeyValue = RequestKeyValue
+export type BackendRequestData = RequestData
 
 export interface BackendRequest {
   id: string
@@ -52,6 +45,25 @@ export interface BackendRequest {
   created_at?: string
   updated_at?: string
   archived_at?: string | null
+}
+
+export interface BackendWorkingCopy {
+  id: string
+  project_id: string
+  owner_id: string
+  api_request_id?: string | null
+  environment_id?: string | null
+  name?: string
+  request: BackendRequestData
+  source_type: string
+  status: string
+  content_hash: string
+  base_content_hash?: string | null
+  edit_version: number
+  created_at?: string
+  updated_at?: string
+  expires_at?: string | null
+  discarded_at?: string | null
 }
 
 export interface TryResult {
@@ -74,6 +86,18 @@ export class CatalogError extends Error {
   }
 }
 
+/**
+ * Raised when a Working Copy edit is rejected because the server-side
+ * edit_version moved on. Never resolved silently: the caller must offer a
+ * reload-or-keep recovery path so a newer version is not overwritten.
+ */
+export class CatalogConflictError extends Error {
+  constructor(message = 'This request was modified elsewhere') {
+    super(message)
+    this.name = 'CatalogConflictError'
+  }
+}
+
 async function json<T>(response: Response): Promise<T> {
   const data = await response.json() as T & { error?: string }
   if (!response.ok) throw new Error(data.error ?? `Request failed (${response.status})`)
@@ -82,7 +106,9 @@ async function json<T>(response: Response): Promise<T> {
 
 function methodOf(value: string): ApiMethod {
   const upper = value.toUpperCase()
-  return upper === 'POST' || upper === 'PUT' || upper === 'PATCH' || upper === 'DELETE' ? upper : 'GET'
+  return upper === 'POST' || upper === 'PUT' || upper === 'PATCH' || upper === 'DELETE' || upper === 'HEAD' || upper === 'OPTIONS'
+    ? upper
+    : 'GET'
 }
 
 function collectionIcon(index: number): ApiCollectionGroup['icon'] {
@@ -110,12 +136,101 @@ export function toDefinition(collection: Pick<BackendCollection, 'id' | 'name'>,
     name: request.name,
     method: methodOf(request.request.method),
     url: request.request.url,
-    description: request.description ?? 'Saved API request.',
+    description: request.description ?? '',
     source: 'backend',
+    requestData: request.request,
     parameters,
     bindings: [],
     rules: [],
     history: [],
+  }
+}
+
+export interface RequestInput {
+  collection_id: string
+  name: string
+  description?: string
+  request: RequestData
+}
+
+/** Creates a durable API Request directly in a collection. */
+export async function createRequest(input: RequestInput): Promise<BackendRequest> {
+  return fetch(`${API_BASE}/requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }).then(json<BackendRequest>)
+}
+
+export async function getRequest(id: string): Promise<BackendRequest> {
+  return fetch(`${API_BASE}/requests/${encodeURIComponent(id)}`).then(json<BackendRequest>)
+}
+
+/** Archives a saved API Request. Removes it from every catalog consumer. */
+export async function archiveRequest(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/requests/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!response.ok && response.status !== 404) {
+    const data = await response.json().catch(() => ({})) as { error?: string }
+    throw new Error(data.error ?? `Archive failed (${response.status})`)
+  }
+}
+
+/**
+ * Opens a Working Copy bound to a saved request. The runtime seeds the draft
+ * with the request's current RequestData and name, so edits stay lossless.
+ */
+export async function createWorkingCopyForRequest(apiRequestId: string): Promise<BackendWorkingCopy> {
+  return fetch(`${API_BASE}/working-copies`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_request_id: apiRequestId, source_type: 'manual' }),
+  }).then(json<BackendWorkingCopy>)
+}
+
+/**
+ * Persists the edited RequestData onto a Working Copy using optimistic
+ * concurrency. A 409 becomes a CatalogConflictError so newer versions are
+ * never silently clobbered.
+ */
+export async function updateWorkingCopy(copy: BackendWorkingCopy, request: RequestData): Promise<BackendWorkingCopy> {
+  const response = await fetch(`${API_BASE}/working-copies/${encodeURIComponent(copy.id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...copy, request, edit_version: copy.edit_version }),
+  })
+  if (response.status === 409) {
+    const data = await response.json().catch(() => ({})) as { error?: string }
+    throw new CatalogConflictError(data.error)
+  }
+  return json<BackendWorkingCopy>(response)
+}
+
+export interface SaveWorkingCopyInput {
+  collection_id?: string
+  name: string
+  description?: string
+}
+
+/** Promotes a Working Copy draft into its durable API Request. */
+export async function saveWorkingCopy(id: string, input: SaveWorkingCopyInput): Promise<BackendWorkingCopy> {
+  const response = await fetch(`${API_BASE}/working-copies/${encodeURIComponent(id)}/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (response.status === 409) {
+    const data = await response.json().catch(() => ({})) as { error?: string }
+    throw new CatalogConflictError(data.error)
+  }
+  return json<BackendWorkingCopy>(response)
+}
+
+/** Discards an editing draft. Safe to call after a successful save. */
+export async function discardWorkingCopy(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/working-copies/${encodeURIComponent(id)}/discard`, { method: 'POST' })
+  if (!response.ok && response.status !== 404) {
+    const data = await response.json().catch(() => ({})) as { error?: string }
+    throw new Error(data.error ?? `Discard failed (${response.status})`)
   }
 }
 

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { IconApi, IconSearch, IconSend, IconTimeline } from '@tabler/icons-react'
 import { allApis, type ApiCollectionGroup, type ApiDefinition } from '../../data/api-catalog'
+import type { CatalogLoadState } from '../../store/catalog-store'
+import { CatalogFeedback } from '../catalog/catalog-feedback'
 
 interface RequestSelection {
   method: string
@@ -10,12 +12,15 @@ interface RequestSelection {
 interface Props {
   mode: 'flow' | 'step'
   catalog: ApiCollectionGroup[]
-  statusMessage?: string | null
+  catalogState: CatalogLoadState
+  catalogError: string | null
+  isPreview: boolean
+  onRetry: () => void
   onClose: () => void
   onSelect: (selection: RequestSelection) => void
 }
 
-export function RequestPicker({ mode, catalog, statusMessage, onClose, onSelect }: Props) {
+export function RequestPicker({ mode, catalog, catalogState, catalogError, isPreview, onRetry, onClose, onSelect }: Props) {
   const [tab, setTab] = useState<'blank' | 'library'>('blank')
   const [method, setMethod] = useState('GET')
   const [url, setUrl] = useState('')
@@ -59,9 +64,15 @@ export function RequestPicker({ mode, catalog, statusMessage, onClose, onSelect 
 
       {tab === 'library' && (
         <div className="nr-pane active">
-          {statusMessage && catalog.length === 0 ? (
-            <div className="catalog-status compact" role="status">{statusMessage}</div>
-          ) : (
+          <CatalogFeedback
+            state={catalogState}
+            error={catalogError}
+            isPreview={isPreview}
+            blocking={catalog.length === 0}
+            compact
+            onRetry={onRetry}
+          />
+          {catalog.length > 0 && (
             <>
               <label className="nr-search"><IconSearch size={12} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索接口…" /></label>
               <div className="nr-api-list">

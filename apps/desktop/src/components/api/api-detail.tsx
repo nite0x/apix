@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import {
+  IconArchive,
   IconArrowDownLeft,
   IconArrowUpRight,
   IconFileCode,
   IconFileDescription,
   IconLoader,
+  IconPencil,
   IconPlayerPlay,
   IconRobot,
   IconSend,
@@ -27,18 +29,18 @@ interface Props {
   context: 'run' | 'library'
   runContext?: RunContext
   onJumpToSession?: () => void
+  onEdit?: () => void
+  onArchive?: () => void
 }
 
 function methodClass(method: string) {
   return `det-method am-${method.toLowerCase()}`
 }
 
-export function ApiDetail({ api, context, runContext, onJumpToSession }: Props) {
+export function ApiDetail({ api, context, runContext, onJumpToSession, onEdit, onArchive }: Props) {
   const [tab, setTab] = useState<DetailTab>('overview')
   const [aiOpen, setAiOpen] = useState(false)
   const [aiNote, setAiNote] = useState('')
-  const [description, setDescription] = useState(api.description)
-  const [editingDescription, setEditingDescription] = useState(false)
   const [rules, setRules] = useState<ApiRule[]>(api.rules)
   const [trying, setTrying] = useState(false)
   const [tryResult, setTryResult] = useState<TryResult | null>(null)
@@ -48,8 +50,6 @@ export function ApiDetail({ api, context, runContext, onJumpToSession }: Props) 
     setTab('overview')
     setAiOpen(false)
     setAiNote('')
-    setDescription(api.description)
-    setEditingDescription(false)
     setRules(api.rules)
     setTryResult(null)
     setTryError(null)
@@ -95,8 +95,21 @@ export function ApiDetail({ api, context, runContext, onJumpToSession }: Props) 
           <span className={methodClass(api.method)}>{api.method}</span>
           <span className="det-url">{api.url}</span>
         </div>
-        <span className="det-name">{api.name} · {api.collectionName}</span>
+        <span className="det-name">
+          {api.name} · {api.collectionName}
+          {api.source === 'fixture' && <span className="demo-label">preview</span>}
+        </span>
         <div className="det-acts">
+          {onEdit && api.source === 'backend' && (
+            <button type="button" className="det-btn" onClick={onEdit}>
+              <IconPencil size={12} /> 编辑
+            </button>
+          )}
+          {onArchive && api.source === 'backend' && (
+            <button type="button" className="det-btn det-btn-danger" onClick={onArchive}>
+              <IconArchive size={12} /> 归档
+            </button>
+          )}
           <button type="button" className={`det-btn ai-btn${aiOpen ? ' active' : ''}`} onClick={() => setAiOpen((open) => !open)}>
             <IconRobot size={12} /> 用 AI 编辑
           </button>
@@ -133,10 +146,10 @@ export function ApiDetail({ api, context, runContext, onJumpToSession }: Props) 
           <div className="det-pane active">
             <div className="dp-sec">
               <div className="dp-lbl"><IconFileDescription size={12} /> Description</div>
-              {editingDescription ? (
-                <textarea className="dp-edit" rows={3} value={description} onChange={(event) => setDescription(event.target.value)} onBlur={() => setEditingDescription(false)} autoFocus />
+              {onEdit && api.source === 'backend' ? (
+                <button type="button" className="dp-desc" onClick={onEdit}>{api.description || 'Saved API request.'}<span className="ehint">编辑</span></button>
               ) : (
-                <button type="button" className="dp-desc" onClick={() => setEditingDescription(true)}>{description}<span className="ehint">编辑</span></button>
+                <div className="dp-desc dp-desc-static">{api.description || 'Saved API request.'}</div>
               )}
             </div>
 
@@ -159,7 +172,6 @@ export function ApiDetail({ api, context, runContext, onJumpToSession }: Props) 
                   <IconRobot size={13} /> Used <strong>{api.aiUsage.count}×</strong>
                   <span className="ai-div" /> {api.aiUsage.succeeded} ok · <span className="ai-failed">{api.aiUsage.failed} err</span>
                   <span className="ai-div" /> avg <strong>{api.aiUsage.averageMs}ms</strong>
-                  {api.source === 'fixture' && <span className="demo-label">preview</span>}
                 </div>
               </div>
             )}

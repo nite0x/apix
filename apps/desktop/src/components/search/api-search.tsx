@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { IconLayoutSidebarRight, IconSearch } from '@tabler/icons-react'
 import { allApis, type ApiCollectionGroup, type ApiDefinition } from '../../data/api-catalog'
+import type { CatalogLoadState } from '../../store/catalog-store'
+import { CatalogFeedback } from '../catalog/catalog-feedback'
 
 interface Props {
   catalog: ApiCollectionGroup[]
-  statusMessage?: string | null
+  catalogState: CatalogLoadState
+  catalogError: string | null
+  isPreview: boolean
+  onRetry: () => void
   onClose: () => void
   onSelect: (api: ApiDefinition) => void
 }
-export function ApiSearch({ catalog, statusMessage, onClose, onSelect }: Props) {
+export function ApiSearch({ catalog, catalogState, catalogError, isPreview, onRetry, onClose, onSelect }: Props) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -34,11 +39,7 @@ export function ApiSearch({ catalog, statusMessage, onClose, onSelect }: Props) 
     if (event.key === 'Enter' && results[activeIndex]) onSelect(results[activeIndex])
   }
 
-  const emptyLabel = statusMessage && catalog.length === 0
-    ? statusMessage
-    : results.length === 0
-      ? 'No matching APIs'
-      : null
+  const emptyLabel = catalog.length > 0 && results.length === 0 ? 'No matching APIs' : null
 
   return (
     <section className="search-modal open" role="dialog" aria-modal="true" aria-label="Search APIs">
@@ -49,6 +50,14 @@ export function ApiSearch({ catalog, statusMessage, onClose, onSelect }: Props) 
       </div>
       <div className="sm-section">
         <div className="sm-sec-lbl">接口</div>
+        <CatalogFeedback
+          state={catalogState}
+          error={catalogError}
+          isPreview={isPreview}
+          blocking={catalog.length === 0}
+          compact
+          onRetry={onRetry}
+        />
         {emptyLabel && <div className="search-empty" role="status">{emptyLabel}</div>}
         {results.map((api, index) => (
           <button

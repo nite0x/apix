@@ -3,10 +3,12 @@ package httpapi
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	_ "modernc.org/sqlite"
 )
 
@@ -78,6 +80,224 @@ func TestEmptyListsAreEncodedAsArrays(t *testing.T) {
 	}
 }
 
+func TestConflictErrorsMapToHTTP409(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	writeAPIError(context, errors.Join(errConflict, errors.New("saved request changed")))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected HTTP 409, got %d", recorder.Code)
+	}
+}
+
+func TestArchivedCatalogEntitiesStayHiddenFromRefreshLists(t *testing.T) {
+	service := newTestService(t)
+	collection := &APICollection{Name: "Archived collection"}
+	if err := service.repo.createCollection(collection); err != nil {
+		t.Fatal(err)
+	}
+	request := &APIRequest{
+		CollectionID: collection.ID,
+		Name:         "Archived request",
+		Request:      RequestData{Method: "GET", URL: "https://example.com/archived"},
+	}
+	if err := service.repo.createRequest(request); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.repo.archiveRequest(request.ID); err != nil {
+		t.Fatal(err)
+	}
+	requests, err := service.repo.listRequests(collection.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 0 {
+		t.Fatalf("archived request reappeared in refresh list: %#v", requests)
+	}
+
+	if err := service.repo.archiveCollection(collection.ID); err != nil {
+		t.Fatal(err)
+	}
+	collections, err := service.repo.listCollections(defaultProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collections) != 0 {
+		t.Fatalf("archived collection reappeared in refresh list: %#v", collections)
+	}
+}
+
+func TestSavedRequestEditRoundTripsAllFields(t *testing.T) {
+	service := newTestService(t)
+	collection := &APICollection{Name: "Users"}
+	if err := service.repo.createCollection(collection); err != nil {
+		t.Fatal(err)
+	}
+
+	original := &APIRequest{
+		CollectionID: collection.ID,
+		Name:         "List users",
+		Description:  "Original description",
+		Request: RequestData{
+			Method: "POST", URL: "https://api.example.com/users",
+			QueryParams: []KeyValue{{Name: "role", Value: "admin", Enabled: true}, {Name: "legacy", Value: "1", Enabled: false}},
+			Headers:     []KeyValue{{Name: "X-Trace", Value: "on", Enabled: false}},
+			BodyType:    "json", Body: `{"page":1}`,
+			AuthConfig: map[string]any{"type": "bearer", "token": "{{token}}"},
+		},
+	}
+	if err := service.repo.createRequest(original); err != nil {
+		t.Fatal(err)
+	}
+
+	// Open a working copy bound to the saved request and edit every field group.
+	// The HTTP layer seeds the draft from the request; mirror that here.
+	copy := &APIWorkingCopy{APIRequestID: &original.ID, Request: original.Request}
+	if err := service.repo.createWorkingCopy(copy); err != nil {
+		t.Fatal(err)
+	}
+	copy.Request.URL = "https://api.example.com/users?v=2"
+	copy.Request.QueryParams = append(copy.Request.QueryParams, KeyValue{Name: "status", Value: "active", Enabled: false})
+	copy.Request.Headers = []KeyValue{{Name: "X-Trace", Value: "off", Enabled: false}, {Name: "Accept", Value: "application/json", Enabled: true}}
+	copy.Request.Body = `{"page":2}`
+	if err := service.repo.updateWorkingCopy(copy, copy.EditVersion); err != nil {
+		t.Fatal(err)
+	}
+
+	newDesc := "Edited description"
+	if _, err := service.repo.saveWorkingCopy(copy.ID, "", "List users v2", &newDesc); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := service.repo.getRequest(original.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Name != "List users v2" {
+		t.Fatalf("name did not persist: %q", reloaded.Name)
+	}
+	if reloaded.Description != newDesc {
+		t.Fatalf("description did not persist losslessly: %q", reloaded.Description)
+	}
+	if reloaded.Request.URL != "https://api.example.com/users?v=2" {
+		t.Fatalf("url edit lost: %q", reloaded.Request.URL)
+	}
+	if len(reloaded.Request.QueryParams) != 3 {
+		t.Fatalf("query params lost: %#v", reloaded.Request.QueryParams)
+	}
+	var disabledKept bool
+	for _, kv := range reloaded.Request.QueryParams {
+		if kv.Name == "legacy" && !kv.Enabled {
+			disabledKept = true
+		}
+	}
+	if !disabledKept {
+		t.Fatal("disabled query param was dropped on round-trip")
+	}
+	if reloaded.Request.Body != `{"page":2}` {
+		t.Fatalf("body edit lost: %q", reloaded.Request.Body)
+	}
+	if reloaded.Request.AuthConfig["type"] != "bearer" || reloaded.Request.AuthConfig["token"] != "{{token}}" {
+		t.Fatalf("auth config lost on round-trip: %#v", reloaded.Request.AuthConfig)
+	}
+}
+
+func TestSaveWithNilDescriptionPreservesExisting(t *testing.T) {
+	service := newTestService(t)
+	collection := &APICollection{Name: "Users"}
+	if err := service.repo.createCollection(collection); err != nil {
+		t.Fatal(err)
+	}
+	request := &APIRequest{
+		CollectionID: collection.ID, Name: "Keep desc", Description: "Keep me",
+		Request: RequestData{Method: "GET", URL: "https://api.example.com/keep"},
+	}
+	if err := service.repo.createRequest(request); err != nil {
+		t.Fatal(err)
+	}
+	copy := &APIWorkingCopy{APIRequestID: &request.ID, Name: request.Name, Request: request.Request}
+	if err := service.repo.createWorkingCopy(copy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.repo.saveWorkingCopy(copy.ID, "", "Keep desc", nil); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := service.repo.getRequest(request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Description != "Keep me" {
+		t.Fatalf("nil description must not clear existing value, got %q", reloaded.Description)
+	}
+}
+
+func TestUpdateWorkingCopyRejectsStaleEditVersion(t *testing.T) {
+	service := newTestService(t)
+	copy := &APIWorkingCopy{SourceType: "manual", Request: RequestData{Method: "GET", URL: "https://api.example.com/x"}}
+	if err := service.repo.createWorkingCopy(copy); err != nil {
+		t.Fatal(err)
+	}
+	staleVersion := copy.EditVersion
+	copy.Request.URL = "https://api.example.com/x?v=2"
+	if err := service.repo.updateWorkingCopy(copy, staleVersion); err != nil {
+		t.Fatal(err)
+	}
+	// A second edit that reuses the now-stale version must be rejected, not applied.
+	copy.Request.URL = "https://api.example.com/x?v=3"
+	if err := service.repo.updateWorkingCopy(copy, staleVersion); err == nil {
+		t.Fatal("stale edit_version was silently accepted")
+	}
+}
+
+func TestSaveWorkingCopyRejectsStaleSavedRequest(t *testing.T) {
+	service := newTestService(t)
+	collection := &APICollection{Name: "Users"}
+	if err := service.repo.createCollection(collection); err != nil {
+		t.Fatal(err)
+	}
+	request := &APIRequest{
+		CollectionID: collection.ID,
+		Name:         "List users",
+		Request:      RequestData{Method: "GET", URL: "https://api.example.com/users"},
+	}
+	if err := service.repo.createRequest(request); err != nil {
+		t.Fatal(err)
+	}
+
+	first := &APIWorkingCopy{OwnerID: "editor-1", APIRequestID: &request.ID, Request: request.Request}
+	second := &APIWorkingCopy{OwnerID: "editor-2", APIRequestID: &request.ID, Request: request.Request}
+	if err := service.repo.createWorkingCopy(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.repo.createWorkingCopy(second); err != nil {
+		t.Fatal(err)
+	}
+
+	first.Request.URL = "https://api.example.com/users?editor=1"
+	if err := service.repo.updateWorkingCopy(first, first.EditVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.repo.saveWorkingCopy(first.ID, "", request.Name, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	second.Request.URL = "https://api.example.com/users?editor=2"
+	if err := service.repo.updateWorkingCopy(second, second.EditVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.repo.saveWorkingCopy(second.ID, "", request.Name, nil); !errors.Is(err, errConflict) {
+		t.Fatalf("expected stale draft conflict, got %v", err)
+	}
+
+	reloaded, err := service.repo.getRequest(request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Request.URL != first.Request.URL {
+		t.Fatalf("stale save overwrote newer request: %q", reloaded.Request.URL)
+	}
+}
+
 func TestWorkingCopySaveAndRunLifecycle(t *testing.T) {
 	service := newTestService(t)
 	collection := &APICollection{Name: "Users"}
@@ -124,7 +344,7 @@ func TestWorkingCopySaveAndRunLifecycle(t *testing.T) {
 		t.Fatal("response cookie was persisted without redaction")
 	}
 
-	saved, err := service.repo.saveWorkingCopy(copy.ID, collection.ID, "Health")
+	saved, err := service.repo.saveWorkingCopy(copy.ID, collection.ID, "Health", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

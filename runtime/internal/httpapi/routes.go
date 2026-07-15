@@ -186,14 +186,15 @@ func (s *HTTPService) workingCopyRoutes(r gin.IRouter) {
 	})
 	g.POST("/:id/save", func(c *gin.Context) {
 		var body struct {
-			CollectionID string `json:"collection_id"`
-			Name         string `json:"name"`
+			CollectionID string  `json:"collection_id"`
+			Name         string  `json:"name"`
+			Description  *string `json:"description"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			writeBadRequest(c, err)
 			return
 		}
-		item, err := s.repo.saveWorkingCopy(c.Param("id"), body.CollectionID, body.Name)
+		item, err := s.repo.saveWorkingCopy(c.Param("id"), body.CollectionID, body.Name, body.Description)
 		if err != nil {
 			writeAPIError(c, err)
 			return
@@ -324,6 +325,10 @@ func writeBadRequest(c *gin.Context, err error) {
 func writeAPIError(c *gin.Context, err error) {
 	if errors.Is(err, errNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, errConflict) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

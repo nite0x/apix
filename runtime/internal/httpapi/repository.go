@@ -13,7 +13,10 @@ import (
 	"github.com/google/uuid"
 )
 
-var errNotFound = errors.New("not found")
+var (
+	errNotFound = errors.New("not found")
+	errConflict = errors.New("conflict")
+)
 
 type repository struct{ db *sql.DB }
 
@@ -342,7 +345,10 @@ func (r *repository) updateWorkingCopy(item *APIWorkingCopy, expectedVersion int
 	return nil
 }
 
-func (r *repository) saveWorkingCopy(id, collectionID, name string) (*APIWorkingCopy, error) {
+// saveWorkingCopy promotes a draft into a durable APIRequest. description is
+// optional: a nil pointer leaves the stored description untouched so callers
+// that do not manage descriptions (e.g. manual drafts) never clear them.
+func (r *repository) saveWorkingCopy(id, collectionID, name string, description *string) (*APIWorkingCopy, error) {
 	copy, err := r.getWorkingCopy(id)
 	if err != nil {
 		return nil, err
@@ -361,10 +367,14 @@ func (r *repository) saveWorkingCopy(id, collectionID, name string) (*APIWorking
 			return nil, fmt.Errorf("name is required")
 		}
 		requestID := uuid.NewString()
+		var desc any
+		if description != nil {
+			desc = optionalString(*description)
+		}
 		_, err = tx.Exec(`INSERT INTO api_requests
-			(id, collection_id, name, method, url, query_params, headers, body_type, body, auth_config,
+			(id, collection_id, name, description, method, url, query_params, headers, body_type, body, auth_config,
 			source_type, status, created_at, updated_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, requestID, collectionID, name, copy.Request.Method, copy.Request.URL,
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, requestID, collectionID, name, desc, copy.Request.Method, copy.Request.URL,
 			marshalJSON(copy.Request.QueryParams), marshalJSON(copy.Request.Headers), copy.Request.BodyType,
 			optionalString(copy.Request.Body), marshalJSON(copy.Request.AuthConfig), copy.SourceType, "active", now, now)
 		if err != nil {
@@ -373,13 +383,45 @@ func (r *repository) saveWorkingCopy(id, collectionID, name string) (*APIWorking
 		copy.APIRequestID = &requestID
 		copy.Name = name
 	} else {
+		current, err := getActiveRequestData(tx, *copy.APIRequestID)
+		if err != nil {
+			return nil, err
+		}
+		currentHash, err := contentHash(current)
+		if err != nil {
+			return nil, err
+		}
+		if copy.BaseContentHash == nil || currentHash != *copy.BaseContentHash {
+			return nil, fmt.Errorf("%w: saved request changed since this draft was opened", errConflict)
+		}
 		if name == "" {
 			name = copy.Name
 		}
-		_, err = tx.Exec(`UPDATE api_requests SET name=?, method=?, url=?, query_params=?, headers=?, body_type=?,
-			body=?, auth_config=?, updated_at=? WHERE id=? AND status='active'`, name, copy.Request.Method, copy.Request.URL,
-			marshalJSON(copy.Request.QueryParams), marshalJSON(copy.Request.Headers), copy.Request.BodyType,
-			optionalString(copy.Request.Body), marshalJSON(copy.Request.AuthConfig), now, *copy.APIRequestID)
+		if description != nil {
+			result, updateErr := tx.Exec(`UPDATE api_requests SET name=?, description=?, method=?, url=?, query_params=?, headers=?, body_type=?,
+				body=?, auth_config=?, updated_at=? WHERE id=? AND status='active'`, name, optionalString(*description),
+				copy.Request.Method, copy.Request.URL, marshalJSON(copy.Request.QueryParams), marshalJSON(copy.Request.Headers),
+				copy.Request.BodyType, optionalString(copy.Request.Body), marshalJSON(copy.Request.AuthConfig), now, *copy.APIRequestID)
+			err = updateErr
+			if err == nil {
+				affected, _ := result.RowsAffected()
+				if affected == 0 {
+					err = errNotFound
+				}
+			}
+		} else {
+			result, updateErr := tx.Exec(`UPDATE api_requests SET name=?, method=?, url=?, query_params=?, headers=?, body_type=?,
+				body=?, auth_config=?, updated_at=? WHERE id=? AND status='active'`, name, copy.Request.Method, copy.Request.URL,
+				marshalJSON(copy.Request.QueryParams), marshalJSON(copy.Request.Headers), copy.Request.BodyType,
+				optionalString(copy.Request.Body), marshalJSON(copy.Request.AuthConfig), now, *copy.APIRequestID)
+			err = updateErr
+			if err == nil {
+				affected, _ := result.RowsAffected()
+				if affected == 0 {
+					err = errNotFound
+				}
+			}
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -396,6 +438,34 @@ func (r *repository) saveWorkingCopy(id, collectionID, name string) (*APIWorking
 		return nil, err
 	}
 	return r.getWorkingCopy(id)
+}
+
+func getActiveRequestData(tx *sql.Tx, id string) (RequestData, error) {
+	var request RequestData
+	var query, headers, auth string
+	var body sql.NullString
+	err := tx.QueryRow(`SELECT method, url, query_params, headers, body_type, body, auth_config
+		FROM api_requests WHERE id=? AND status='active'`, id).Scan(
+		&request.Method, &request.URL, &query, &headers, &request.BodyType, &body, &auth)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RequestData{}, errNotFound
+	}
+	if err != nil {
+		return RequestData{}, err
+	}
+	request.Body = body.String
+	if err := json.Unmarshal([]byte(query), &request.QueryParams); err != nil {
+		return RequestData{}, err
+	}
+	if err := json.Unmarshal([]byte(headers), &request.Headers); err != nil {
+		return RequestData{}, err
+	}
+	if auth != "" && auth != "null" {
+		if err := json.Unmarshal([]byte(auth), &request.AuthConfig); err != nil {
+			return RequestData{}, err
+		}
+	}
+	return request, nil
 }
 
 func (r *repository) discardWorkingCopy(id string) error {

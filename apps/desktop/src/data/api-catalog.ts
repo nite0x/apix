@@ -1,4 +1,21 @@
-export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'
+
+export interface RequestKeyValue {
+  id?: string
+  name: string
+  value: string
+  enabled: boolean
+}
+
+export interface RequestData {
+  method: string
+  url: string
+  query_params?: RequestKeyValue[]
+  headers?: RequestKeyValue[]
+  body_type?: string
+  body?: string
+  auth_config?: Record<string, unknown>
+}
 
 export interface ApiParameter {
   name: string
@@ -38,6 +55,8 @@ export interface ApiDefinition {
   url: string
   description: string
   source: 'fixture' | 'backend'
+  /** Complete durable Runtime request payload. Fixture entries may omit it. */
+  requestData?: RequestData
   aiUsage?: { count: number; succeeded: number; failed: number; averageMs: number }
   parameters: ApiParameter[]
   bindings: ApiBinding[]

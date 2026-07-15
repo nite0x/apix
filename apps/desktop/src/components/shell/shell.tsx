@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { allApis, type ApiDefinition } from '../../data/api-catalog'
 import { useWebSocket } from '../../hooks/use-websocket'
 import { resumeStep } from '../../services/api-client'
-import { catalogStatusMessage, useCatalogStore } from '../../store/catalog-store'
+import { useCatalogStore } from '../../store/catalog-store'
 import { useSessionStore, type Step } from '../../store/session-store'
 import { ApiDrawer } from '../api/api-drawer'
 import { ApiLibrary } from '../api/api-library'
@@ -44,8 +44,9 @@ export function Shell() {
   const catalog = useCatalogStore((s) => s.groups)
   const catalogState = useCatalogStore((s) => s.loadState)
   const catalogError = useCatalogStore((s) => s.error)
+  const isPreviewCatalog = useCatalogStore((s) => s.isPreview)
   const refreshCatalog = useCatalogStore((s) => s.refresh)
-  const catalogStatus = catalogStatusMessage(catalogState, catalogError)
+  const runCatalogMutation = useCatalogStore((s) => s.runMutation)
 
   const [overlay, setOverlay] = useState<'library' | 'search' | null>(null)
   const [drawer, setDrawer] = useState<DrawerState | null>(null)
@@ -188,7 +189,10 @@ export function Shell() {
         {overlay === 'search' && (
           <ApiSearch
             catalog={catalog}
-            statusMessage={catalogStatus}
+            catalogState={catalogState}
+            catalogError={catalogError}
+            isPreview={isPreviewCatalog}
+            onRetry={() => void refreshCatalog()}
             onClose={() => setOverlay(null)}
             onSelect={selectSearchApi}
           />
@@ -196,10 +200,13 @@ export function Shell() {
         {overlay === 'library' && (
           <ApiLibrary
             catalog={catalog}
-            statusMessage={catalogStatus}
+            catalogState={catalogState}
+            catalogError={catalogError}
+            isPreview={isPreviewCatalog}
             onClose={() => setOverlay(null)}
             onJumpToSession={() => setOverlay(null)}
-            onCatalogChanged={() => void refreshCatalog()}
+            onRetry={() => void refreshCatalog()}
+            onCatalogMutation={runCatalogMutation}
           />
         )}
         {drawer && <ApiDrawer {...drawer} onClose={() => setDrawer(null)} onJumpToSession={() => setDrawer(null)} />}
@@ -207,7 +214,10 @@ export function Shell() {
           <RequestPicker
             mode={picker.mode}
             catalog={catalog}
-            statusMessage={catalogStatus}
+            catalogState={catalogState}
+            catalogError={catalogError}
+            isPreview={isPreviewCatalog}
+            onRetry={() => void refreshCatalog()}
             onClose={() => setPicker(null)}
             onSelect={handlePickerSelection}
           />
