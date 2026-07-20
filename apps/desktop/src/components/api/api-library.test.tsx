@@ -8,6 +8,7 @@ import { ApiLibrary } from './api-library'
 
 const apiMocks = vi.hoisted(() => ({
   archiveRequest: vi.fn(),
+  importCurl: vi.fn(),
 }))
 
 vi.mock('../../services/api-client', async (importOriginal) => ({
@@ -70,5 +71,67 @@ describe('ApiLibrary archive flow', () => {
     await waitFor(() => expect(apiMocks.archiveRequest).toHaveBeenCalledWith('request-1'))
     expect(onCatalogMutation).toHaveBeenCalledOnce()
     expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+})
+
+describe('ApiLibrary import flow', () => {
+  function renderLibrary() {
+    return render(
+      <ApiLibrary
+        catalog={catalog}
+        catalogState="ready"
+        catalogError={null}
+        isPreview={false}
+        onClose={vi.fn()}
+        onJumpToSession={vi.fn()}
+        onRetry={vi.fn()}
+        onCatalogMutation={vi.fn(async (mutation: () => Promise<void>) => mutation())}
+      />,
+    )
+  }
+
+  it('opens an editable import editor seeded from the parsed draft', async () => {
+    const user = userEvent.setup()
+    apiMocks.importCurl.mockResolvedValue({
+      id: 'wc-import',
+      project_id: 'default',
+      owner_id: 'local',
+      request: {
+        method: 'POST',
+        url: 'https://api.example.com/items',
+        query_params: [],
+        headers: [],
+        body_type: 'json',
+        body: '{}',
+      },
+      source_type: 'curl_import',
+      status: 'active',
+      content_hash: 'h',
+      edit_version: 1,
+    })
+
+    renderLibrary()
+
+    await user.click(screen.getByRole('button', { name: '导入' }))
+    await user.type(screen.getByPlaceholderText('Paste curl or raw HTTP request…'), 'curl -XPOST https://api.example.com/items')
+    await user.click(screen.getByRole('button', { name: 'Import as draft' }))
+
+    expect(await screen.findByText('导入接口')).toBeTruthy()
+    expect(screen.getByDisplayValue('https://api.example.com/items')).toBeTruthy()
+    expect(within(screen.getAllByRole('combobox')[0]).getByRole('option', { name: 'Saved APIs' })).toBeTruthy()
+  })
+
+  it('shows a recoverable message when parsing fails and keeps the editor closed', async () => {
+    const user = userEvent.setup()
+    apiMocks.importCurl.mockRejectedValue(new Error('expected a curl command'))
+
+    renderLibrary()
+
+    await user.click(screen.getByRole('button', { name: '导入' }))
+    await user.type(screen.getByPlaceholderText('Paste curl or raw HTTP request…'), 'nonsense')
+    await user.click(screen.getByRole('button', { name: 'Import as draft' }))
+
+    expect(await screen.findByText('expected a curl command')).toBeTruthy()
+    expect(screen.queryByText('导入接口')).toBeNull()
   })
 })

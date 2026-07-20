@@ -183,7 +183,7 @@ export function modelFromBackendRequest(fields: {
     url: fields.request.url ?? '',
     queryParams: (fields.request.query_params ?? []).map((item) => ({ ...item })),
     headers: (fields.request.headers ?? []).map((item) => ({ ...item })),
-    bodyType: fields.request.body_type ?? 'none',
+    bodyType: fields.request.body_type || 'none',
     body: fields.request.body ?? '',
     auth: parseAuth(fields.request.auth_config),
   }

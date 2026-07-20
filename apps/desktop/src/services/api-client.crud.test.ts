@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   CatalogConflictError,
+  CatalogError,
   archiveRequest,
   createRequest,
   discardWorkingCopy,
+  importCurl,
   saveWorkingCopy,
   updateWorkingCopy,
   type BackendWorkingCopy,
@@ -110,5 +112,31 @@ describe('working copy edit semantics', () => {
   it('ignores a 404 when discarding a draft', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })))
     await expect(discardWorkingCopy('wc-1')).resolves.toBeUndefined()
+  })
+})
+
+describe('cURL / raw HTTP import', () => {
+  it('returns the parsed Working Copy draft without saving it', async () => {
+    const imported = { ...draft, api_request_id: undefined, source_type: 'curl_import' }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(imported, 201))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const copy = await importCurl('curl https://api.example.com/items')
+
+    expect(copy.source_type).toBe('curl_import')
+    expect(copy.api_request_id).toBeUndefined()
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toContain('/import/curl')
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ content: 'curl https://api.example.com/items' })
+  })
+
+  it('surfaces the parser error message so the caller can recover', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ error: 'expected a curl command' }, 400)))
+    await expect(importCurl('nonsense')).rejects.toThrow('expected a curl command')
+  })
+
+  it('classifies a network failure as an offline CatalogError', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    await expect(importCurl('curl https://api.example.com')).rejects.toBeInstanceOf(CatalogError)
   })
 })

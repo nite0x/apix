@@ -303,7 +303,7 @@ func (s *HTTPService) importRoutes(r gin.IRouter) {
 			writeBadRequest(c, err)
 			return
 		}
-		request := RequestData{Method: parsed.Method, URL: parsed.URL, Body: parsed.Body}
+		request := RequestData{Method: parsed.Method, URL: parsed.URL, Body: parsed.Body, BodyType: "none"}
 		if parsed.Body != "" {
 			request.BodyType = "json"
 		}

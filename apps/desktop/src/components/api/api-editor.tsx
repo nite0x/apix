@@ -25,12 +25,16 @@ import {
 } from './api-editor-model'
 
 interface Props {
-  mode: 'create' | 'edit'
+  mode: 'create' | 'edit' | 'import'
   collectionId: string
   collectionName: string
   api?: ApiDefinition
+  /** Draft produced by cURL/Raw HTTP import; seeds the form in `import` mode. */
+  importedCopy?: BackendWorkingCopy
+  /** Collections the imported draft can be saved into (import mode only). */
+  collections?: { id: string; name: string }[]
   onCatalogMutation: (mutation: () => Promise<void>) => Promise<void>
-  onSaved: (requestId: string) => void
+  onSaved: (requestId: string, collectionId?: string) => void
   onCancel: () => void
 }
 
@@ -75,27 +79,38 @@ function KeyValueRows({
   )
 }
 
-export function ApiEditor({ mode, collectionId, collectionName, api, onCatalogMutation, onSaved, onCancel }: Props) {
-  const initial = useMemo(() => (mode === 'edit' && api ? modelFromApi(api) : emptyModel()), [mode, api])
+export function ApiEditor({ mode, collectionId, collectionName, api, importedCopy, collections, onCatalogMutation, onSaved, onCancel }: Props) {
+  const initial = useMemo(() => {
+    if (mode === 'edit' && api) return modelFromApi(api)
+    if (mode === 'import' && importedCopy) {
+      return modelFromBackendRequest({ name: importedCopy.name ?? '', request: importedCopy.request })
+    }
+    return emptyModel()
+  }, [mode, api, importedCopy])
   const [model, setModel] = useState<EditorModel>(initial)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [conflict, setConflict] = useState(false)
-  const wcRef = useRef<BackendWorkingCopy | null>(null)
+  const [confirmClose, setConfirmClose] = useState(false)
+  const [importCollectionId, setImportCollectionId] = useState(() => collectionId || collections?.[0]?.id || '')
+  const wcRef = useRef<BackendWorkingCopy | null>(mode === 'import' ? importedCopy ?? null : null)
   const creatingRef = useRef<Promise<BackendWorkingCopy> | null>(null)
 
-  const dirty = mode === 'edit' && api
-    ? hasUnsavedChanges(model, api)
-    : Boolean(
-        model.name.trim()
-        || model.description.trim()
-        || model.url.trim()
-        || model.body.trim()
-        || model.bodyType !== 'none'
-        || model.auth.mode !== 'none'
-        || model.headers.length
-        || model.queryParams.length,
-      )
+  // A fresh import is always unsaved until the user promotes it into the catalog.
+  const dirty = mode === 'import'
+    ? true
+    : mode === 'edit' && api
+      ? hasUnsavedChanges(model, api)
+      : Boolean(
+          model.name.trim()
+          || model.description.trim()
+          || model.url.trim()
+          || model.body.trim()
+          || model.bodyType !== 'none'
+          || model.auth.mode !== 'none'
+          || model.headers.length
+          || model.queryParams.length,
+        )
 
   useEffect(() => () => {
     const draft = wcRef.current
@@ -149,20 +164,48 @@ export function ApiEditor({ mode, collectionId, collectionName, api, onCatalogMu
     return saved.api_request_id ?? api!.id
   }
 
+  async function persistImport(): Promise<{ id: string; collectionId: string }> {
+    const draft = wcRef.current
+    if (!draft) throw new Error('导入草稿已失效，请重新导入')
+    const synced = await updateWorkingCopy(draft, buildRequestData(model))
+    wcRef.current = synced
+    const saved = await saveWorkingCopy(synced.id, {
+      collection_id: importCollectionId,
+      name: model.name.trim(),
+      description: model.description,
+    })
+    await discardWorkingCopy(synced.id).catch(() => undefined)
+    wcRef.current = null
+    return { id: saved.api_request_id ?? '', collectionId: importCollectionId }
+  }
+
   async function handleSave() {
     const invalid = validateModel(model)
     if (invalid) {
       setError(invalid.message)
       return
     }
+    if (mode === 'import' && !importCollectionId) {
+      setError('请选择要保存到的 Collection')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
       let requestId = ''
+      let savedCollectionId: string | undefined
       await onCatalogMutation(async () => {
-        requestId = mode === 'create' ? await persistCreate() : await persistEdit()
+        if (mode === 'create') {
+          requestId = await persistCreate()
+        } else if (mode === 'edit') {
+          requestId = await persistEdit()
+        } else {
+          const result = await persistImport()
+          requestId = result.id
+          savedCollectionId = result.collectionId
+        }
       })
-      onSaved(requestId)
+      onSaved(requestId, savedCollectionId)
     } catch (err) {
       if (err instanceof CatalogConflictError) {
         setConflict(true)
@@ -199,11 +242,20 @@ export function ApiEditor({ mode, collectionId, collectionName, api, onCatalogMu
     setConflict(false)
   }
 
-  function cancelEditor() {
+  function discardDraftAndClose() {
     const draft = wcRef.current
     wcRef.current = null
     if (draft) void discardWorkingCopy(draft.id).catch(() => undefined)
     onCancel()
+  }
+
+  function cancelEditor() {
+    // Closing an unsaved import silently would drop the parsed draft: confirm first.
+    if (mode === 'import' && dirty) {
+      setConfirmClose(true)
+      return
+    }
+    discardDraftAndClose()
   }
 
   function discardChanges() {
@@ -214,21 +266,28 @@ export function ApiEditor({ mode, collectionId, collectionName, api, onCatalogMu
       setModel(modelFromApi(api))
       setConflict(false)
       setError(null)
+    } else if (mode === 'import') {
+      discardDraftAndClose()
     } else {
       cancelEditor()
     }
   }
 
-  const title = mode === 'create' ? '新建接口' : '编辑接口'
-  const saveLabel = saving ? '保存中…' : mode === 'create' ? '创建' : '保存修改'
+  const title = mode === 'create' ? '新建接口' : mode === 'import' ? '导入接口' : '编辑接口'
+  const saveLabel = saving ? '保存中…' : mode === 'create' ? '创建' : mode === 'import' ? '保存到接口库' : '保存修改'
+  const discardLabel = mode === 'edit' ? '丢弃修改' : mode === 'import' ? '丢弃导入' : '清空'
+  const dirtyLabel = mode === 'import' ? '未保存导入' : '未保存修改'
+  const headCollectionName = mode === 'import'
+    ? (collections?.find((item) => item.id === importCollectionId)?.name ?? collectionName)
+    : collectionName
 
   return (
     <div className="api-editor">
       <div className="ed-head">
         <div className="ed-head-main">
           <span className="ed-title">{title}</span>
-          <span className="ed-coll">{collectionName}</span>
-          {dirty && <span className="ed-dirty">未保存修改</span>}
+          <span className="ed-coll">{headCollectionName}</span>
+          {dirty && <span className="ed-dirty">{dirtyLabel}</span>}
         </div>
         <button type="button" className="ed-close" aria-label="关闭编辑器" onClick={cancelEditor} disabled={saving}><IconX size={15} /></button>
       </div>
@@ -245,6 +304,20 @@ export function ApiEditor({ mode, collectionId, collectionName, api, onCatalogMu
       )}
 
       <div className="ed-body">
+        {mode === 'import' && (
+          <label className="ed-field">
+            <span className="ed-lbl">Collection</span>
+            <select
+              className="ed-inp"
+              value={importCollectionId}
+              onChange={(event) => { setImportCollectionId(event.target.value); setError(null) }}
+            >
+              {(collections ?? []).length === 0 && <option value="">无可用 Collection</option>}
+              {(collections ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+        )}
+
         <label className="ed-field">
           <span className="ed-lbl">名称</span>
           <input className="ed-inp" value={model.name} onChange={(event) => patch({ name: event.target.value })} placeholder="接口名称" />
@@ -321,7 +394,7 @@ export function ApiEditor({ mode, collectionId, collectionName, api, onCatalogMu
 
       <div className="ed-foot">
         <button type="button" className="ed-btn ghost" onClick={discardChanges} disabled={saving || !dirty}>
-          {mode === 'edit' ? '丢弃修改' : '清空'}
+          {discardLabel}
         </button>
         <div className="ed-foot-right">
           <button type="button" className="ed-btn" onClick={cancelEditor} disabled={saving}>取消</button>
@@ -330,6 +403,20 @@ export function ApiEditor({ mode, collectionId, collectionName, api, onCatalogMu
           </button>
         </div>
       </div>
+
+      {confirmClose && (
+        <div className="lib-confirm-overlay" role="presentation">
+          <div className="lib-confirm" role="alertdialog" aria-modal="true" aria-label="放弃导入">
+            <div className="lib-confirm-icon"><IconAlertTriangle size={18} /></div>
+            <div className="lib-confirm-title">放弃导入</div>
+            <p className="lib-confirm-body">导入的内容尚未保存，关闭后将被丢弃且不会生成已保存接口。确认放弃？</p>
+            <div className="lib-confirm-acts">
+              <button type="button" className="ed-btn" onClick={() => setConfirmClose(false)}>继续编辑</button>
+              <button type="button" className="ed-btn primary danger" onClick={discardDraftAndClose}>放弃导入</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

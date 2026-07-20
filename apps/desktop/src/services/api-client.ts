@@ -310,10 +310,20 @@ export async function resumeStep(stepId: string, action: 'continue' | 'skip' | '
   }).then(json)
 }
 
-export async function importCurl(content: string): Promise<void> {
-  await fetch(`${API_BASE}/import/curl`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
-  }).then(json)
+/**
+ * Parses pasted cURL / raw HTTP into a Working Copy draft. Import does NOT save:
+ * the returned draft must be reviewed and explicitly saved to become a durable API.
+ * A network failure raises a CatalogError('offline'); an invalid request raises a
+ * CatalogError('error') carrying the parser message so the caller can recover.
+ */
+export async function importCurl(content: string): Promise<BackendWorkingCopy> {
+  try {
+    return await fetch(`${API_BASE}/import/curl`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    }).then(json<BackendWorkingCopy>)
+  } catch (error) {
+    throw classifyFetchError(error)
+  }
 }

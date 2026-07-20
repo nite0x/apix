@@ -11,7 +11,7 @@ import {
   IconX,
 } from '@tabler/icons-react'
 import type { ApiCollectionGroup, ApiDefinition } from '../../data/api-catalog'
-import { archiveRequest, importCurl } from '../../services/api-client'
+import { CatalogError, archiveRequest, importCurl, type BackendWorkingCopy } from '../../services/api-client'
 import type { CatalogLoadState } from '../../store/catalog-store'
 import { CatalogFeedback } from '../catalog/catalog-feedback'
 import { ApiDetail } from './api-detail'
@@ -28,7 +28,9 @@ interface Props {
   onCatalogMutation: (mutation: () => Promise<void>) => Promise<void>
 }
 
-type EditorState = { mode: 'create' | 'edit'; api?: ApiDefinition }
+type EditorState =
+  | { mode: 'create' | 'edit'; api?: ApiDefinition }
+  | { mode: 'import'; importedCopy: BackendWorkingCopy }
 
 function CollectionIcon({ icon }: { icon: ApiCollectionGroup['icon'] }) {
   if (icon === 'lock') return <IconLock size={13} />
@@ -51,7 +53,8 @@ export function ApiLibrary({
   const [query, setQuery] = useState('')
   const [importOpen, setImportOpen] = useState(false)
   const [importContent, setImportContent] = useState('')
-  const [importState, setImportState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle')
+  const [importState, setImportState] = useState<'idle' | 'sending' | 'error'>('idle')
+  const [importError, setImportError] = useState<string | null>(null)
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [archiveTarget, setArchiveTarget] = useState<ApiDefinition | null>(null)
   const [archiveError, setArchiveError] = useState<string | null>(null)
@@ -80,11 +83,23 @@ export function ApiLibrary({
   async function submitImport() {
     if (!importContent.trim()) return
     setImportState('sending')
+    setImportError(null)
     try {
-      await onCatalogMutation(() => importCurl(importContent))
-      setImportState('done')
-    } catch {
+      // Import parses into a Working Copy draft; it never saves on its own.
+      const copy = await importCurl(importContent)
+      setImportState('idle')
+      setImportOpen(false)
+      setImportContent('')
+      setEditor({ mode: 'import', importedCopy: copy })
+    } catch (error) {
       setImportState('error')
+      setImportError(
+        error instanceof CatalogError && error.kind === 'offline'
+          ? '无法连接本地运行时，请确认服务已启动后重试。'
+          : error instanceof Error
+            ? error.message
+            : '无法解析该请求，请检查 cURL 或 Raw HTTP 格式。',
+      )
     }
   }
 
@@ -98,9 +113,10 @@ export function ApiLibrary({
     setEditor({ mode: 'edit', api })
   }
 
-  function handleSaved(requestId: string) {
+  function handleSaved(requestId: string, savedCollectionId?: string) {
     setEditor(null)
-    setApiId(requestId)
+    if (savedCollectionId) setCollectionId(savedCollectionId)
+    if (requestId) setApiId(requestId)
   }
 
   async function confirmArchive() {
@@ -111,7 +127,7 @@ export function ApiLibrary({
       const target = archiveTarget
       await onCatalogMutation(() => archiveRequest(target.id))
       if (apiId === target.id) setApiId(null)
-      if (editor?.api?.id === target.id) setEditor(null)
+      if (editor && editor.mode !== 'import' && editor.api?.id === target.id) setEditor(null)
       setArchiveTarget(null)
     } catch (error) {
       setArchiveError(error instanceof Error ? error.message : 'Archive failed')
@@ -137,12 +153,11 @@ export function ApiLibrary({
 
         {importOpen && (
           <div className="lib-import-bar">
-            <textarea value={importContent} onChange={(event) => { setImportContent(event.target.value); setImportState('idle') }} rows={2} placeholder="Paste curl or raw HTTP request…" />
+            <textarea value={importContent} onChange={(event) => { setImportContent(event.target.value); setImportState('idle'); setImportError(null) }} rows={2} placeholder="Paste curl or raw HTTP request…" />
             <button type="button" onClick={() => void submitImport()} disabled={importState === 'sending' || !importContent.trim()}>
               {importState === 'sending' ? 'Importing…' : 'Import as draft'}
             </button>
-            {importState === 'done' && <span className="lib-import-ok">Imported as a working copy</span>}
-            {importState === 'error' && <span className="lib-import-error">Runtime unavailable or request is invalid</span>}
+            {importState === 'error' && importError && <span className="lib-import-error">{importError}</span>}
           </div>
         )}
 
@@ -154,7 +169,7 @@ export function ApiLibrary({
           onRetry={onRetry}
         />
 
-        {catalog.length > 0 && (
+        {(catalog.length > 0 || editor?.mode === 'import') && (
           <div className="lib-body">
             <div className="col-coll">
               <div className="col-coll-head"><span className="col-hl">Collections</span><button type="button" aria-label="New collection"><IconPlus size={12} /></button></div>
@@ -192,7 +207,19 @@ export function ApiLibrary({
             </div>
 
             <div className="col-det">
-              {editor ? (
+              {editor?.mode === 'import' ? (
+                <ApiEditor
+                  key="import"
+                  mode="import"
+                  collectionId={collection?.id ?? ''}
+                  collectionName={collection?.name ?? ''}
+                  importedCopy={editor.importedCopy}
+                  collections={catalog.map((item) => ({ id: item.id, name: item.name }))}
+                  onCatalogMutation={onCatalogMutation}
+                  onSaved={handleSaved}
+                  onCancel={() => setEditor(null)}
+                />
+              ) : editor ? (
                 <ApiEditor
                   key={editor.mode === 'edit' ? `edit-${editor.api?.id}` : 'create'}
                   mode={editor.mode}
