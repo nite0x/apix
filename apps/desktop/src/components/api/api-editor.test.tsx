@@ -11,6 +11,7 @@ const apiMocks = vi.hoisted(() => ({
   createWorkingCopyForRequest: vi.fn(),
   discardWorkingCopy: vi.fn(),
   getRequest: vi.fn(),
+  getWorkingCopy: vi.fn(),
   saveWorkingCopy: vi.fn(),
   updateWorkingCopy: vi.fn(),
 }))
@@ -254,15 +255,36 @@ describe('ApiEditor import mode', () => {
     expect(onCancel).toHaveBeenCalledOnce()
   })
 
-  it('shows a recoverable conflict when the save hits a 409', async () => {
+  it('refreshes the concurrency token, keeps local edits, and retries after a 409', async () => {
     const { CatalogConflictError } = await import('../../services/api-client')
     const user = userEvent.setup()
-    apiMocks.updateWorkingCopy.mockRejectedValue(new CatalogConflictError('draft changed'))
+    const freshCopy = { ...importedCopy, edit_version: 2, content_hash: 'fresh' }
+    apiMocks.updateWorkingCopy
+      .mockRejectedValueOnce(new CatalogConflictError('draft changed'))
+      .mockResolvedValueOnce({ ...freshCopy, edit_version: 3 })
+    apiMocks.getWorkingCopy.mockResolvedValue(freshCopy)
+    apiMocks.saveWorkingCopy.mockResolvedValue({ ...freshCopy, api_request_id: 'request-new', edit_version: 4 })
+    apiMocks.discardWorkingCopy.mockResolvedValue(undefined)
 
     renderImport()
     await user.type(screen.getByPlaceholderText('接口名称'), 'List users')
+    const url = screen.getByPlaceholderText('https://api.example.com/path')
+    await user.clear(url)
+    await user.type(url, 'https://api.example.com/users?local=1')
     await user.click(screen.getByRole('button', { name: '保存到接口库' }))
 
     expect((await screen.findByRole('alert')).textContent).toContain('已在别处被修改')
+    await user.click(screen.getByRole('button', { name: '保留本地修改' }))
+
+    await waitFor(() => expect(apiMocks.getWorkingCopy).toHaveBeenCalledWith('wc-import'))
+    expect((url as HTMLInputElement).value).toBe('https://api.example.com/users?local=1')
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: '保存到接口库' }))
+    await waitFor(() => expect(apiMocks.updateWorkingCopy).toHaveBeenLastCalledWith(
+      freshCopy,
+      expect.objectContaining({ url: 'https://api.example.com/users?local=1' }),
+    ))
+    expect(apiMocks.saveWorkingCopy).toHaveBeenCalledOnce()
   })
 })

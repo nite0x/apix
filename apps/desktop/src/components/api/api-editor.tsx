@@ -7,6 +7,7 @@ import {
   createWorkingCopyForRequest,
   discardWorkingCopy,
   getRequest,
+  getWorkingCopy,
   saveWorkingCopy,
   updateWorkingCopy,
   type BackendWorkingCopy,
@@ -36,6 +37,7 @@ interface Props {
   onCatalogMutation: (mutation: () => Promise<void>) => Promise<void>
   onSaved: (requestId: string, collectionId?: string) => void
   onCancel: () => void
+  onSavingChange?: (saving: boolean) => void
 }
 
 function KeyValueRows({
@@ -79,7 +81,7 @@ function KeyValueRows({
   )
 }
 
-export function ApiEditor({ mode, collectionId, collectionName, api, importedCopy, collections, onCatalogMutation, onSaved, onCancel }: Props) {
+export function ApiEditor({ mode, collectionId, collectionName, api, importedCopy, collections, onCatalogMutation, onSaved, onCancel, onSavingChange }: Props) {
   const initial = useMemo(() => {
     if (mode === 'edit' && api) return modelFromApi(api)
     if (mode === 'import' && importedCopy) {
@@ -117,6 +119,10 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
     wcRef.current = null
     if (draft) void discardWorkingCopy(draft.id).catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    onSavingChange?.(saving)
+  }, [onSavingChange, saving])
 
   function patch(next: Partial<EditorModel>) {
     setModel((current) => ({ ...current, ...next }))
@@ -218,6 +224,26 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
   }
 
   async function reloadFromServer() {
+    if (mode === 'import') {
+      const draft = wcRef.current
+      if (!draft) {
+        setError('导入草稿已失效，请重新导入')
+        return
+      }
+      setSaving(true)
+      try {
+        const fresh = await getWorkingCopy(draft.id)
+        wcRef.current = fresh
+        setModel(modelFromBackendRequest({ name: fresh.name ?? '', request: fresh.request }))
+        setConflict(false)
+        setError(null)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Reload failed')
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
     if (!api) return
     setSaving(true)
     try {
@@ -237,6 +263,24 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
 
   async function keepLocalCopy() {
     const draft = wcRef.current
+    if (mode === 'import') {
+      if (!draft) {
+        setError('导入草稿已失效，请重新导入')
+        return
+      }
+      setSaving(true)
+      try {
+        // Refresh only the concurrency token; keep the user's current form.
+        wcRef.current = await getWorkingCopy(draft.id)
+        setConflict(false)
+        setError(null)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Reload failed')
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
     wcRef.current = null
     if (draft) await discardWorkingCopy(draft.id).catch(() => undefined)
     setConflict(false)
@@ -295,10 +339,10 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
       {conflict && (
         <div className="ed-conflict" role="alert">
           <IconAlertTriangle size={14} />
-          <span>该接口已在别处被修改。请重新加载最新版本，或保留你的本地修改后再次保存。</span>
+          <span>{mode === 'import' ? '该导入草稿已在别处被修改。请重新加载草稿，或保留本地修改后再次保存。' : '该接口已在别处被修改。请重新加载最新版本，或保留你的本地修改后再次保存。'}</span>
           <div className="ed-conflict-acts">
-            <button type="button" onClick={() => void reloadFromServer()}>重新加载</button>
-            <button type="button" onClick={() => void keepLocalCopy()}>保留本地副本</button>
+            <button type="button" onClick={() => void reloadFromServer()} disabled={saving}>{mode === 'import' ? '重新加载草稿' : '重新加载'}</button>
+            <button type="button" onClick={() => void keepLocalCopy()} disabled={saving}>{mode === 'import' ? '保留本地修改' : '保留本地副本'}</button>
           </div>
         </div>
       )}

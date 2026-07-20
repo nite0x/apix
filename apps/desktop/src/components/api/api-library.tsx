@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconAlertTriangle,
   IconArchive,
@@ -56,6 +56,9 @@ export function ApiLibrary({
   const [importState, setImportState] = useState<'idle' | 'sending' | 'error'>('idle')
   const [importError, setImportError] = useState<string | null>(null)
   const [editor, setEditor] = useState<EditorState | null>(null)
+  const [importSaving, setImportSaving] = useState(false)
+  const [confirmImportExit, setConfirmImportExit] = useState(false)
+  const pendingImportExitRef = useRef<(() => void) | null>(null)
   const [archiveTarget, setArchiveTarget] = useState<ApiDefinition | null>(null)
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [archiving, setArchiving] = useState(false)
@@ -69,15 +72,51 @@ export function ApiLibrary({
   }, [collection, query])
   const selectedApi = catalog.flatMap((item) => item.apis).find((api) => api.id === apiId) ?? null
 
+  const requestImportExit = useCallback((action: () => void) => {
+    if (editor?.mode === 'import') {
+      if (importSaving) return
+      pendingImportExitRef.current = action
+      setConfirmImportExit(true)
+      return
+    }
+    action()
+  }, [editor?.mode, importSaving])
+
+  const handleImportSavingChange = useCallback((value: boolean) => {
+    setImportSaving(value)
+  }, [])
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape' || editor?.mode !== 'import') return
+      // Shell owns the general Escape shortcut. Capture this one first so an
+      // unsaved import always goes through the confirmation flow.
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      if (confirmImportExit) {
+        pendingImportExitRef.current = null
+        setConfirmImportExit(false)
+        return
+      }
+      requestImportExit(onClose)
+    }
+    window.addEventListener('keydown', handleEscape, true)
+    return () => window.removeEventListener('keydown', handleEscape, true)
+  }, [confirmImportExit, editor?.mode, onClose, requestImportExit])
+
   function chooseCollection(id: string) {
-    setEditor(null)
-    setCollectionId(id)
-    setApiId(catalog.find((item) => item.id === id)?.apis[0]?.id ?? null)
+    requestImportExit(() => {
+      setEditor(null)
+      setCollectionId(id)
+      setApiId(catalog.find((item) => item.id === id)?.apis[0]?.id ?? null)
+    })
   }
 
   function chooseApi(id: string) {
-    setEditor(null)
-    setApiId(id)
+    requestImportExit(() => {
+      setEditor(null)
+      setApiId(id)
+    })
   }
 
   async function submitImport() {
@@ -90,6 +129,7 @@ export function ApiLibrary({
       setImportState('idle')
       setImportOpen(false)
       setImportContent('')
+      setImportSaving(false)
       setEditor({ mode: 'import', importedCopy: copy })
     } catch (error) {
       setImportState('error')
@@ -105,15 +145,18 @@ export function ApiLibrary({
 
   function openCreate() {
     if (!collection) return
-    setImportOpen(false)
-    setEditor({ mode: 'create' })
+    requestImportExit(() => {
+      setImportOpen(false)
+      setEditor({ mode: 'create' })
+    })
   }
 
   function openEdit(api: ApiDefinition) {
-    setEditor({ mode: 'edit', api })
+    requestImportExit(() => setEditor({ mode: 'edit', api }))
   }
 
   function handleSaved(requestId: string, savedCollectionId?: string) {
+    setImportSaving(false)
     setEditor(null)
     if (savedCollectionId) setCollectionId(savedCollectionId)
     if (requestId) setApiId(requestId)
@@ -145,10 +188,21 @@ export function ApiLibrary({
             <IconSearch size={12} />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索接口…" />
           </label>
-          <button type="button" className={`lib-hbtn${importOpen ? ' active' : ''}`} onClick={() => setImportOpen((open) => !open)}>
+          <button
+            type="button"
+            className={`lib-hbtn${importOpen ? ' active' : ''}`}
+            onClick={() => {
+              if (editor?.mode === 'import') {
+                requestImportExit(() => { setEditor(null); setImportOpen(true) })
+              } else {
+                setImportOpen((open) => !open)
+              }
+            }}
+            disabled={importSaving}
+          >
             <IconFileImport size={12} /> 导入
           </button>
-          <button type="button" className="lib-close" aria-label="Close API library" onClick={onClose}><IconX size={15} /></button>
+          <button type="button" className="lib-close" aria-label="Close API library" onClick={() => requestImportExit(onClose)} disabled={importSaving}><IconX size={15} /></button>
         </div>
 
         {importOpen && (
@@ -175,7 +229,7 @@ export function ApiLibrary({
               <div className="col-coll-head"><span className="col-hl">Collections</span><button type="button" aria-label="New collection"><IconPlus size={12} /></button></div>
               <div className="coll-list">
                 {catalog.map((item) => (
-                  <button type="button" className={`coll-it${item.id === collection?.id ? ' active' : ''}`} key={item.id} onClick={() => chooseCollection(item.id)}>
+                  <button type="button" className={`coll-it${item.id === collection?.id ? ' active' : ''}`} key={item.id} onClick={() => chooseCollection(item.id)} disabled={importSaving}>
                     <span className={`coll-icon coll-icon-${item.icon}`}><CollectionIcon icon={item.icon} /></span>
                     <span className="coll-info">
                       <span className="coll-nm">{item.name}</span>
@@ -189,12 +243,12 @@ export function ApiLibrary({
             <div className="col-apis">
               <div className="col-apis-head">
                 <span className="col-apis-title">{collection?.name ?? 'APIs'}</span>
-                <button type="button" aria-label="New API" onClick={openCreate} disabled={isPreview}><IconPlus size={12} /></button>
+                <button type="button" aria-label="New API" onClick={openCreate} disabled={isPreview || importSaving}><IconPlus size={12} /></button>
               </div>
               <div className="api-list">
                 {filteredApis.length === 0 && <div className="api-list-empty">No matching APIs</div>}
                 {filteredApis.map((api) => (
-                  <button type="button" className={`api-it${api.id === selectedApi?.id && !editor ? ' active' : ''}`} key={api.id} onClick={() => chooseApi(api.id)}>
+                  <button type="button" className={`api-it${api.id === selectedApi?.id && !editor ? ' active' : ''}`} key={api.id} onClick={() => chooseApi(api.id)} disabled={importSaving}>
                     <span className={`api-m am-${api.method.toLowerCase()}`}>{api.method === 'DELETE' ? 'DEL' : api.method}</span>
                     <span className="api-nm">{api.name}</span>
                     {api.aiUsage && <span className="api-ai" title="Used by AI" />}
@@ -202,7 +256,7 @@ export function ApiLibrary({
                 ))}
               </div>
               <div className="col-apis-footer">
-                <button type="button" className="api-add-btn" onClick={openCreate} disabled={isPreview}><IconPlus size={12} /> 新建接口</button>
+                <button type="button" className="api-add-btn" onClick={openCreate} disabled={isPreview || importSaving}><IconPlus size={12} /> 新建接口</button>
               </div>
             </div>
 
@@ -218,6 +272,7 @@ export function ApiLibrary({
                   onCatalogMutation={onCatalogMutation}
                   onSaved={handleSaved}
                   onCancel={() => setEditor(null)}
+                  onSavingChange={handleImportSavingChange}
                 />
               ) : editor ? (
                 <ApiEditor
@@ -259,6 +314,31 @@ export function ApiLibrary({
                 <button type="button" className="ed-btn" onClick={() => setArchiveTarget(null)} disabled={archiving}>取消</button>
                 <button type="button" className="ed-btn primary danger" onClick={() => void confirmArchive()} disabled={archiving}>
                   {archiving ? '归档中…' : '归档'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {confirmImportExit && (
+          <div className="lib-confirm-overlay" role="presentation">
+            <div className="lib-confirm" role="alertdialog" aria-modal="true" aria-label="放弃导入">
+              <div className="lib-confirm-icon"><IconAlertTriangle size={18} /></div>
+              <div className="lib-confirm-title">放弃导入</div>
+              <p className="lib-confirm-body">导入的内容尚未保存，离开后将被丢弃且不会生成已保存接口。确认放弃？</p>
+              <div className="lib-confirm-acts">
+                <button type="button" className="ed-btn" onClick={() => { pendingImportExitRef.current = null; setConfirmImportExit(false) }}>继续编辑</button>
+                <button
+                  type="button"
+                  className="ed-btn primary danger"
+                  onClick={() => {
+                    const action = pendingImportExitRef.current
+                    pendingImportExitRef.current = null
+                    setConfirmImportExit(false)
+                    action?.()
+                  }}
+                >
+                  放弃导入
                 </button>
               </div>
             </div>

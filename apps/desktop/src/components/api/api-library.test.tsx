@@ -8,6 +8,7 @@ import { ApiLibrary } from './api-library'
 
 const apiMocks = vi.hoisted(() => ({
   archiveRequest: vi.fn(),
+  discardWorkingCopy: vi.fn().mockResolvedValue(undefined),
   importCurl: vi.fn(),
 }))
 
@@ -75,14 +76,14 @@ describe('ApiLibrary archive flow', () => {
 })
 
 describe('ApiLibrary import flow', () => {
-  function renderLibrary() {
+  function renderLibrary(overrides: { onClose?: () => void } = {}) {
     return render(
       <ApiLibrary
         catalog={catalog}
         catalogState="ready"
         catalogError={null}
         isPreview={false}
-        onClose={vi.fn()}
+        onClose={overrides.onClose ?? vi.fn()}
         onJumpToSession={vi.fn()}
         onRetry={vi.fn()}
         onCatalogMutation={vi.fn(async (mutation: () => Promise<void>) => mutation())}
@@ -133,5 +134,39 @@ describe('ApiLibrary import flow', () => {
 
     expect(await screen.findByText('expected a curl command')).toBeTruthy()
     expect(screen.queryByText('导入接口')).toBeNull()
+  })
+
+  it('confirms before the library close path discards an imported draft', async () => {
+    const user = userEvent.setup()
+    const imported = {
+      id: 'wc-import',
+      project_id: 'default',
+      owner_id: 'local',
+      request: { method: 'GET', url: 'https://api.example.com/items', body_type: 'none', body: '' },
+      source_type: 'curl_import',
+      status: 'active',
+      content_hash: 'h',
+      edit_version: 1,
+    }
+    apiMocks.importCurl.mockResolvedValue(imported)
+    apiMocks.discardWorkingCopy.mockResolvedValue(undefined)
+
+    let view: ReturnType<typeof render>
+    const onClose = vi.fn(() => view.unmount())
+    view = renderLibrary({ onClose })
+
+    await user.click(screen.getByRole('button', { name: '导入' }))
+    await user.type(screen.getByPlaceholderText('Paste curl or raw HTTP request…'), 'curl https://api.example.com/items')
+    await user.click(screen.getByRole('button', { name: 'Import as draft' }))
+    await screen.findByText('导入接口')
+
+    await user.click(screen.getByRole('button', { name: 'Close API library' }))
+    const dialog = screen.getByRole('alertdialog', { name: '放弃导入' })
+    expect(onClose).not.toHaveBeenCalled()
+    expect(apiMocks.discardWorkingCopy).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole('button', { name: '放弃导入' }))
+    expect(onClose).toHaveBeenCalledOnce()
+    await waitFor(() => expect(apiMocks.discardWorkingCopy).toHaveBeenCalledWith('wc-import'))
   })
 })

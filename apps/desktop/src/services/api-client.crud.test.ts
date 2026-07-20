@@ -5,6 +5,7 @@ import {
   archiveRequest,
   createRequest,
   discardWorkingCopy,
+  getWorkingCopy,
   importCurl,
   saveWorkingCopy,
   updateWorkingCopy,
@@ -66,6 +67,16 @@ describe('request CRUD client', () => {
 })
 
 describe('working copy edit semantics', () => {
+  it('loads the latest Working Copy for conflict recovery', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ...draft, edit_version: 4 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const copy = await getWorkingCopy('wc-1')
+
+    expect(copy.edit_version).toBe(4)
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/working-copies/wc-1')
+  })
+
   it('raises a CatalogConflictError on a 409 instead of overwriting', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ error: 'working copy changed or not found' }, 409)))
 

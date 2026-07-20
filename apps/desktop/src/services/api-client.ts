@@ -187,6 +187,11 @@ export async function createWorkingCopyForRequest(apiRequestId: string): Promise
   }).then(json<BackendWorkingCopy>)
 }
 
+/** Reloads the latest server version of an existing Working Copy. */
+export async function getWorkingCopy(id: string): Promise<BackendWorkingCopy> {
+  return fetch(`${API_BASE}/working-copies/${encodeURIComponent(id)}`).then(json<BackendWorkingCopy>)
+}
+
 /**
  * Persists the edited RequestData onto a Working Copy using optimistic
  * concurrency. A 409 becomes a CatalogConflictError so newer versions are
