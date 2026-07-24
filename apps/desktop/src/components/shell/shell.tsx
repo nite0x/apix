@@ -3,11 +3,14 @@ import { allApis, type ApiDefinition } from '../../data/api-catalog'
 import { useWebSocket } from '../../hooks/use-websocket'
 import { resumeStep } from '../../services/api-client'
 import { useCatalogStore } from '../../store/catalog-store'
+import { useRuleStore } from '../../store/rule-store'
+import { useRuntimeStatusStore } from '../../store/runtime-status-store'
 import { useSessionStore, type Step } from '../../store/session-store'
 import { ApiDrawer } from '../api/api-drawer'
 import { ApiLibrary } from '../api/api-library'
-import { RequestPicker } from '../request-picker/request-picker'
 import { SessionPanel } from '../right-panel/session-panel'
+import { RulesManager } from '../rules/rules-manager'
+import { RunHistory } from '../runs/run-history'
 import { ApiSearch } from '../search/api-search'
 import { Sidebar } from '../sidebar/sidebar'
 import { Timeline } from '../timeline/timeline'
@@ -17,10 +20,6 @@ interface DrawerState {
   api: ApiDefinition
   source: 'run' | 'library'
   step?: Step
-}
-interface PickerState {
-  mode: 'flow' | 'step'
-  targetStepId?: string
 }
 
 function comparablePath(value?: string) {
@@ -37,7 +36,6 @@ export function Shell() {
   const loadSessions = useSessionStore((s) => s.loadSessions)
   const startNewFlow = useSessionStore((s) => s.startNewFlow)
   const appendManualStep = useSessionStore((s) => s.appendManualStep)
-  const configureManualStep = useSessionStore((s) => s.configureManualStep)
   const resolvePausedStep = useSessionStore((s) => s.resolvePausedStep)
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
 
@@ -48,9 +46,11 @@ export function Shell() {
   const refreshCatalog = useCatalogStore((s) => s.refresh)
   const runCatalogMutation = useCatalogStore((s) => s.runMutation)
 
-  const [overlay, setOverlay] = useState<'library' | 'search' | null>(null)
+  const loadRules = useRuleStore((s) => s.loadRules)
+  const checkHealth = useRuntimeStatusStore((s) => s.checkHealth)
+
+  const [overlay, setOverlay] = useState<'library' | 'search' | 'rules' | 'runs' | null>(null)
   const [drawer, setDrawer] = useState<DrawerState | null>(null)
-  const [picker, setPicker] = useState<PickerState | null>(null)
   const [panelTab, setPanelTab] = useState<'session' | 'rules'>('session')
 
   useEffect(() => {
@@ -61,11 +61,20 @@ export function Shell() {
     void refreshCatalog()
   }, [refreshCatalog])
 
+  useEffect(() => {
+    // One-time startup connectivity probe and rule load (drives the sidebar count).
+    void checkHealth()
+    void loadRules()
+  }, [checkHealth, loadRules])
+
   const closeLayers = useCallback(() => {
     setOverlay(null)
     setDrawer(null)
-    setPicker(null)
   }, [])
+
+  const addBlankStep = useCallback(() => {
+    if (activeSession) appendManualStep(activeSession.id)
+  }, [activeSession, appendManualStep])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -75,19 +84,18 @@ export function Shell() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         setDrawer(null)
-        setPicker(null)
         setOverlay('search')
       }
       if (!isTyping && event.key.toLowerCase() === 'n' && activeSession) {
         event.preventDefault()
         setOverlay(null)
         setDrawer(null)
-        setPicker({ mode: 'step' })
+        addBlankStep()
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeSession, closeLayers])
+  }, [activeSession, closeLayers, addBlankStep])
 
   const flatApis = useMemo(() => allApis(catalog), [catalog])
 
@@ -102,20 +110,27 @@ export function Shell() {
     const api = findApiForStep(step)
     if (!api) return
     setOverlay(null)
-    setPicker(null)
     setDrawer({ api, source: 'run', step })
   }
 
   function openLibrary() {
     setDrawer(null)
-    setPicker(null)
     setOverlay('library')
   }
 
   function openSearch() {
     setDrawer(null)
-    setPicker(null)
     setOverlay('search')
+  }
+
+  function openRules() {
+    setDrawer(null)
+    setOverlay('rules')
+  }
+
+  function openRunHistory() {
+    setDrawer(null)
+    setOverlay('runs')
   }
 
   function selectSearchApi(api: ApiDefinition) {
@@ -139,19 +154,6 @@ export function Shell() {
     setPanelTab('session')
   }
 
-  function handlePickerSelection(selection: { method: string; url: string; api?: ApiDefinition }) {
-    if (!activeSession && picker?.mode === 'step') return
-    if (picker?.mode === 'flow') {
-      const sessionId = activeSession?.status === 'draft' ? activeSession.id : startNewFlow()
-      const session = useSessionStore.getState().sessions.find((item) => item.id === sessionId)
-      const stepId = picker.targetStepId ?? session?.steps[0]?.id
-      if (stepId) configureManualStep(sessionId, stepId, { method: selection.method, url: selection.url, apiRequestId: selection.api?.id })
-    } else if (activeSession) {
-      appendManualStep(activeSession.id, { method: selection.method, url: selection.url, apiRequestId: selection.api?.id })
-    }
-    setPicker(null)
-  }
-
   function reviewCurrentStep() {
     const paused = activeSession?.steps.find((step) => step.status === 'paused')
     if (paused) document.getElementById(`step-${paused.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -164,9 +166,17 @@ export function Shell() {
 
   return (
     <div className="app">
-      <Sidebar onNewFlow={startFlow} onOpenRules={() => setPanelTab('rules')} onOpenVariables={() => setPanelTab('session')} />
+      <Sidebar onNewFlow={startFlow} onOpenRules={openRules} onOpenVariables={() => setPanelTab('session')} onOpenRunHistory={openRunHistory} />
       <main className="main" id="main">
-        <Topbar session={activeSession} onReview={reviewCurrentStep} onStop={stopCurrentStep} onSearch={openSearch} onLibrary={openLibrary} />
+        <Topbar
+          session={activeSession}
+          onReview={reviewCurrentStep}
+          onStop={stopCurrentStep}
+          onSearch={openSearch}
+          onLibrary={openLibrary}
+          onRunHistory={openRunHistory}
+          onRetryRuntime={() => void checkHealth()}
+        />
         <div className="tl-wrap">
           {loadState === 'loading' && !activeSession ? (
             <div className="tl-empty">Loading sessions...</div>
@@ -174,8 +184,7 @@ export function Shell() {
             <Timeline
               session={activeSession}
               onOpenApi={openStepApi}
-              onAddStep={() => setPicker({ mode: 'step' })}
-              onChooseDraftApi={(_sessionId, stepId) => setPicker({ mode: 'flow', targetStepId: stepId })}
+              onAddStep={addBlankStep}
               onResolvePaused={(action, step, modifiedRequest) => void resolveStep(action, step, modifiedRequest)}
             />
           ) : loadState === 'error' ? (
@@ -183,7 +192,7 @@ export function Shell() {
           ) : (
             <div className="tl-empty">No sessions yet</div>
           )}
-          <SessionPanel session={activeSession} activeTab={panelTab} onTabChange={setPanelTab} />
+          <SessionPanel session={activeSession} activeTab={panelTab} onTabChange={setPanelTab} onManageRules={openRules} />
         </div>
 
         {overlay === 'search' && (
@@ -209,19 +218,9 @@ export function Shell() {
             onCatalogMutation={runCatalogMutation}
           />
         )}
+        {overlay === 'rules' && <RulesManager onClose={() => setOverlay(null)} />}
+        {overlay === 'runs' && <RunHistory onClose={() => setOverlay(null)} />}
         {drawer && <ApiDrawer {...drawer} onClose={() => setDrawer(null)} onJumpToSession={() => setDrawer(null)} />}
-        {picker && (
-          <RequestPicker
-            mode={picker.mode}
-            catalog={catalog}
-            catalogState={catalogState}
-            catalogError={catalogError}
-            isPreview={isPreviewCatalog}
-            onRetry={() => void refreshCatalog()}
-            onClose={() => setPicker(null)}
-            onSelect={handlePickerSelection}
-          />
-        )}
       </main>
     </div>
   )

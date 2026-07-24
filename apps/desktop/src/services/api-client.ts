@@ -104,6 +104,17 @@ async function json<T>(response: Response): Promise<T> {
   return data
 }
 
+/**
+ * Shared DELETE/idempotent-mutation helper. A 404 is treated as success when
+ * `notFoundOk` is set so archiving something already gone never fails the UI.
+ */
+async function expectNoContent(response: Response, notFoundOk: boolean, label: string): Promise<void> {
+  if (response.ok) return
+  if (notFoundOk && response.status === 404) return
+  const data = await response.json().catch(() => ({})) as { error?: string }
+  throw new Error(data.error ?? `${label} (${response.status})`)
+}
+
 function methodOf(value: string): ApiMethod {
   const upper = value.toUpperCase()
   return upper === 'POST' || upper === 'PUT' || upper === 'PATCH' || upper === 'DELETE' || upper === 'HEAD' || upper === 'OPTIONS'
@@ -330,5 +341,174 @@ export async function importCurl(content: string): Promise<BackendWorkingCopy> {
     }).then(json<BackendWorkingCopy>)
   } catch (error) {
     throw classifyFetchError(error)
+  }
+}
+
+// ── Collections ──────────────────────────────────────────────────────────
+
+export interface CreateCollectionInput {
+  name: string
+  description?: string
+  project_id?: string
+  parent_id?: string | null
+}
+
+export interface UpdateCollectionInput {
+  name: string
+  description?: string
+  parent_id?: string | null
+  sort_order?: number
+}
+
+/** Creates a Collection. The runtime fills project_id/status/sort defaults. */
+export async function createCollection(input: CreateCollectionInput): Promise<BackendCollection> {
+  return fetch(`${API_BASE}/collections`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }).then(json<BackendCollection>)
+}
+
+/** Renames or edits a Collection. The full name is required by the runtime. */
+export async function updateCollection(id: string, input: UpdateCollectionInput): Promise<BackendCollection> {
+  return fetch(`${API_BASE}/collections/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }).then(json<BackendCollection>)
+}
+
+/** Archives a Collection. A 404 is treated as success (already gone). */
+export async function archiveCollection(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/collections/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  await expectNoContent(response, true, 'Archive failed')
+}
+
+// ── Rules ────────────────────────────────────────────────────────────────
+
+export type RuleTrigger = 'before' | 'after'
+
+export interface RuleMatch {
+  method?: string
+  url_pattern?: string
+  env?: string
+  status_range?: string
+}
+
+export interface RuntimeRule {
+  id: string
+  name: string
+  enabled: boolean
+  trigger: RuleTrigger
+  match: RuleMatch
+  action: 'pause'
+}
+
+/** Loads the full Rule list. Offline failures raise a CatalogError('offline'). */
+export async function getRules(): Promise<RuntimeRule[]> {
+  try {
+    const rules = await fetch(`${API_BASE}/rules`).then(json<RuntimeRule[] | null>)
+    return rules ?? []
+  } catch (error) {
+    throw classifyFetchError(error)
+  }
+}
+
+/**
+ * Persists the complete Rule array. PUT is a full overwrite: callers must send
+ * every rule they want to keep, not a single-rule patch.
+ */
+export async function updateRules(rules: RuntimeRule[]): Promise<void> {
+  try {
+    const response = await fetch(`${API_BASE}/rules`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rules),
+    })
+    await json<{ ok: boolean }>(response)
+  } catch (error) {
+    throw classifyFetchError(error)
+  }
+}
+
+// ── Run history ────────────────────────────────────────────────────────────
+
+export interface BackendRun {
+  id: string
+  project_id: string
+  api_request_id?: string | null
+  working_copy_id?: string | null
+  environment_id?: string | null
+  session_id?: string
+  step_id?: string
+  trigger_type: string
+  status: string
+  request_snapshot: RequestData
+  response_status?: number
+  response_headers?: unknown
+  response_body?: unknown
+  response_size?: number
+  response_truncated: boolean
+  duration_ms?: number
+  error_code?: string
+  error_message?: string
+  is_pinned: boolean
+  started_at: string
+  finished_at?: string
+  expires_at?: string
+}
+
+export interface ListRunsInput {
+  projectId?: string
+  limit?: number
+}
+
+/** Lists persisted runs, newest first. Offline failures raise a CatalogError. */
+export async function listRuns({ projectId = 'default', limit }: ListRunsInput = {}): Promise<BackendRun[]> {
+  try {
+    const params = new URLSearchParams({ project_id: projectId })
+    if (limit != null) params.set('limit', String(limit))
+    const runs = await fetch(`${API_BASE}/runs?${params.toString()}`).then(json<BackendRun[] | null>)
+    return runs ?? []
+  } catch (error) {
+    throw classifyFetchError(error)
+  }
+}
+
+export async function getRun(id: string): Promise<BackendRun> {
+  try {
+    return await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}`).then(json<BackendRun>)
+  } catch (error) {
+    throw classifyFetchError(error)
+  }
+}
+
+/** Pins or unpins a run. A 404 surfaces so the caller can roll back optimistic state. */
+export async function setRunPinned(id: string, pinned: boolean): Promise<void> {
+  const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/pin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pinned }),
+  })
+  await expectNoContent(response, false, 'Pin failed')
+}
+
+/** Deletes a run. A 404 is treated as success (already gone). */
+export async function deleteRun(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  await expectNoContent(response, true, 'Delete failed')
+}
+
+// ── Runtime health ───────────────────────────────────────────────────────
+
+export const RUNTIME_BASE = 'http://127.0.0.1:4317'
+
+/** Probes the runtime health endpoint. Returns true on any 2xx response. */
+export async function checkRuntimeHealth(signal?: AbortSignal): Promise<boolean> {
+  try {
+    const response = await fetch(`${RUNTIME_BASE}/health`, { signal })
+    return response.ok
+  } catch {
+    return false
   }
 }

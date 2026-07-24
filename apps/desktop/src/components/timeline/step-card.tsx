@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { IconArrowDownLeft, IconArrowUpRight, IconChevronDown, IconInfoCircle, IconShieldCheck } from '@tabler/icons-react'
+import { IconArrowDownLeft, IconArrowUpRight, IconChevronDown, IconInfoCircle, IconShieldCheck, IconTrash } from '@tabler/icons-react'
 import type { Step } from '../../store/session-store'
 import { ManualForm } from './manual-form'
 
@@ -10,6 +10,7 @@ interface Props {
   muted?: boolean
   current?: boolean
   onOpenApi?: (step: Step) => void
+  onDelete?: () => void
   onResolvePaused?: (action: 'continue' | 'skip' | 'stop', step: Step, modifiedRequest?: string) => void
 }
 
@@ -24,7 +25,7 @@ function StatusCode({ code }: { code: number }) {
   return <span className={cls}>{code}</span>
 }
 
-export function StepCard({ step, sessionId, defaultOpen = false, muted = false, current = false, onOpenApi, onResolvePaused }: Props) {
+export function StepCard({ step, sessionId, defaultOpen = false, muted = false, current = false, onOpenApi, onDelete, onResolvePaused }: Props) {
   const [open, setOpen] = useState(defaultOpen || step.status === 'error' || step.status === 'paused')
   const [editingRequest, setEditingRequest] = useState(false)
   const [editedRequest, setEditedRequest] = useState(step.requestBody ?? '')
@@ -94,6 +95,20 @@ export function StepCard({ step, sessionId, defaultOpen = false, muted = false, 
               {step.status === 'running' && <span className="ct">···</span>}
               {step.statusCode != null && <StatusCode code={step.statusCode} />}
               {step.durationMs != null && <span className="ct">{step.durationMs}ms</span>}
+              {onDelete && (
+                <button
+                  type="button"
+                  className="step-delete"
+                  title="Delete request step"
+                  aria-label="Delete request step"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onDelete()
+                  }}
+                >
+                  <IconTrash size={12} />
+                </button>
+              )}
               <IconChevronDown size={13} className={`chev${open ? ' open' : ''}`} />
             </div>
           </div>

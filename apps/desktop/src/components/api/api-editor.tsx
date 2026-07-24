@@ -32,8 +32,10 @@ interface Props {
   api?: ApiDefinition
   /** Draft produced by cURL/Raw HTTP import; seeds the form in `import` mode. */
   importedCopy?: BackendWorkingCopy
-  /** Collections the imported draft can be saved into (import mode only). */
+  /** Collections a draft can be saved into (import mode, or create with a picker). */
   collections?: { id: string; name: string }[]
+  /** Creates a collection inline and returns it, so an API can be saved even with none. */
+  onCreateCollection?: (name: string) => Promise<{ id: string; name: string }>
   onCatalogMutation: (mutation: () => Promise<void>) => Promise<void>
   onSaved: (requestId: string, collectionId?: string) => void
   onCancel: () => void
@@ -81,7 +83,7 @@ function KeyValueRows({
   )
 }
 
-export function ApiEditor({ mode, collectionId, collectionName, api, importedCopy, collections, onCatalogMutation, onSaved, onCancel, onSavingChange }: Props) {
+export function ApiEditor({ mode, collectionId, collectionName, api, importedCopy, collections, onCreateCollection, onCatalogMutation, onSaved, onCancel, onSavingChange }: Props) {
   const initial = useMemo(() => {
     if (mode === 'edit' && api) return modelFromApi(api)
     if (mode === 'import' && importedCopy) {
@@ -94,7 +96,13 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
   const [error, setError] = useState<string | null>(null)
   const [conflict, setConflict] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
-  const [importCollectionId, setImportCollectionId] = useState(() => collectionId || collections?.[0]?.id || '')
+  const [targetCollectionId, setTargetCollectionId] = useState(() => collectionId || collections?.[0]?.id || '')
+  // Inline collection creation, so an API can be saved even when none exist yet.
+  const [newCollectionName, setNewCollectionName] = useState('')
+  const [creatingCollection, setCreatingCollection] = useState(false)
+  const [collectionError, setCollectionError] = useState<string | null>(null)
+  // A collection picker is shown for imports and for create mode when a list is provided.
+  const showCollectionSelect = mode === 'import' || (mode === 'create' && collections != null)
   const wcRef = useRef<BackendWorkingCopy | null>(mode === 'import' ? importedCopy ?? null : null)
   const creatingRef = useRef<Promise<BackendWorkingCopy> | null>(null)
 
@@ -138,9 +146,11 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
     return creatingRef.current
   }
 
+  const effectiveCollectionId = showCollectionSelect ? targetCollectionId : collectionId
+
   async function persistCreate(): Promise<string> {
     const created = await createRequest({
-      collection_id: collectionId,
+      collection_id: effectiveCollectionId,
       name: model.name.trim(),
       description: model.description.trim() || undefined,
       request: buildRequestData(model),
@@ -176,13 +186,13 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
     const synced = await updateWorkingCopy(draft, buildRequestData(model))
     wcRef.current = synced
     const saved = await saveWorkingCopy(synced.id, {
-      collection_id: importCollectionId,
+      collection_id: targetCollectionId,
       name: model.name.trim(),
       description: model.description,
     })
     await discardWorkingCopy(synced.id).catch(() => undefined)
     wcRef.current = null
-    return { id: saved.api_request_id ?? '', collectionId: importCollectionId }
+    return { id: saved.api_request_id ?? '', collectionId: targetCollectionId }
   }
 
   async function handleSave() {
@@ -191,8 +201,8 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
       setError(invalid.message)
       return
     }
-    if (mode === 'import' && !importCollectionId) {
-      setError('请选择要保存到的 Collection')
+    if (showCollectionSelect && !targetCollectionId) {
+      setError('请选择或新建要保存到的 Collection')
       return
     }
     setSaving(true)
@@ -203,6 +213,7 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
       await onCatalogMutation(async () => {
         if (mode === 'create') {
           requestId = await persistCreate()
+          if (showCollectionSelect) savedCollectionId = effectiveCollectionId
         } else if (mode === 'edit') {
           requestId = await persistEdit()
         } else {
@@ -220,6 +231,23 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
       }
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleCreateCollection() {
+    const name = newCollectionName.trim()
+    if (!name || !onCreateCollection) return
+    setCreatingCollection(true)
+    setCollectionError(null)
+    try {
+      const created = await onCreateCollection(name)
+      setTargetCollectionId(created.id)
+      setNewCollectionName('')
+      setError(null)
+    } catch (err) {
+      setCollectionError(err instanceof Error ? err.message : '新建 Collection 失败')
+    } finally {
+      setCreatingCollection(false)
     }
   }
 
@@ -321,8 +349,8 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
   const saveLabel = saving ? '保存中…' : mode === 'create' ? '创建' : mode === 'import' ? '保存到接口库' : '保存修改'
   const discardLabel = mode === 'edit' ? '丢弃修改' : mode === 'import' ? '丢弃导入' : '清空'
   const dirtyLabel = mode === 'import' ? '未保存导入' : '未保存修改'
-  const headCollectionName = mode === 'import'
-    ? (collections?.find((item) => item.id === importCollectionId)?.name ?? collectionName)
+  const headCollectionName = showCollectionSelect
+    ? (collections?.find((item) => item.id === targetCollectionId)?.name ?? collectionName)
     : collectionName
 
   return (
@@ -348,18 +376,41 @@ export function ApiEditor({ mode, collectionId, collectionName, api, importedCop
       )}
 
       <div className="ed-body">
-        {mode === 'import' && (
-          <label className="ed-field">
+        {showCollectionSelect && (
+          <div className="ed-field">
             <span className="ed-lbl">Collection</span>
-            <select
-              className="ed-inp"
-              value={importCollectionId}
-              onChange={(event) => { setImportCollectionId(event.target.value); setError(null) }}
-            >
-              {(collections ?? []).length === 0 && <option value="">无可用 Collection</option>}
-              {(collections ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </label>
+            {(collections ?? []).length > 0 && (
+              <select
+                className="ed-inp"
+                aria-label="选择 Collection"
+                value={targetCollectionId}
+                onChange={(event) => { setTargetCollectionId(event.target.value); setError(null) }}
+              >
+                {!targetCollectionId && <option value="">请选择 Collection</option>}
+                {(collections ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            )}
+            {onCreateCollection && (
+              <div className="ed-urlrow">
+                <input
+                  className="ed-inp ed-url"
+                  value={newCollectionName}
+                  placeholder={(collections ?? []).length === 0 ? '新建一个 Collection…' : '或新建 Collection…'}
+                  aria-label="新建 Collection 名称"
+                  onChange={(event) => { setNewCollectionName(event.target.value); setCollectionError(null) }}
+                />
+                <button
+                  type="button"
+                  className="ed-btn"
+                  onClick={() => void handleCreateCollection()}
+                  disabled={creatingCollection || !newCollectionName.trim()}
+                >
+                  {creatingCollection ? '创建中…' : '新建'}
+                </button>
+              </div>
+            )}
+            {collectionError && <div className="ed-error" style={{ padding: 0, border: 0, background: 'transparent' }}>{collectionError}</div>}
+          </div>
         )}
 
         <label className="ed-field">

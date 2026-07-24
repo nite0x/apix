@@ -51,13 +51,15 @@ interface Props {
 export function ManualForm({ sessionId, stepId }: Props) {
   const initialStep = useSessionStore((state) => state.sessions.find((session) => session.id === sessionId)?.steps.find((step) => step.id === stepId))
   const [method, setMethod] = useState(initialStep?.method ?? 'GET')
-  const [url, setUrl] = useState(initialStep?.url ?? 'http://127.0.0.1:4317/health')
+  const [url, setUrl] = useState(initialStep?.url ?? '')
   const [body, setBody] = useState('{\n  "email": "admin@example.com",\n  "password": "secret123"\n}')
   const [headersText, setHeadersText] = useState('')
   const [workingCopy, setWorkingCopy] = useState<WorkingCopy | null>(null)
   const workingCopyRef = useRef<WorkingCopy | null>(null)
   const creatingRef = useRef<Promise<WorkingCopy> | null>(null)
   const syncQueueRef = useRef<Promise<void>>(Promise.resolve())
+  // Flips to true after the first field change so autosave skips the mount render.
+  const editedRef = useRef(false)
   const [saveState, setSaveState] = useState<'unsaved' | 'saved' | 'modified' | 'saving' | 'error'>('unsaved')
   const [importing, setImporting] = useState(false)
   const [importMessage, setImportMessage] = useState<string | null>(null)
@@ -128,8 +130,10 @@ export function ManualForm({ sessionId, stepId }: Props) {
   }
 
   useEffect(() => {
+    // Skip the initial mount so merely opening the form with default values
+    // doesn't create an empty draft; the first user edit seeds one.
+    if (!editedRef.current) { editedRef.current = true; return }
     const timer = window.setTimeout(() => {
-      if (!workingCopyRef.current) return
       void syncWorkingCopy().catch(() => setSaveState('error'))
     }, 500)
     return () => window.clearTimeout(timer)
@@ -244,22 +248,34 @@ export function ManualForm({ sessionId, stepId }: Props) {
     }
   }
 
-  const saveLabel = saveState === 'saved' ? 'Saved' : saveState === 'modified' ? 'Unsaved changes' : saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : 'Unsaved'
+  const isFormalAPI = Boolean(workingCopy?.api_request_id)
+  const saveButtonLabel = saveState === 'saving'
+    ? 'Saving…'
+    : saveState === 'error'
+      ? 'Retry save'
+      : isFormalAPI
+        ? saveState === 'saved' ? 'Saved' : 'Save changes'
+        : 'Draft · Save API'
+  const saveButtonTitle = isFormalAPI
+    ? saveState === 'saved' ? 'This API is up to date' : 'Save these changes to the formal API'
+    : 'Draft changes are saved automatically. Click to save as a formal API.'
 
   return (
     <div className="mr-wrap">
-      <div className="mr-state-row">
-        <span className={`mr-save-state ${saveState}`}>{saveLabel}</span>
-        <button className="mr-save" onClick={() => void saveAPI()} disabled={sending || saveState === 'saving' || saveState === 'saved'}>
-          <IconDeviceFloppy size={12} /> {workingCopy?.api_request_id ? 'Save changes' : 'Save API'}
-        </button>
-      </div>
       <div className="mr-urlrow">
         <select className="mr-sel" value={method} onChange={(e) => { setMethod(e.target.value); setSaveState(workingCopy?.api_request_id ? 'modified' : 'unsaved') }} disabled={sending}>
           {['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'].map((item) => <option key={item}>{item}</option>)}
         </select>
         <input className="mr-inp" value={url} onChange={(e) => { setUrl(e.target.value); setImportMessage(null); setSaveState(workingCopy?.api_request_id ? 'modified' : 'unsaved') }}
           onPaste={handleURLPaste} disabled={sending || importing} placeholder={importing ? 'Parsing pasted request…' : 'URL — or paste curl / raw HTTP'} />
+        <button
+          className={`mr-save ${isFormalAPI ? 'formal' : 'draft'} ${saveState}`}
+          title={saveButtonTitle}
+          onClick={() => void saveAPI()}
+          disabled={sending || saveState === 'saving' || (isFormalAPI && saveState === 'saved')}
+        >
+          <IconDeviceFloppy size={12} /> {saveButtonLabel}
+        </button>
       </div>
       {importMessage && <div className={`mr-import-msg${importMessage.startsWith('Imported') ? ' ok' : ' err'}`}>{importMessage}</div>}
       <textarea className="mr-ta mr-headers" rows={2} value={headersText} onChange={(e) => { setHeadersText(e.target.value); setSaveState(workingCopy?.api_request_id ? 'modified' : 'unsaved') }}

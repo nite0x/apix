@@ -1,26 +1,28 @@
-import { useEffect, useState } from 'react'
-import { IconShieldCheck } from '@tabler/icons-react'
+import { useEffect } from 'react'
+import { IconExternalLink, IconShieldCheck } from '@tabler/icons-react'
 import type { Session } from '../../store/session-store'
+import { rulesAreDirty, useRuleStore } from '../../store/rule-store'
 
 interface Props {
   session: Session | null
   activeTab: 'session' | 'rules'
   onTabChange: (tab: 'session' | 'rules') => void
+  onManageRules: () => void
 }
-const baseRules = [
-  { id: 'r-delete', label: 'Pause before DELETE', enabled: true },
-  { id: 'r-4xx', label: 'Pause if response is 4xx', enabled: false },
-]
 
-export function SessionPanel({ session, activeTab, onTabChange }: Props) {
-  const [rules, setRules] = useState(baseRules)
+export function SessionPanel({ session, activeTab, onTabChange, onManageRules }: Props) {
+  const rules = useRuleStore((s) => s.rules)
+  const savedRules = useRuleStore((s) => s.savedRules)
+  const loadState = useRuleStore((s) => s.loadState)
+  const saveState = useRuleStore((s) => s.saveState)
+  const loadRules = useRuleStore((s) => s.loadRules)
+  const toggleRule = useRuleStore((s) => s.toggleRule)
+  const saveRules = useRuleStore((s) => s.saveRules)
+  const dirty = rulesAreDirty(rules, savedRules)
+
   useEffect(() => {
-    if (session?.matchedRule && !rules.some((rule) => rule.id === session.matchedRule?.id)) {
-      setRules((current) => [{ id: session.matchedRule!.id, label: session.matchedRule!.name, enabled: true }, ...current])
-    }
-    // Rules are kept as local UI state until the editing API is expanded.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.matchedRule?.id])
+    if (loadState === 'idle') void loadRules()
+  }, [loadState, loadRules])
 
   if (!session) return <aside className="rp"><div className="rp-body" /></aside>
 
@@ -74,18 +76,30 @@ export function SessionPanel({ session, activeTab, onTabChange }: Props) {
         ) : (
           <>
             <div className="rs"><div className="rl">Pause rules</div></div>
+            {loadState === 'loading' && rules.length === 0 && <div className="rsub">加载规则中…</div>}
+            {loadState === 'error' && rules.length === 0 && <div className="rsub">加载规则失败，请在管理面板重试</div>}
+            {loadState !== 'loading' && rules.length === 0 && <div className="rsub">还没有任何 Pause Rule</div>}
             {rules.map((rule) => {
               const triggered = session.matchedRule?.id === rule.id
               return (
                 <div className={`panel-rule${triggered ? ' triggered' : ''}`} key={rule.id}>
-                  <button type="button" role="switch" aria-checked={rule.enabled} aria-label={rule.label} className={`rrtog ${rule.enabled ? 'on' : 'off'}`} onClick={() => setRules((current) => current.map((item) => item.id === rule.id ? { ...item, enabled: !item.enabled } : item))}><span className="rrtog-k" /></button>
+                  <button type="button" role="switch" aria-checked={rule.enabled} aria-label={rule.name || '未命名规则'} className={`rrtog ${rule.enabled ? 'on' : 'off'}`} onClick={() => toggleRule(rule.id)}><span className="rrtog-k" /></button>
                   <IconShieldCheck size={13} />
-                  <span>{rule.label}</span>
+                  <span>{rule.name || '未命名规则'}</span>
                   {triggered && <span className="rr-b rrb-tri">now</span>}
                 </div>
               )
             })}
-            <button type="button" className="add-il">+ Add rule</button>
+            {dirty && (
+              <div className="panel-rule-save">
+                <span className="rsub">本地改动尚未保存到 Runtime</span>
+                <button type="button" className="ed-btn primary" onClick={() => void saveRules()} disabled={saveState === 'saving'}>
+                  {saveState === 'saving' ? '保存中…' : '保存更改'}
+                </button>
+              </div>
+            )}
+            {saveState === 'saved' && !dirty && <div className="rsub" role="status">已保存到 Runtime</div>}
+            <button type="button" className="add-il" onClick={onManageRules}><IconExternalLink size={12} /> 管理规则</button>
           </>
         )}
       </div>

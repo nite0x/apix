@@ -6,9 +6,16 @@ import {
   type BackendSession,
   type BackendStep,
 } from '../store/session-store'
+import { useCatalogStore } from '../store/catalog-store'
+import { useRunHistoryStore } from '../store/run-history-store'
+import { useRuntimeStatusStore } from '../store/runtime-status-store'
 
 const API_BASE = 'http://127.0.0.1:4317/api'
 const WS_URL = 'ws://127.0.0.1:4317/ws/logs'
+
+const RECONNECT_BASE_MS = 1000
+const RECONNECT_MAX_MS = 30000
+const RUN_REFRESH_DEBOUNCE_MS = 400
 
 interface RuntimeEvent {
   type: string
@@ -46,18 +53,57 @@ async function hydrateRun(sessionId: string, stepId: string, runId: string) {
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const attemptsRef = useRef(0)
+  const runRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     let disposed = false
 
+    // Coalesce run-history refreshes so a burst of events triggers one reload,
+    // and only when the history has actually been opened at least once.
+    function scheduleRunRefresh() {
+      if (runRefreshTimerRef.current) return
+      runRefreshTimerRef.current = setTimeout(() => {
+        runRefreshTimerRef.current = null
+        if (!disposed) useRunHistoryStore.getState().refreshIfLoaded()
+      }, RUN_REFRESH_DEBOUNCE_MS)
+    }
+
+    // After the socket (re)connects, resync the data that may have changed while
+    // it was down. The stores each guard against stale/duplicate responses.
+    function resyncOnOpen() {
+      void useSessionStore.getState().loadSessions()
+      void useCatalogStore.getState().refresh()
+      void useRuntimeStatusStore.getState().checkHealth()
+      useRunHistoryStore.getState().refreshIfLoaded()
+    }
+
+    function scheduleReconnect() {
+      if (disposed || timerRef.current) return
+      const delay = Math.min(RECONNECT_BASE_MS * 2 ** attemptsRef.current, RECONNECT_MAX_MS)
+      attemptsRef.current += 1
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null
+        connect()
+      }, delay)
+    }
+
     function connect() {
       if (disposed) return
+      // Never create a second parallel socket.
+      if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return
       try {
         const ws = new WebSocket(WS_URL)
         wsRef.current = ws
 
-        ws.onopen = () => useSessionStore.getState().setWsStatus('connected')
+        ws.onopen = () => {
+          if (disposed) { ws.close(); return }
+          attemptsRef.current = 0
+          useSessionStore.getState().setWsStatus('connected')
+          resyncOnOpen()
+        }
         ws.onmessage = (event) => {
+          if (disposed) return
           try {
             const msg = JSON.parse(event.data as string) as RuntimeEvent
             const store = useSessionStore.getState()
@@ -74,9 +120,11 @@ export function useWebSocket() {
                   status: 'done',
                   summary: msg.payload?.summary as string | undefined,
                 })
+                scheduleRunRefresh()
                 break
               case 'session:error':
                 store.updateSession(msg.session_id, { status: 'failed' })
+                scheduleRunRefresh()
                 break
               case 'session:stopped':
                 store.updateSession(msg.session_id, { status: 'stopped' })
@@ -132,6 +180,7 @@ export function useWebSocket() {
                 if (msg.type === 'step:done' && runId) {
                   void hydrateRun(msg.session_id, msg.step_id, runId)
                 }
+                scheduleRunRefresh()
                 break
               }
             }
@@ -141,20 +190,30 @@ export function useWebSocket() {
         }
 
         ws.onclose = () => {
+          if (wsRef.current === ws) wsRef.current = null
+          if (disposed) return
           useSessionStore.getState().setWsStatus('disconnected')
-          if (!disposed) timerRef.current = setTimeout(connect, 3000)
+          // A dropped socket means realtime is down; refresh the HTTP health signal.
+          void useRuntimeStatusStore.getState().checkHealth()
+          scheduleReconnect()
         }
         ws.onerror = () => ws.close()
       } catch {
-        timerRef.current = setTimeout(connect, 3000)
+        scheduleReconnect()
       }
     }
 
     connect()
     return () => {
       disposed = true
-      wsRef.current?.close()
-      if (timerRef.current) clearTimeout(timerRef.current)
+      const ws = wsRef.current
+      wsRef.current = null
+      if (ws) {
+        ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null
+        ws.close()
+      }
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
+      if (runRefreshTimerRef.current) { clearTimeout(runRefreshTimerRef.current); runRefreshTimerRef.current = null }
     }
   }, [])
 }

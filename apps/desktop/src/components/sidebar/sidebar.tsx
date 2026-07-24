@@ -1,6 +1,7 @@
-import { IconBolt, IconPlus, IconRobot, IconCursorText, IconPlug, IconSettings, IconShieldCheck, IconVariable } from '@tabler/icons-react'
+import { IconBolt, IconHistory, IconPlus, IconRobot, IconCursorText, IconPlug, IconSettings, IconShieldCheck, IconVariable } from '@tabler/icons-react'
 import { useSessionStore } from '../../store/session-store'
 import type { Session } from '../../store/session-store'
+import { useRuleStore } from '../../store/rule-store'
 
 function StatusDot({ status }: { status: Session['status'] }) {
   const cls =
@@ -10,17 +11,15 @@ function StatusDot({ status }: { status: Session['status'] }) {
     status === 'failed' ? 'sdot d-err' :
     status === 'stopped' ? 'sdot d-err' :
     'sdot d-idle'
-  return <div className={cls} />
+  return <span className={cls} title={status} aria-label={`${status} status`} />
 }
 
 function SessionItem({ session, active, onClick }: { session: Session; active: boolean; onClick: () => void }) {
   const Icon = session.type === 'ai' ? IconRobot : IconCursorText
   return (
-    <button type="button" className={`si${active ? ' active' : ''}`} onClick={onClick}>
-      <Icon size={14} />
-      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '11px' }}>
-        {session.name}
-      </span>
+    <button type="button" className={`si${active ? ' active' : ''}`} aria-current={active ? 'page' : undefined} onClick={onClick}>
+      <span className="si-icon"><Icon size={13} /></span>
+      <span className="si-label">{session.name}</span>
       <StatusDot status={session.status} />
     </button>
   )
@@ -30,44 +29,51 @@ interface Props {
   onNewFlow: () => void
   onOpenRules: () => void
   onOpenVariables: () => void
+  onOpenRunHistory: () => void
 }
 
-export function Sidebar({ onNewFlow, onOpenRules, onOpenVariables }: Props) {
+export function Sidebar({ onNewFlow, onOpenRules, onOpenVariables, onOpenRunHistory }: Props) {
   const sessions = useSessionStore((s) => s.sessions)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
   const setActiveSession = useSessionStore((s) => s.setActiveSession)
+  const ruleCount = useRuleStore((s) => s.rules.length)
   const liveSessions = sessions.filter((s) => s.status === 'running' || s.status === 'paused' || s.status === 'draft')
   const recentSessions = sessions.filter((s) => s.status !== 'running' && s.status !== 'paused' && s.status !== 'draft')
 
   return (
     <div className="sb">
       <div className="sb-brand">
-        <div className="bmark"><IconBolt size={13} color="#fff" /></div>
+        <div className="bmark"><IconBolt size={14} color="#fff" /></div>
         <span className="bname">Apix</span>
         <span className="bver">v4</span>
       </div>
 
       <div className="sb-scroll">
-        <button type="button" className="sb-new" onClick={onNewFlow}><IconPlus size={13} /> New flow</button>
+        <button type="button" className="sb-new" onClick={onNewFlow}>
+          <span className="sb-new-icon"><IconPlus size={13} /></span>
+          <span>New flow</span>
+        </button>
 
         {liveSessions.length > 0 && (
-          <>
-            <div className="sb-sec">Live</div>
+          <section className="sb-group" aria-labelledby="sidebar-live">
+            <div className="sb-sec" id="sidebar-live">Live</div>
             {liveSessions.map((s) => <SessionItem key={s.id} session={s} active={s.id === activeSessionId} onClick={() => setActiveSession(s.id)} />)}
-          </>
+          </section>
         )}
 
         {recentSessions.length > 0 && (
-          <>
-            <div className="sb-sec">Recent</div>
+          <section className="sb-group" aria-labelledby="sidebar-recent">
+            <div className="sb-sec" id="sidebar-recent">Recent</div>
             {recentSessions.map((s) => <SessionItem key={s.id} session={s} active={s.id === activeSessionId} onClick={() => setActiveSession(s.id)} />)}
-          </>
+          </section>
         )}
 
-        <div className="sb-divider" />
-        <div className="sb-sec">Tools</div>
-        <button type="button" className="si" onClick={onOpenRules}><IconShieldCheck size={14} /><span className="si-label">Pause rules</span><span className="tool-count">2</span></button>
-        <button type="button" className="si" onClick={onOpenVariables}><IconVariable size={14} /><span className="si-label">Variables</span></button>
+        <section className="sb-group sb-tools" aria-labelledby="sidebar-tools">
+          <div className="sb-sec" id="sidebar-tools">Tools</div>
+          <button type="button" className="si" onClick={onOpenRunHistory}><span className="si-icon"><IconHistory size={13} /></span><span className="si-label">Run history</span></button>
+          <button type="button" className="si" onClick={onOpenRules}><span className="si-icon"><IconShieldCheck size={13} /></span><span className="si-label">Pause rules</span>{ruleCount > 0 && <span className="tool-count">{ruleCount}</span>}</button>
+          <button type="button" className="si" onClick={onOpenVariables}><span className="si-icon"><IconVariable size={13} /></span><span className="si-label">Variables</span></button>
+        </section>
       </div>
 
       <div className="sb-footer">

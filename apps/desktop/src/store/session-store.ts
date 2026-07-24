@@ -94,6 +94,7 @@ interface AppStore {
   updateSession: (id: string, patch: Partial<Session>) => void
   addStep: (sessionId: string, step: Step) => void
   updateStep: (sessionId: string, stepId: string, patch: Partial<Step>) => void
+  removeStep: (sessionId: string, stepId: string) => void
   loadSessions: () => Promise<void>
   startNewFlow: () => string
   appendManualStep: (sessionId: string, request?: { method?: string; url?: string; apiRequestId?: string }) => string
@@ -231,6 +232,23 @@ export const useSessionStore = create<AppStore>((set, get) => ({
             }
           : session,
       ),
+    })),
+
+  removeStep: (sessionId, stepId) =>
+    set((state) => ({
+      sessions: state.sessions.map((session) => {
+        if (session.id !== sessionId || !session.steps.some((step) => step.id === stepId)) return session
+
+        const steps = session.steps.filter((step) => step.id !== stepId)
+        const totalSteps = Math.max(0, (session.totalSteps ?? session.steps.length) - 1)
+        return {
+          ...session,
+          steps,
+          totalSteps,
+          currentStep: session.currentStep == null ? undefined : Math.min(session.currentStep, totalSteps),
+          status: steps.length === 0 ? 'idle' : session.status,
+        }
+      }),
     })),
 
   loadSessions: async () => {

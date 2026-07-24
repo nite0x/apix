@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   IconArchive,
   IconArrowDownLeft,
@@ -14,8 +14,10 @@ import {
   IconTimeline,
   IconVariable,
 } from '@tabler/icons-react'
-import type { ApiDefinition, ApiRule } from '../../data/api-catalog'
+import type { ApiDefinition } from '../../data/api-catalog'
 import { tryApi, type TryResult } from '../../services/api-client'
+import { rulesForRequest, useRuleStore } from '../../store/rule-store'
+import { useRunHistoryStore } from '../../store/run-history-store'
 
 type DetailTab = 'overview' | 'parameters' | 'rules' | 'history'
 
@@ -41,16 +43,21 @@ export function ApiDetail({ api, context, runContext, onJumpToSession, onEdit, o
   const [tab, setTab] = useState<DetailTab>('overview')
   const [aiOpen, setAiOpen] = useState(false)
   const [aiNote, setAiNote] = useState('')
-  const [rules, setRules] = useState<ApiRule[]>(api.rules)
   const [trying, setTrying] = useState(false)
   const [tryResult, setTryResult] = useState<TryResult | null>(null)
   const [tryError, setTryError] = useState<string | null>(null)
+
+  // Rules come from the single shared rule-store, filtered to this request. A
+  // toggle here edits the draft only; nothing is persisted until it is saved
+  // through Pause Rules (PUT /api/rules).
+  const allRules = useRuleStore((s) => s.rules)
+  const toggleStoreRule = useRuleStore((s) => s.toggleRule)
+  const scopedRules = useMemo(() => rulesForRequest(allRules, api.method, api.url), [allRules, api.method, api.url])
 
   useEffect(() => {
     setTab('overview')
     setAiOpen(false)
     setAiNote('')
-    setRules(api.rules)
     setTryResult(null)
     setTryError(null)
   }, [api])
@@ -60,15 +67,13 @@ export function ApiDetail({ api, context, runContext, onJumpToSession, onEdit, o
     setTryError(null)
     try {
       setTryResult(await tryApi(api))
+      // A durable run was recorded; let an open Run History reflect it.
+      if (api.source === 'backend') useRunHistoryStore.getState().refreshIfLoaded()
     } catch (error) {
       setTryError(error instanceof Error ? error.message : 'Request failed')
     } finally {
       setTrying(false)
     }
-  }
-
-  function toggleRule(id: string) {
-    setRules((current) => current.map((rule) => rule.id === id ? { ...rule, enabled: !rule.enabled, triggered: false } : rule))
   }
 
   return (
@@ -208,18 +213,18 @@ export function ApiDetail({ api, context, runContext, onJumpToSession, onEdit, o
 
         {tab === 'rules' && (
           <div className="det-pane active">
-            {rules.length === 0 && <div className="det-empty-copy">No rules match this API</div>}
-            {rules.map((rule) => (
-              <div className={`rule-row${rule.triggered ? ' triggered' : ''}`} key={rule.id}>
-                <button type="button" role="switch" aria-checked={rule.enabled} aria-label={rule.label} className={`rrtog ${rule.enabled ? 'on' : 'off'}`} onClick={() => toggleRule(rule.id)}>
+            {scopedRules.length === 0 && <div className="det-empty-copy">No rules match this API</div>}
+            {scopedRules.map((rule) => (
+              <div className="rule-row" key={rule.id}>
+                <button type="button" role="switch" aria-checked={rule.enabled} aria-label={rule.name || '未命名规则'} className={`rrtog ${rule.enabled ? 'on' : 'off'}`} onClick={() => toggleStoreRule(rule.id)}>
                   <span className="rrtog-k" />
                 </button>
                 <IconShieldCheck size={13} />
-                <span className="rr-lbl">{rule.label}</span>
-                {rule.triggered ? <span className="rr-b rrb-tri">triggered now</span> : <span className="rule-state">{rule.enabled ? 'on' : 'off'}</span>}
+                <span className="rr-lbl">{rule.name || '未命名规则'} <span className={`rule-trig rt-${rule.trigger}`}>{rule.trigger}</span></span>
+                <span className="rule-state">{rule.enabled ? 'on' : 'off'}</span>
               </div>
             ))}
-            <button type="button" className="add-il">+ Add rule</button>
+            {scopedRules.length > 0 && <div className="det-empty-copy">在 Pause Rules 中保存后才会写入 Runtime。</div>}
           </div>
         )}
 
