@@ -5,11 +5,14 @@ import (
 	"fmt"
 )
 
-const httpSchemaVersion = 2
+const httpSchemaVersion = 3
 
-// MigrateSchema installs the current HTTP domain schema. Older HTTP schemas are
-// deliberately destroyed instead of migrated: this project treats v2 as a clean
-// model replacement with no compatibility layer.
+// MigrateSchema installs the current HTTP domain schema.
+//
+// The jump from v1 to v2 was a deliberate destructive replacement. From v2
+// onward migrations are non-destructive: v2→v3 only adds the Flow tables and
+// keeps every existing collection/request/working-copy/run intact. Fresh
+// installs still create the full schema (including Flow tables) in one pass.
 func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 	s.db = db
 
@@ -31,11 +34,124 @@ func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 		return nil
 	}
 
+	// Existing v2 installs are upgraded in place without dropping data.
+	if err == nil && version == 2 {
+		if err := migrateV2toV3(db); err != nil {
+			return err
+		}
+		s.initRepositories()
+		return nil
+	}
+
+	// Fresh install or legacy (v1) schema: build the full model from scratch.
 	if err := rebuildHTTPSchema(db); err != nil {
 		return err
 	}
 	s.initRepositories()
 	return nil
+}
+
+// migrateV2toV3 adds the Flow tables to an existing v2 database. It is
+// non-destructive: no v2 table is dropped or rewritten.
+func migrateV2toV3(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	for _, stmt := range flowSchemaStatements() {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("create flow schema: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_metadata(name, version, updated_at)
+		VALUES ('http_domain', ?, datetime('now'))
+		ON CONFLICT(name) DO UPDATE SET version = excluded.version, updated_at = excluded.updated_at`, httpSchemaVersion); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// flowSchemaStatements returns the Flow domain schema. Every statement is
+// idempotent (IF NOT EXISTS) so it is safe from both the fresh-install path and
+// the incremental v2→v3 migration.
+func flowSchemaStatements() []string {
+	return []string{
+		`CREATE TABLE IF NOT EXISTS flows (
+			id             TEXT PRIMARY KEY,
+			project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			name           TEXT NOT NULL,
+			description    TEXT NOT NULL DEFAULT '',
+			environment_id TEXT REFERENCES environments(id) ON DELETE SET NULL,
+			settings       TEXT NOT NULL DEFAULT '{}',
+			variables      TEXT NOT NULL DEFAULT '[]',
+			edit_version   INTEGER NOT NULL DEFAULT 1,
+			created_by     TEXT,
+			updated_by     TEXT,
+			created_at     DATETIME NOT NULL,
+			updated_at     DATETIME NOT NULL,
+			archived_at    DATETIME
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_flows_project_updated ON flows(project_id, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_flows_active ON flows(project_id, updated_at DESC) WHERE archived_at IS NULL`,
+		`CREATE TABLE IF NOT EXISTS flow_steps (
+			id                    TEXT PRIMARY KEY,
+			flow_id               TEXT NOT NULL REFERENCES flows(id) ON DELETE CASCADE,
+			position              INTEGER NOT NULL,
+			type                  TEXT NOT NULL CHECK (type IN ('http')),
+			name                  TEXT NOT NULL,
+			enabled               INTEGER NOT NULL DEFAULT 1,
+			source_api_request_id TEXT REFERENCES api_requests(id) ON DELETE SET NULL,
+			request_data          TEXT NOT NULL,
+			config                TEXT NOT NULL DEFAULT '{}',
+			created_at            DATETIME NOT NULL,
+			updated_at            DATETIME NOT NULL,
+			UNIQUE(flow_id, position)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_flow_steps_order ON flow_steps(flow_id, position)`,
+		`CREATE TABLE IF NOT EXISTS flow_runs (
+			id                 TEXT PRIMARY KEY,
+			project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			flow_id            TEXT REFERENCES flows(id) ON DELETE SET NULL,
+			flow_version       INTEGER NOT NULL,
+			flow_name_snapshot TEXT NOT NULL,
+			flow_snapshot      TEXT NOT NULL,
+			environment_id     TEXT REFERENCES environments(id) ON DELETE SET NULL,
+			trigger_type       TEXT NOT NULL CHECK (trigger_type IN ('manual','ai','test')),
+			status             TEXT NOT NULL CHECK (
+				status IN ('queued','running','paused','succeeded','failed','cancelled')
+			),
+			current_step       INTEGER NOT NULL DEFAULT 0,
+			total_steps        INTEGER NOT NULL,
+			variables_snapshot TEXT NOT NULL DEFAULT '{}',
+			error_code         TEXT,
+			error_message      TEXT,
+			created_at         DATETIME NOT NULL,
+			started_at         DATETIME,
+			finished_at        DATETIME
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_flow_runs_flow ON flow_runs(flow_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_flow_runs_project ON flow_runs(project_id, created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS flow_run_steps (
+			id               TEXT PRIMARY KEY,
+			flow_run_id      TEXT NOT NULL REFERENCES flow_runs(id) ON DELETE CASCADE,
+			flow_step_id     TEXT,
+			position         INTEGER NOT NULL,
+			name_snapshot    TEXT NOT NULL,
+			request_snapshot TEXT NOT NULL,
+			status           TEXT NOT NULL CHECK (
+				status IN ('pending','running','paused','succeeded','failed','skipped','cancelled')
+			),
+			api_run_id       TEXT REFERENCES api_runs(id) ON DELETE SET NULL,
+			error_code       TEXT,
+			error_message    TEXT,
+			started_at       DATETIME,
+			finished_at      DATETIME,
+			UNIQUE(flow_run_id, position)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_flow_run_steps_order ON flow_run_steps(flow_run_id, position)`,
+	}
 }
 
 func rebuildHTTPSchema(db *sql.DB) error {
@@ -45,8 +161,13 @@ func rebuildHTTPSchema(db *sql.DB) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Drop the replaced HTTP model, including any partially-created v2 schema.
+	// Drop the replaced HTTP model, including any partially-created schema.
+	// Flow tables are dropped first because they reference api_requests/api_runs.
 	drops := []string{
+		`DROP TABLE IF EXISTS flow_run_steps`,
+		`DROP TABLE IF EXISTS flow_runs`,
+		`DROP TABLE IF EXISTS flow_steps`,
+		`DROP TABLE IF EXISTS flows`,
 		`DROP TABLE IF EXISTS api_examples`,
 		`DROP TABLE IF EXISTS api_fields`,
 		`DROP TABLE IF EXISTS api_responses`,
@@ -182,6 +303,7 @@ func rebuildHTTPSchema(db *sql.DB) error {
 		`CREATE INDEX idx_api_runs_expiration ON api_runs(expires_at) WHERE is_pinned = 0`,
 		`INSERT OR IGNORE INTO projects(id, name, description) VALUES ('default', 'My APIs', 'Default local project')`,
 	}
+	stmts = append(stmts, flowSchemaStatements()...)
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("create HTTP schema: %w", err)

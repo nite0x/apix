@@ -1,6 +1,5 @@
 import { IconApi, IconHistory, IconPlayerPlay, IconPlayerStop, IconSearch } from '@tabler/icons-react'
 import type { Session } from '../../store/session-store'
-import { RuntimeStatusIndicator } from './runtime-status-indicator'
 
 interface Props {
   session: Session | null
@@ -9,10 +8,9 @@ interface Props {
   onSearch: () => void
   onLibrary: () => void
   onRunHistory: () => void
-  onRetryRuntime: () => void
 }
 
-export function Topbar({ session, onReview, onStop, onSearch, onLibrary, onRunHistory, onRetryRuntime }: Props) {
+export function Topbar({ session, onReview, onStop, onSearch, onLibrary, onRunHistory }: Props) {
   const pill = !session ? '' :
     session.status === 'paused' ? 'pill pl-paused' :
     session.status === 'draft' ? 'pill pl-paused' :
@@ -54,9 +52,6 @@ export function Topbar({ session, onReview, onStop, onSearch, onLibrary, onRunHi
         <div className="tb-title" style={{ color: '#bbb' }}>Apix</div>
       )}
 
-      <RuntimeStatusIndicator onRetry={onRetryRuntime} />
-      <div className="tb-sep" />
-
       {session?.status === 'paused' && (
         <>
           <button type="button" className="tb-btn tb-review" onClick={onReview}><IconPlayerPlay size={13} /> Review</button>
@@ -66,7 +61,7 @@ export function Topbar({ session, onReview, onStop, onSearch, onLibrary, onRunHi
       )}
       <button type="button" className="tb-search" aria-label="搜索接口" onClick={onSearch}><IconSearch size={13} /> 搜索接口… <kbd>⌘K</kbd></button>
       <button type="button" className="tb-btn" aria-label="打开接口库" onClick={onLibrary}><IconApi size={13} /> 接口库</button>
-      <button type="button" className="tb-btn" aria-label="打开运行历史" onClick={onRunHistory}><IconHistory size={13} /> 运行历史</button>
+      <button type="button" className="tb-btn" aria-label="打开请求历史" onClick={onRunHistory}><IconHistory size={13} /> 请求历史</button>
     </div>
   )
 }

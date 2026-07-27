@@ -17,6 +17,8 @@ func (s *HTTPService) Routes(r gin.IRouter) {
 	s.workingCopyRoutes(r)
 	s.runRoutes(r)
 	s.importRoutes(r)
+	s.flowRoutes(r)
+	s.flowRunRoutes(r)
 }
 
 func (s *HTTPService) collectionRoutes(r gin.IRouter) {

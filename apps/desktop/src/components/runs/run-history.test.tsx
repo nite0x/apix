@@ -73,7 +73,7 @@ describe('RunHistory states', () => {
   it('shows an offline state with retry', async () => {
     stubFetch({ listReject: true })
     render(<RunHistory onClose={vi.fn()} />)
-    expect(await screen.findByText(/Runtime 离线/)).toBeTruthy()
+    expect(await screen.findByText(/暂时无法加载请求历史/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Retry/ })).toBeTruthy()
   })
 
@@ -104,11 +104,11 @@ describe('RunHistory list and detail', () => {
     render(<RunHistory onClose={vi.fn()} />)
     await screen.findByText('https://api.example.com/users')
 
-    await user.type(screen.getByLabelText('搜索运行历史'), 'login')
+    await user.type(screen.getByLabelText('搜索请求历史'), 'login')
     expect(screen.getByText('https://api.example.com/login')).toBeTruthy()
     expect(screen.queryByText('https://api.example.com/users')).toBeNull()
 
-    await user.clear(screen.getByLabelText('搜索运行历史'))
+    await user.clear(screen.getByLabelText('搜索请求历史'))
     await user.click(screen.getByRole('button', { name: /仅看 pinned/ }))
     expect(screen.getByText('https://api.example.com/users/9')).toBeTruthy()
     expect(screen.queryByText('https://api.example.com/login')).toBeNull()

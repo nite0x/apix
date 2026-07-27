@@ -24,6 +24,8 @@ func Run(_ []string) error {
 	if err := httpService.MigrateSchema(db.DB()); err != nil {
 		log.Fatalf("http schema migration failed: %v", err)
 	}
+	httpService.SetHub(hub)
+	httpService.SetRuleEngine(rules)
 	executor := core.NewExecutor(sessions, rules, hub, db, httpService.Execute, httpService.ExtractVars)
 
 	// 3. MCP server

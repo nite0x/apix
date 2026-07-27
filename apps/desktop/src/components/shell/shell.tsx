@@ -6,6 +6,8 @@ import { useCatalogStore } from '../../store/catalog-store'
 import { useRuleStore } from '../../store/rule-store'
 import { useRuntimeStatusStore } from '../../store/runtime-status-store'
 import { useSessionStore, type Step } from '../../store/session-store'
+import { useFlowStore } from '../../store/flow-store'
+import { useFlowRunStore } from '../../store/flow-run-store'
 import { ApiDrawer } from '../api/api-drawer'
 import { ApiLibrary } from '../api/api-library'
 import { SessionPanel } from '../right-panel/session-panel'
@@ -15,6 +17,9 @@ import { ApiSearch } from '../search/api-search'
 import { Sidebar } from '../sidebar/sidebar'
 import { Timeline } from '../timeline/timeline'
 import { Topbar } from '../topbar/topbar'
+import { createBlankFlowStep, FlowEditor } from '../flow/flow-editor'
+import { FlowRunView } from '../flow/flow-run-view'
+import { FlowDeleteDialog } from '../flow/flow-delete-dialog'
 
 interface DrawerState {
   api: ApiDefinition
@@ -34,7 +39,6 @@ export function Shell() {
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
   const loadState = useSessionStore((s) => s.loadState)
   const loadSessions = useSessionStore((s) => s.loadSessions)
-  const startNewFlow = useSessionStore((s) => s.startNewFlow)
   const appendManualStep = useSessionStore((s) => s.appendManualStep)
   const resolvePausedStep = useSessionStore((s) => s.resolvePausedStep)
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
@@ -49,13 +53,33 @@ export function Shell() {
   const loadRules = useRuleStore((s) => s.loadRules)
   const checkHealth = useRuntimeStatusStore((s) => s.checkHealth)
 
+  const loadFlows = useFlowStore((s) => s.loadFlows)
+  const createFlow = useFlowStore((s) => s.createFlow)
+  const selectFlow = useFlowStore((s) => s.selectFlow)
+  const renameFlow = useFlowStore((s) => s.renameFlow)
+  const deleteFlowAction = useFlowStore((s) => s.deleteFlow)
+  const restoreFlow = useFlowStore((s) => s.restoreFlow)
+  const saveStateById = useFlowStore((s) => s.saveStateById)
+  const selectedFlowId = useFlowStore((s) => s.selectedFlowId)
+  const flowDraft = useFlowStore((s) => (s.selectedFlowId ? s.drafts[s.selectedFlowId] : undefined))
+  const flushSave = useFlowStore((s) => s.flushSave)
+  const updateFlowDraft = useFlowStore((s) => s.updateDraft)
+  const activeRunId = useFlowRunStore((s) => s.activeRunId)
+  const activeRun = useFlowRunStore((s) => (s.activeRunId ? s.runsById[s.activeRunId] : undefined))
+
   const [overlay, setOverlay] = useState<'library' | 'search' | 'rules' | 'runs' | null>(null)
   const [drawer, setDrawer] = useState<DrawerState | null>(null)
   const [panelTab, setPanelTab] = useState<'session' | 'rules'>('session')
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
+  const [undoFlow, setUndoFlow] = useState<{ id: string; name: string } | null>(null)
 
   useEffect(() => {
     void loadSessions()
   }, [loadSessions])
+
+  useEffect(() => {
+    void loadFlows()
+  }, [loadFlows])
 
   useEffect(() => {
     void refreshCatalog()
@@ -73,20 +97,35 @@ export function Shell() {
   }, [])
 
   const addBlankStep = useCallback(() => {
+    if (selectedFlowId && flowDraft) {
+      updateFlowDraft(selectedFlowId, (draft) => ({
+        ...draft,
+        steps: [...draft.steps, createBlankFlowStep(draft.steps.length)],
+      }))
+      return
+    }
     if (activeSession) appendManualStep(activeSession.id)
-  }, [activeSession, appendManualStep])
+  }, [activeSession, appendManualStep, selectedFlowId, flowDraft, updateFlowDraft])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null
       const isTyping = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT'
       if (event.key === 'Escape') closeLayers()
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        // Cmd/Ctrl+S saves the open flow immediately.
+        if (selectedFlowId) {
+          event.preventDefault()
+          void flushSave(selectedFlowId)
+          return
+        }
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         setDrawer(null)
         setOverlay('search')
       }
-      if (!isTyping && event.key.toLowerCase() === 'n' && activeSession) {
+      if (!isTyping && event.key.toLowerCase() === 'n' && (activeSession || selectedFlowId)) {
         event.preventDefault()
         setOverlay(null)
         setDrawer(null)
@@ -95,7 +134,20 @@ export function Shell() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeSession, closeLayers, addBlankStep])
+  }, [activeSession, closeLayers, addBlankStep, selectedFlowId, flushSave])
+
+  useEffect(() => {
+    // Warn before leaving with unsaved/failed flow edits.
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      const unsaved = Object.values(saveStateById).some((state) => state === 'dirty' || state === 'saving' || state === 'error' || state === 'conflict')
+      if (unsaved) {
+        event.preventDefault()
+        event.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [saveStateById])
 
   const flatApis = useMemo(() => allApis(catalog), [catalog])
 
@@ -135,7 +187,35 @@ export function Shell() {
 
   function selectSearchApi(api: ApiDefinition) {
     setOverlay(null)
+    if (selectedFlowId && flowDraft) {
+      const request = api.requestData ?? {
+        method: api.method,
+        url: api.url,
+        query_params: [],
+        headers: [],
+        body_type: 'none',
+        body: '',
+      }
+      updateFlowDraft(selectedFlowId, (draft) => ({
+        ...draft,
+        steps: [
+          ...draft.steps,
+          {
+            ...createBlankFlowStep(draft.steps.length),
+            name: request.url ? comparablePath(request.url) || request.url : api.name,
+            source_api_request_id: api.source === 'backend' ? api.id : null,
+            request,
+          },
+        ],
+      }))
+      return
+    }
     setDrawer({ api, source: 'library' })
+  }
+
+  function openFlowAPI(requestId: string) {
+    const api = flatApis.find((item) => item.id === requestId)
+    if (api) setDrawer({ api, source: 'library' })
   }
 
   async function resolveStep(action: 'continue' | 'skip' | 'stop', step: Step, modifiedRequest?: string) {
@@ -148,11 +228,52 @@ export function Shell() {
     resolvePausedStep(activeSession.id, step.id, action)
   }
 
-  function startFlow() {
+  async function startFlow() {
     closeLayers()
-    startNewFlow()
-    setPanelTab('session')
+    // Create a durable Flow on the backend so a refresh never loses it.
+    try {
+      await createFlow()
+    } catch {
+      // Do not fabricate a local flow; the sidebar stays unchanged on failure.
+    }
   }
+
+  function openFlow(id: string) {
+    closeLayers()
+    useFlowRunStore.setState({ activeRunId: null })
+    void selectFlow(id)
+  }
+
+  function requestRenameFlow(id: string) {
+    const summary = useFlowStore.getState().summaries.find((s) => s.id === id)
+    const next = window.prompt('Rename flow', summary?.name ?? '')
+    if (next && next.trim()) void renameFlow(id, next)
+  }
+
+  function requestDeleteFlow(id: string) {
+    const summary = useFlowStore.getState().summaries.find((s) => s.id === id)
+    setDeleteTarget({ id, name: summary?.name ?? 'this flow' })
+  }
+
+  async function confirmDeleteFlow() {
+    if (!deleteTarget) return
+    const target = deleteTarget
+    setDeleteTarget(null)
+    await deleteFlowAction(target.id)
+    setUndoFlow(target)
+    window.setTimeout(() => {
+      setUndoFlow((current) => (current?.id === target.id ? null : current))
+    }, 6000)
+  }
+
+  function undoDelete() {
+    if (!undoFlow) return
+    void restoreFlow(undoFlow.id)
+    setUndoFlow(null)
+  }
+
+  const showFlowRun = !!activeRun && activeRun.flow_id === selectedFlowId
+  const flowOpen = !!selectedFlowId && !!flowDraft
 
   function reviewCurrentStep() {
     const paused = activeSession?.steps.find((step) => step.status === 'paused')
@@ -166,34 +287,61 @@ export function Shell() {
 
   return (
     <div className="app">
-      <Sidebar onNewFlow={startFlow} onOpenRules={openRules} onOpenVariables={() => setPanelTab('session')} onOpenRunHistory={openRunHistory} />
+      <Sidebar
+        onNewFlow={() => void startFlow()}
+        onOpenFlow={openFlow}
+        onRenameFlow={requestRenameFlow}
+        onDeleteFlow={requestDeleteFlow}
+        onOpenRules={openRules}
+        onOpenVariables={() => setPanelTab('session')}
+        onOpenRunHistory={openRunHistory}
+      />
       <main className="main" id="main">
-        <Topbar
-          session={activeSession}
-          onReview={reviewCurrentStep}
-          onStop={stopCurrentStep}
-          onSearch={openSearch}
-          onLibrary={openLibrary}
-          onRunHistory={openRunHistory}
-          onRetryRuntime={() => void checkHealth()}
-        />
-        <div className="tl-wrap">
-          {loadState === 'loading' && !activeSession ? (
-            <div className="tl-empty">Loading sessions...</div>
-          ) : activeSession ? (
-            <Timeline
+        {flowOpen && flowDraft ? (
+          <div className="tl-wrap flow-wrap">
+            {showFlowRun && activeRunId ? (
+              <FlowRunView runId={activeRunId} onBack={() => useFlowRunStore.setState({ activeRunId: null })} />
+            ) : (
+              <FlowEditor
+                flow={flowDraft}
+                onSearch={openSearch}
+                onLibrary={openLibrary}
+                onRunHistory={openRunHistory}
+                onChooseAPI={openSearch}
+                onOpenAPI={openFlowAPI}
+                onManageRules={openRules}
+              />
+            )}
+          </div>
+        ) : (
+          <>
+            <Topbar
               session={activeSession}
-              onOpenApi={openStepApi}
-              onAddStep={addBlankStep}
-              onResolvePaused={(action, step, modifiedRequest) => void resolveStep(action, step, modifiedRequest)}
+              onReview={reviewCurrentStep}
+              onStop={stopCurrentStep}
+              onSearch={openSearch}
+              onLibrary={openLibrary}
+              onRunHistory={openRunHistory}
             />
-          ) : loadState === 'error' ? (
-            <div className="tl-empty">Runtime unavailable</div>
-          ) : (
-            <div className="tl-empty">No sessions yet</div>
-          )}
-          <SessionPanel session={activeSession} activeTab={panelTab} onTabChange={setPanelTab} onManageRules={openRules} />
-        </div>
+            <div className="tl-wrap">
+              {loadState === 'loading' && !activeSession ? (
+                <div className="tl-empty">Loading sessions...</div>
+              ) : activeSession ? (
+                <Timeline
+                  session={activeSession}
+                  onOpenApi={openStepApi}
+                  onAddStep={addBlankStep}
+                  onResolvePaused={(action, step, modifiedRequest) => void resolveStep(action, step, modifiedRequest)}
+                />
+              ) : loadState === 'error' ? (
+                <div className="tl-empty">Runtime unavailable</div>
+              ) : (
+                <div className="tl-empty">No sessions yet</div>
+              )}
+              <SessionPanel session={activeSession} activeTab={panelTab} onTabChange={setPanelTab} onManageRules={openRules} />
+            </div>
+          </>
+        )}
 
         {overlay === 'search' && (
           <ApiSearch
@@ -221,6 +369,19 @@ export function Shell() {
         {overlay === 'rules' && <RulesManager onClose={() => setOverlay(null)} />}
         {overlay === 'runs' && <RunHistory onClose={() => setOverlay(null)} />}
         {drawer && <ApiDrawer {...drawer} onClose={() => setDrawer(null)} onJumpToSession={() => setDrawer(null)} />}
+        {deleteTarget && (
+          <FlowDeleteDialog
+            flowName={deleteTarget.name}
+            onCancel={() => setDeleteTarget(null)}
+            onConfirm={() => void confirmDeleteFlow()}
+          />
+        )}
+        {undoFlow && (
+          <div className="flow-undo-toast" role="status">
+            <span>Deleted “{undoFlow.name}”.</span>
+            <button type="button" className="linkish" onClick={undoDelete}>Undo</button>
+          </div>
+        )}
       </main>
     </div>
   )

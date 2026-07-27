@@ -9,6 +9,8 @@ import {
 import { useCatalogStore } from '../store/catalog-store'
 import { useRunHistoryStore } from '../store/run-history-store'
 import { useRuntimeStatusStore } from '../store/runtime-status-store'
+import { useFlowStore } from '../store/flow-store'
+import { useFlowRunStore } from '../store/flow-run-store'
 
 const API_BASE = 'http://127.0.0.1:4317/api'
 const WS_URL = 'ws://127.0.0.1:4317/ws/logs'
@@ -76,6 +78,10 @@ export function useWebSocket() {
       void useCatalogStore.getState().refresh()
       void useRuntimeStatusStore.getState().checkHealth()
       useRunHistoryStore.getState().refreshIfLoaded()
+      void useFlowStore.getState().loadFlows()
+      // A dropped socket may have missed run events; re-sync the open run.
+      const activeRunId = useFlowRunStore.getState().activeRunId
+      if (activeRunId) void useFlowRunStore.getState().resync(activeRunId)
     }
 
     function scheduleReconnect() {
@@ -106,6 +112,12 @@ export function useWebSocket() {
           if (disposed) return
           try {
             const msg = JSON.parse(event.data as string) as RuntimeEvent
+            // Flow run events route to the flow-run store only; they must never
+            // be pushed back into the legacy session store.
+            if (msg.type.startsWith('flow_run.')) {
+              useFlowRunStore.getState().applyEvent(msg)
+              return
+            }
             const store = useSessionStore.getState()
 
             switch (msg.type) {

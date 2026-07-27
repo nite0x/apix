@@ -113,12 +113,12 @@ export function RunHistory({ onClose }: Props) {
 
   return (
     <div className="lib-overlay open" role="presentation">
-      <section className="lib-modal" role="dialog" aria-modal="true" aria-label="运行历史">
+      <section className="lib-modal" role="dialog" aria-modal="true" aria-label="请求历史">
         <div className="lib-header">
-          <div className="lib-title">运行历史</div>
+          <div className="lib-title">请求历史</div>
           <label className="lib-search">
             <IconSearch size={12} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Method / URL / API Request ID…" aria-label="搜索运行历史" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Method / URL / API Request ID…" aria-label="搜索请求历史" />
           </label>
           <select className="run-filter" aria-label="按状态筛选" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             <option value="all">全部状态</option>
@@ -127,18 +127,18 @@ export function RunHistory({ onClose }: Props) {
           <button type="button" className={`lib-hbtn${pinnedOnly ? ' active' : ''}`} aria-pressed={pinnedOnly} onClick={() => setPinnedOnly((value) => !value)}>
             <IconPin size={12} /> 仅看 pinned
           </button>
-          <button type="button" className="lib-hbtn" aria-label="刷新运行历史" onClick={() => void loadRuns()} disabled={listState === 'loading' || listState === 'refreshing'}>
+          <button type="button" className="lib-hbtn" aria-label="刷新请求历史" onClick={() => void loadRuns()} disabled={listState === 'loading' || listState === 'refreshing'}>
             <IconRefresh size={12} /> 刷新
           </button>
-          <button type="button" className="lib-close" aria-label="关闭运行历史" onClick={onClose}><IconX size={15} /></button>
+          <button type="button" className="lib-close" aria-label="关闭请求历史" onClick={onClose}><IconX size={15} /></button>
         </div>
 
-        {showLoading && <div className="catalog-status" role="status"><IconLoader2 className="catalog-spinner" size={14} /><span>加载运行历史…</span></div>}
+        {showLoading && <div className="catalog-status" role="status"><IconLoader2 className="catalog-spinner" size={14} /><span>加载请求历史…</span></div>}
         {showOffline && (
-          <div className="catalog-status" role="alert"><span>Runtime 离线，无法加载运行历史</span><button type="button" className="catalog-retry" onClick={() => void loadRuns()}><IconRefresh size={12} /> Retry</button></div>
+          <div className="catalog-status" role="alert"><span>暂时无法加载请求历史</span><button type="button" className="catalog-retry" onClick={() => void loadRuns()}><IconRefresh size={12} /> Retry</button></div>
         )}
         {showError && (
-          <div className="catalog-status" role="alert"><span>{error ?? '加载运行历史失败'}</span><button type="button" className="catalog-retry" onClick={() => void loadRuns()}><IconRefresh size={12} /> Retry</button></div>
+          <div className="catalog-status" role="alert"><span>{error ?? '加载请求历史失败'}</span><button type="button" className="catalog-retry" onClick={() => void loadRuns()}><IconRefresh size={12} /> Retry</button></div>
         )}
         {pinError && <div className="catalog-status inline" role="alert"><span>{pinError}</span></div>}
 

@@ -5,22 +5,34 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Sidebar } from './sidebar'
 import { useRuleStore } from '../../store/rule-store'
 import { useSessionStore } from '../../store/session-store'
+import { useFlowStore } from '../../store/flow-store'
 
 afterEach(cleanup)
 
 beforeEach(() => {
   useSessionStore.setState({ sessions: [], activeSessionId: null })
   useRuleStore.setState({ rules: [], savedRules: [], loadState: 'idle', saveState: 'idle', error: null })
+  useFlowStore.setState({ summaries: [], selectedFlowId: null })
 })
 
 function renderSidebar() {
-  render(<Sidebar onNewFlow={vi.fn()} onOpenRules={vi.fn()} onOpenVariables={vi.fn()} onOpenRunHistory={vi.fn()} />)
+  render(
+    <Sidebar
+      onNewFlow={vi.fn()}
+      onOpenFlow={vi.fn()}
+      onRenameFlow={vi.fn()}
+      onDeleteFlow={vi.fn()}
+      onOpenRules={vi.fn()}
+      onOpenVariables={vi.fn()}
+      onOpenRunHistory={vi.fn()}
+    />,
+  )
 }
 
 describe('Sidebar', () => {
-  it('shows a Run history entry', () => {
+  it('shows a Request history entry', () => {
     renderSidebar()
-    expect(screen.getByRole('button', { name: /Run history/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Request history/ })).toBeTruthy()
   })
 
   it('shows the real rule count from the store, not a hardcoded 2', () => {

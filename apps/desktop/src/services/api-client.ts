@@ -98,6 +98,13 @@ export class CatalogConflictError extends Error {
   }
 }
 
+export class CatalogNotFoundError extends Error {
+  constructor(message = 'The saved API no longer exists') {
+    super(message)
+    this.name = 'CatalogNotFoundError'
+  }
+}
+
 async function json<T>(response: Response): Promise<T> {
   const data = await response.json() as T & { error?: string }
   if (!response.ok) throw new Error(data.error ?? `Request failed (${response.status})`)
@@ -177,6 +184,15 @@ export async function getRequest(id: string): Promise<BackendRequest> {
   return fetch(`${API_BASE}/requests/${encodeURIComponent(id)}`).then(json<BackendRequest>)
 }
 
+/** Replaces a saved API Request with the current request definition. */
+export async function updateRequest(id: string, input: RequestInput): Promise<BackendRequest> {
+  return fetch(`${API_BASE}/requests/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }).then(json<BackendRequest>)
+}
+
 /** Archives a saved API Request. Removes it from every catalog consumer. */
 export async function archiveRequest(id: string): Promise<void> {
   const response = await fetch(`${API_BASE}/requests/${encodeURIComponent(id)}`, { method: 'DELETE' })
@@ -191,10 +207,31 @@ export async function archiveRequest(id: string): Promise<void> {
  * with the request's current RequestData and name, so edits stay lossless.
  */
 export async function createWorkingCopyForRequest(apiRequestId: string): Promise<BackendWorkingCopy> {
-  return fetch(`${API_BASE}/working-copies`, {
+  const response = await fetch(`${API_BASE}/working-copies`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ api_request_id: apiRequestId, source_type: 'manual' }),
+  })
+  if (response.status === 404) {
+    const data = await response.json().catch(() => ({})) as { error?: string }
+    throw new CatalogNotFoundError(data.error)
+  }
+  return json<BackendWorkingCopy>(response)
+}
+
+/** Creates an unsaved Working Copy for an inline request. */
+export async function createWorkingCopy(
+  request: RequestData,
+  input: { name?: string; source_type?: string } = {},
+): Promise<BackendWorkingCopy> {
+  return fetch(`${API_BASE}/working-copies`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      request,
+      name: input.name,
+      source_type: input.source_type ?? 'manual',
+    }),
   }).then(json<BackendWorkingCopy>)
 }
 
@@ -344,6 +381,15 @@ export async function importCurl(content: string): Promise<BackendWorkingCopy> {
   }
 }
 
+/** Executes the exact content of a Working Copy without first saving an API. */
+export async function runWorkingCopy(id: string): Promise<BackendRun> {
+  return fetch(`${API_BASE}/runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ working_copy_id: id }),
+  }).then(json<BackendRun>)
+}
+
 // ── Collections ──────────────────────────────────────────────────────────
 
 export interface CreateCollectionInput {
@@ -358,6 +404,11 @@ export interface UpdateCollectionInput {
   description?: string
   parent_id?: string | null
   sort_order?: number
+}
+
+/** Lists saved collections without loading every request in the catalog. */
+export async function listCollections(projectId = 'default'): Promise<BackendCollection[]> {
+  return fetch(`${API_BASE}/collections?project_id=${encodeURIComponent(projectId)}`).then(json<BackendCollection[]>)
 }
 
 /** Creates a Collection. The runtime fills project_id/status/sort defaults. */
