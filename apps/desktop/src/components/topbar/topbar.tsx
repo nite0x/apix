@@ -1,4 +1,5 @@
-import { IconApi, IconHistory, IconPlayerPlay, IconPlayerStop, IconSearch } from '@tabler/icons-react'
+import { useEffect, useState } from 'react'
+import { IconApi, IconGitBranch, IconHistory, IconPlayerPlay, IconPlayerStop, IconSearch, IconTrash } from '@tabler/icons-react'
 import type { Session } from '../../store/session-store'
 
 interface Props {
@@ -8,12 +9,41 @@ interface Props {
   onSearch: () => void
   onLibrary: () => void
   onRunHistory: () => void
+  onSaveAsFlow?: () => void
+  onClearScratch?: () => void
+  savingAsFlow?: boolean
 }
 
-export function Topbar({ session, onReview, onStop, onSearch, onLibrary, onRunHistory }: Props) {
+export function Topbar({
+  session,
+  onReview,
+  onStop,
+  onSearch,
+  onLibrary,
+  onRunHistory,
+  onSaveAsFlow,
+  onClearScratch,
+  savingAsFlow = false,
+}: Props) {
+  const [confirmingClear, setConfirmingClear] = useState(false)
+  const isScratch = session?.type === 'manual'
+
+  useEffect(() => {
+    setConfirmingClear(false)
+  }, [session?.id])
+
+  function handleClearScratch() {
+    if (!confirmingClear) {
+      setConfirmingClear(true)
+      return
+    }
+    onClearScratch?.()
+    setConfirmingClear(false)
+  }
+
   const pill = !session ? '' :
     session.status === 'paused' ? 'pill pl-paused' :
-    session.status === 'draft' ? 'pill pl-paused' :
+    isScratch ? 'pill pl-manual' :
     session.status === 'running' ? 'pill pl-run' :
     session.status === 'done' ? 'pill pl-done' :
     session.status === 'failed' ? 'pill pl-err' :
@@ -21,11 +51,11 @@ export function Topbar({ session, onReview, onStop, onSearch, onLibrary, onRunHi
 
   const pillText = !session ? '' :
     session.status === 'running'
-      ? `Running · step ${session.steps.filter(s => s.status === 'done').length + 1}`
+      ? isScratch ? 'Scratch session' : `Running · step ${session.steps.filter(s => s.status === 'done').length + 1}`
       : session.status === 'paused'
         ? 'Paused by rule'
-        : session.status === 'draft'
-          ? 'Draft flow'
+        : isScratch
+          ? 'Scratch session'
       : session.status === 'done'
         ? `Done · ${session.steps.filter(s => s.type !== 'think').length} steps`
         : session.status === 'failed'
@@ -40,8 +70,14 @@ export function Topbar({ session, onReview, onStop, onSearch, onLibrary, onRunHi
       {session ? (
         <>
           <div className="tb-title" style={titleStyle}>
-            <span>{session.status === 'draft' ? 'Untitled flow' : session.name}</span>
-            {(session.currentStep || session.status === 'draft') && <small>{session.status === 'draft' ? 'Draft' : `Step ${session.currentStep} of ${session.totalSteps ?? session.steps.length}`}</small>}
+            <span>{isScratch ? 'Scratch' : session.name}</span>
+            {(session.currentStep || isScratch) && (
+              <small>
+                {isScratch
+                  ? `${session.steps.length} request${session.steps.length === 1 ? '' : 's'}`
+                  : `Step ${session.currentStep} of ${session.totalSteps ?? session.steps.length}`}
+              </small>
+            )}
           </div>
           <div className={pill}>
             <div className="porb" />
@@ -57,6 +93,30 @@ export function Topbar({ session, onReview, onStop, onSearch, onLibrary, onRunHi
           <button type="button" className="tb-btn tb-review" onClick={onReview}><IconPlayerPlay size={13} /> Review</button>
           <button type="button" className="tb-btn tb-stop" onClick={onStop}><IconPlayerStop size={13} /> Stop</button>
           <div className="tb-sep" />
+        </>
+      )}
+      {isScratch && onSaveAsFlow && (
+        <button type="button" className="tb-btn tb-save-flow" onClick={onSaveAsFlow} disabled={savingAsFlow}>
+          <IconGitBranch size={13} />
+          {savingAsFlow ? 'Saving…' : 'Save as Flow'}
+        </button>
+      )}
+      {isScratch && onClearScratch && (
+        <>
+          <button
+            type="button"
+            className={`tb-btn${confirmingClear ? ' tb-stop' : ''}`}
+            onClick={handleClearScratch}
+            disabled={savingAsFlow}
+          >
+            <IconTrash size={13} />
+            {confirmingClear ? 'Confirm clear' : 'Clear'}
+          </button>
+          {confirmingClear && (
+            <button type="button" className="tb-btn" onClick={() => setConfirmingClear(false)}>
+              Cancel
+            </button>
+          )}
         </>
       )}
       <button type="button" className="tb-search" aria-label="搜索接口" onClick={onSearch}><IconSearch size={13} /> 搜索接口… <kbd>⌘K</kbd></button>

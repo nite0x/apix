@@ -123,6 +123,38 @@ describe('RunHistory list and detail', () => {
     await waitFor(() => expect(useRunHistoryStore.getState().detail?.id).toBe('run-x'))
     expect(screen.getByText('not json <html>')).toBeTruthy()
   })
+
+  it('opens a copied request directly in Scratch when no Flow is active', async () => {
+    const user = userEvent.setup()
+    const onRerun = vi.fn()
+    stubFetch()
+    render(<RunHistory onClose={vi.fn()} onRerun={onRerun} />)
+
+    await user.click(await screen.findByText('https://api.example.com/users'))
+    await waitFor(() => expect(useRunHistoryStore.getState().detail?.id).toBe('run-1'))
+    await user.click(screen.getByRole('button', { name: '再次执行' }))
+
+    expect(onRerun).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-1' }), 'scratch')
+    expect(screen.queryByRole('dialog', { name: '选择再次执行的位置' })).toBeNull()
+  })
+
+  it('asks whether to add the copied request to the active Flow', async () => {
+    const user = userEvent.setup()
+    const onRerun = vi.fn()
+    stubFetch()
+    render(<RunHistory onClose={vi.fn()} currentFlowName="Checkout flow" onRerun={onRerun} />)
+
+    await user.click(await screen.findByText('https://api.example.com/users'))
+    await waitFor(() => expect(useRunHistoryStore.getState().detail?.id).toBe('run-1'))
+    await user.click(screen.getByRole('button', { name: '再次执行' }))
+
+    const dialog = screen.getByRole('dialog', { name: '选择再次执行的位置' })
+    expect(within(dialog).getByText(/Checkout flow/)).toBeTruthy()
+    expect(onRerun).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole('button', { name: '添加到当前 Flow' }))
+    expect(onRerun).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-1' }), 'flow')
+  })
 })
 
 describe('RunHistory pin and delete', () => {

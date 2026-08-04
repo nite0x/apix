@@ -13,16 +13,33 @@ export function ManualForm({ sessionId, stepId }: Props) {
   const initialStep = useSessionStore((state) =>
     state.sessions.find((session) => session.id === sessionId)?.steps.find((step) => step.id === stepId),
   )
-  const [request, setRequest] = useState<RequestData>(() => ({
-    method: initialStep?.method ?? 'GET',
-    url: initialStep?.url ?? '',
-    query_params: [],
-    headers: [],
-    body_type: initialStep?.requestBody ? 'json' : 'none',
-    body: initialStep?.requestBody ?? '',
-  }))
+  const initialRequest: RequestData = {
+    ...(initialStep?.requestData ?? {
+      method: initialStep?.method ?? 'GET',
+      url: initialStep?.url ?? '',
+      query_params: [],
+      headers: [],
+      body_type: initialStep?.requestBody ? 'json' : 'none',
+      body: initialStep?.requestBody ?? '',
+    }),
+  }
+  const [request, setRequest] = useState<RequestData>(() => initialRequest)
   const store = useSessionStore()
   const hasSent = initialStep?.responseBody != null
+  const initialRun = hasSent ? {
+    id: `${stepId}-persisted-run`,
+    project_id: 'default',
+    api_request_id: initialStep.apiRequestId,
+    trigger_type: 'manual',
+    status: initialStep.status === 'error' ? 'failed' : 'succeeded',
+    request_snapshot: initialRequest,
+    response_status: initialStep.statusCode,
+    response_body: initialStep.responseBody,
+    response_truncated: false,
+    duration_ms: initialStep.durationMs,
+    is_pinned: false,
+    started_at: new Date(0).toISOString(),
+  } satisfies BackendRun : null
 
   function handleChange(next: RequestData) {
     setRequest(next)
@@ -30,6 +47,7 @@ export function ManualForm({ sessionId, stepId }: Props) {
       method: next.method,
       url: next.url,
       requestBody: next.method !== 'GET' ? next.body : undefined,
+      requestData: next,
     })
   }
 
@@ -39,6 +57,7 @@ export function ManualForm({ sessionId, stepId }: Props) {
       method: request.method,
       url: request.url,
       requestBody: request.method !== 'GET' ? request.body : undefined,
+      requestData: request,
       statusCode: run.response_status,
       durationMs: run.duration_ms,
       responseBody: run.error_message ?? (typeof run.response_body === 'string'
@@ -56,7 +75,11 @@ export function ManualForm({ sessionId, stepId }: Props) {
       request={request}
       sourceApiRequestId={initialStep?.apiRequestId}
       onChange={handleChange}
+      onSourceApiRequestIdChange={(apiRequestId) => {
+        store.updateStep(sessionId, stepId, { apiRequestId: apiRequestId ?? undefined })
+      }}
       onRunResult={handleRun}
+      initialRun={initialRun}
       hasSent={hasSent}
     />
   )

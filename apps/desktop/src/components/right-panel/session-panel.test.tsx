@@ -59,3 +59,28 @@ describe('SessionPanel rules tab', () => {
     expect(onManageRules).toHaveBeenCalledOnce()
   })
 })
+
+describe('SessionPanel Scratch tab', () => {
+  it('describes a manual draft as Scratch instead of a Flow', () => {
+    render(
+      <SessionPanel
+        session={{
+          id: 'scratch-1',
+          type: 'manual',
+          name: 'Scratch',
+          status: 'draft',
+          startedAt: Date.now(),
+          steps: [{ id: 'request-1', type: 'manual-input', status: 'pending' }],
+        }}
+        activeTab="session"
+        onTabChange={vi.fn()}
+        onManageRules={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Scratch status')).toBeTruthy()
+    expect(screen.getByText('1 request')).toBeTruthy()
+    expect(screen.queryByText('Flow status')).toBeNull()
+    expect(screen.queryByText('New flow')).toBeNull()
+  })
+})

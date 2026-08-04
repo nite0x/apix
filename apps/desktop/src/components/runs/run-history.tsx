@@ -4,6 +4,7 @@ import {
   IconLoader2,
   IconPin,
   IconPinnedFilled,
+  IconPlayerPlay,
   IconRefresh,
   IconSearch,
   IconTrash,
@@ -16,6 +17,8 @@ import { formatClock, formatDuration, formatJson, formatSize, formatTimestamp } 
 
 interface Props {
   onClose: () => void
+  currentFlowName?: string | null
+  onRerun?: (run: BackendRun, destination: 'scratch' | 'flow') => void | Promise<void>
 }
 
 function statusClass(run: BackendRun): string {
@@ -42,7 +45,7 @@ function KeyValueList({ label, rows }: { label: string; rows?: RequestKeyValue[]
   )
 }
 
-export function RunHistory({ onClose }: Props) {
+export function RunHistory({ onClose, currentFlowName = null, onRerun }: Props) {
   const runs = useRunHistoryStore((s) => s.runs)
   const listState = useRunHistoryStore((s) => s.listState)
   const detailState = useRunHistoryStore((s) => s.detailState)
@@ -62,6 +65,7 @@ export function RunHistory({ onClose }: Props) {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [pinError, setPinError] = useState<string | null>(null)
+  const [rerunTarget, setRerunTarget] = useState<BackendRun | null>(null)
 
   useEffect(() => {
     // Opening Run History always refreshes the list.
@@ -103,6 +107,22 @@ export function RunHistory({ onClose }: Props) {
     } finally {
       setDeleting(false)
     }
+  }
+
+  function requestRerun(run: BackendRun) {
+    if (!onRerun) return
+    if (currentFlowName != null) {
+      setRerunTarget(run)
+      return
+    }
+    void onRerun(run, 'scratch')
+  }
+
+  function confirmRerun(destination: 'scratch' | 'flow') {
+    if (!rerunTarget || !onRerun) return
+    const target = rerunTarget
+    setRerunTarget(null)
+    void onRerun(target, destination)
   }
 
   const blocking = runs.length === 0
@@ -182,6 +202,11 @@ export function RunHistory({ onClose }: Props) {
                       <span className="det-url">{detail.request_snapshot.url}</span>
                     </div>
                     <div className="run-detail-acts">
+                      {onRerun && (
+                        <button type="button" className="det-btn" onClick={() => requestRerun(detail)}>
+                          <IconPlayerPlay size={12} /> 再次执行
+                        </button>
+                      )}
                       <button type="button" className="det-btn" aria-label={detail.is_pinned ? '取消固定' : '固定'} aria-pressed={detail.is_pinned} onClick={() => void handleTogglePin(detail.id)}>
                         {detail.is_pinned ? <IconPinnedFilled size={12} /> : <IconPin size={12} />} {detail.is_pinned ? '已固定' : '固定'}
                       </button>
@@ -261,6 +286,23 @@ export function RunHistory({ onClose }: Props) {
                 <button type="button" className="ed-btn primary danger" onClick={() => void confirmDelete()} disabled={deleting}>
                   {deleting ? '删除中…' : '删除'}
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {rerunTarget && currentFlowName != null && (
+          <div className="lib-confirm-overlay" role="presentation">
+            <div className="lib-confirm" role="dialog" aria-modal="true" aria-label="选择再次执行的位置">
+              <div className="lib-confirm-icon run-rerun-icon"><IconPlayerPlay size={18} /></div>
+              <div className="lib-confirm-title">添加到当前 Flow？</div>
+              <p className="lib-confirm-body">
+                是否将 <strong>{rerunTarget.request_snapshot.method} {rerunTarget.request_snapshot.url}</strong> 添加到
+                当前 Flow「{currentFlowName}」？
+              </p>
+              <div className="lib-confirm-acts">
+                <button type="button" className="ed-btn" onClick={() => setRerunTarget(null)}>取消</button>
+                <button type="button" className="ed-btn" onClick={() => confirmRerun('scratch')}>在 Scratch 中打开</button>
+                <button type="button" className="ed-btn primary" onClick={() => confirmRerun('flow')}>添加到当前 Flow</button>
               </div>
             </div>
           </div>

@@ -115,12 +115,6 @@ export function StepCard({ step, sessionId, defaultOpen = false, muted = false, 
           {open && (
             <div className="cbody open">
               <ManualForm sessionId={sessionId} stepId={step.id} />
-              {hasResponse && (
-                <>
-                  <div className="bl">Response</div>
-                  <div className="bc">{step.responseBody}</div>
-                </>
-              )}
             </div>
           )}
         </div>

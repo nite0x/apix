@@ -33,7 +33,14 @@ export function Timeline({ session, onOpenApi, onAddStep, onResolvePaused }: Pro
         <div className="node n-manual" />
         <button type="button" className="add-step" onClick={onAddStep}>
           <span className="add-step-icon"><IconPlus size={13} /></span>
-          <span className="add-step-copy"><span className="add-step-title">Add next step</span><span className="add-step-sub">Choose an API, start from a blank request, or let AI continue from here.</span></span>
+          <span className="add-step-copy">
+            <span className="add-step-title">{session.type === 'manual' ? 'Add next request' : 'Add next step'}</span>
+            <span className="add-step-sub">
+              {session.type === 'manual'
+                ? 'Test another API in this Scratch session.'
+                : 'Choose an API, start from a blank request, or let AI continue from here.'}
+            </span>
+          </span>
           <kbd className="add-step-kbd">N</kbd>
         </button>
       </div>

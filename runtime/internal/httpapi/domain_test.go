@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -370,5 +371,33 @@ func TestWorkingCopySaveAndRunLifecycle(t *testing.T) {
 	persistedBody, ok := persisted.ResponseBody.(map[string]any)
 	if !ok || persistedBody["token"] != "••••••" {
 		t.Fatal("response token was persisted without redaction")
+	}
+}
+
+func TestURLEncodedBodySetsContentType(t *testing.T) {
+	service := newTestService(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Content-Type"); got != "application/x-www-form-urlencoded" {
+			t.Fatalf("unexpected content type %q", got)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != "name=Ada&role=admin" {
+			t.Fatalf("unexpected body %q", body)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	status, _, _, _, _, _, err := service.execution.perform(context.Background(), RequestData{
+		Method: "POST", URL: upstream.URL, BodyType: "urlencoded", Body: "name=Ada&role=admin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusNoContent {
+		t.Fatalf("unexpected status %d", status)
 	}
 }

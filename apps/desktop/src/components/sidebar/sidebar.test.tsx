@@ -18,7 +18,9 @@ beforeEach(() => {
 function renderSidebar() {
   render(
     <Sidebar
+      onNewRequest={vi.fn()}
       onNewFlow={vi.fn()}
+      onOpenSession={vi.fn()}
       onOpenFlow={vi.fn()}
       onRenameFlow={vi.fn()}
       onDeleteFlow={vi.fn()}
@@ -33,6 +35,14 @@ describe('Sidebar', () => {
   it('shows a Request history entry', () => {
     renderSidebar()
     expect(screen.getByRole('button', { name: /Request history/ })).toBeTruthy()
+  })
+
+  it('keeps New request global and New flow inside the Flows section', () => {
+    renderSidebar()
+
+    expect(screen.getByRole('button', { name: 'New request' })).toBeTruthy()
+    const flows = screen.getByRole('region', { name: 'Flows' })
+    expect(flows.querySelector('button[aria-label="New flow"]')).toBeTruthy()
   })
 
   it('shows the real rule count from the store, not a hardcoded 2', () => {
@@ -58,13 +68,32 @@ describe('Sidebar', () => {
     useSessionStore.setState({
       activeSessionId: 'active',
       sessions: [
-        { id: 'active', type: 'manual', name: 'Active flow', status: 'draft', startedAt: 1, steps: [] },
-        { id: 'recent', type: 'manual', name: 'Recent flow', status: 'idle', startedAt: 2, steps: [] },
+        { id: 'active', type: 'ai', name: 'Active run', status: 'running', startedAt: 1, steps: [] },
+        { id: 'recent', type: 'ai', name: 'Recent run', status: 'idle', startedAt: 2, steps: [] },
       ],
     })
 
     renderSidebar()
-    expect(screen.getByRole('button', { name: /Active flow/ }).getAttribute('aria-current')).toBe('page')
-    expect(screen.getByRole('button', { name: /Recent flow/ }).getAttribute('aria-current')).toBeNull()
+    expect(screen.getByRole('button', { name: /Active run/ }).getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('button', { name: /Recent run/ }).getAttribute('aria-current')).toBeNull()
+  })
+
+  it('does not list the singleton Scratch as a Live or Recent entity', () => {
+    useSessionStore.setState({
+      activeSessionId: 'scratch-1',
+      sessions: [{
+        id: 'scratch-1',
+        type: 'manual',
+        name: 'Scratch',
+        status: 'draft',
+        source: 'scratch',
+        startedAt: 1,
+        steps: [],
+      }],
+    })
+
+    renderSidebar()
+    expect(screen.queryByRole('button', { name: /Scratch/ })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Live' })).toBeNull()
   })
 })

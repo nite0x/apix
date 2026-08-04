@@ -152,6 +152,8 @@ func (s *executionService) perform(ctx context.Context, data RequestData) (int, 
 	if data.Body != "" && req.Header.Get("Content-Type") == "" {
 		if data.BodyType == "json" {
 			req.Header.Set("Content-Type", "application/json")
+		} else if data.BodyType == "urlencoded" || data.BodyType == "x-www-form-urlencoded" || data.BodyType == "form" {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		} else {
 			req.Header.Set("Content-Type", "text/plain")
 		}

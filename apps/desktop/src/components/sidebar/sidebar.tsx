@@ -28,7 +28,9 @@ function SessionItem({ session, active, onClick }: { session: Session; active: b
 }
 
 interface Props {
+  onNewRequest: () => void
   onNewFlow: () => void
+  onOpenSession: (id: string) => void
   onOpenFlow: (id: string) => void
   onRenameFlow: (id: string) => void
   onDeleteFlow: (id: string) => void
@@ -37,16 +39,28 @@ interface Props {
   onOpenRunHistory: () => void
 }
 
-export function Sidebar({ onNewFlow, onOpenFlow, onRenameFlow, onDeleteFlow, onOpenRules, onOpenVariables, onOpenRunHistory }: Props) {
+export function Sidebar({
+  onNewRequest,
+  onNewFlow,
+  onOpenSession,
+  onOpenFlow,
+  onRenameFlow,
+  onDeleteFlow,
+  onOpenRules,
+  onOpenVariables,
+  onOpenRunHistory,
+}: Props) {
   const sessions = useSessionStore((s) => s.sessions)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
-  const setActiveSession = useSessionStore((s) => s.setActiveSession)
   const ruleCount = useRuleStore((s) => s.rules.length)
   const flowSummaries = useFlowStore((s) => s.summaries)
   const selectedFlowId = useFlowStore((s) => s.selectedFlowId)
   const activeFlows = flowSummaries.filter((s) => !s.archived_at)
-  const liveSessions = sessions.filter((s) => s.status === 'running' || s.status === 'paused' || s.status === 'draft')
-  const recentSessions = sessions.filter((s) => s.status !== 'running' && s.status !== 'paused' && s.status !== 'draft')
+  // Scratch is a singleton workspace, not a managed sidebar entity. Live and
+  // Recent are reserved for AI/MCP execution sessions.
+  const executionSessions = sessions.filter((session) => session.type !== 'manual')
+  const liveSessions = executionSessions.filter((s) => s.status === 'running' || s.status === 'paused' || s.status === 'draft')
+  const recentSessions = executionSessions.filter((s) => s.status !== 'running' && s.status !== 'paused' && s.status !== 'draft')
 
   return (
     <div className="sb">
@@ -57,13 +71,22 @@ export function Sidebar({ onNewFlow, onOpenFlow, onRenameFlow, onDeleteFlow, onO
       </div>
 
       <div className="sb-scroll">
-        <button type="button" className="sb-new" onClick={onNewFlow}>
+        <button
+          type="button"
+          className="sb-new"
+          onClick={onNewRequest}
+        >
           <span className="sb-new-icon"><IconPlus size={13} /></span>
-          <span>New flow</span>
+          <span>New request</span>
         </button>
 
         <section className="sb-group" aria-labelledby="sidebar-flows">
-          <div className="sb-sec" id="sidebar-flows">Flows</div>
+          <div className="sb-sec-row">
+            <div className="sb-sec" id="sidebar-flows">Flows</div>
+            <button type="button" className="sb-sec-action" onClick={onNewFlow} aria-label="New flow" title="New flow">
+              <IconPlus size={12} />
+            </button>
+          </div>
           {activeFlows.length === 0 && <div className="sb-empty">No flows yet</div>}
           {activeFlows.map((summary) => (
             <FlowSidebarItem
@@ -80,14 +103,14 @@ export function Sidebar({ onNewFlow, onOpenFlow, onRenameFlow, onDeleteFlow, onO
         {liveSessions.length > 0 && (
           <section className="sb-group" aria-labelledby="sidebar-live">
             <div className="sb-sec" id="sidebar-live">Live</div>
-            {liveSessions.map((s) => <SessionItem key={s.id} session={s} active={s.id === activeSessionId} onClick={() => setActiveSession(s.id)} />)}
+            {liveSessions.map((s) => <SessionItem key={s.id} session={s} active={!selectedFlowId && s.id === activeSessionId} onClick={() => onOpenSession(s.id)} />)}
           </section>
         )}
 
         {recentSessions.length > 0 && (
           <section className="sb-group" aria-labelledby="sidebar-recent">
             <div className="sb-sec" id="sidebar-recent">Recent</div>
-            {recentSessions.map((s) => <SessionItem key={s.id} session={s} active={s.id === activeSessionId} onClick={() => setActiveSession(s.id)} />)}
+            {recentSessions.map((s) => <SessionItem key={s.id} session={s} active={!selectedFlowId && s.id === activeSessionId} onClick={() => onOpenSession(s.id)} />)}
           </section>
         )}
 

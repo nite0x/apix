@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { RequestData } from '../data/api-catalog'
 
 export type SessionStatus = 'running' | 'paused' | 'done' | 'failed' | 'stopped' | 'idle' | 'draft'
 export type SessionType = 'ai' | 'manual'
@@ -38,6 +39,7 @@ export interface Step {
   riskSummary?: string
   dataScope?: string
   apiRequestId?: string
+  requestData?: RequestData
 }
 
 export interface Session {
@@ -96,7 +98,8 @@ interface AppStore {
   updateStep: (sessionId: string, stepId: string, patch: Partial<Step>) => void
   removeStep: (sessionId: string, stepId: string) => void
   loadSessions: () => Promise<void>
-  startNewFlow: () => string
+  startScratchSession: () => string
+  resetScratchSession: (id: string) => void
   appendManualStep: (sessionId: string, request?: { method?: string; url?: string; apiRequestId?: string }) => string
   configureManualStep: (sessionId: string, stepId: string, request: { method?: string; url?: string; apiRequestId?: string }) => void
   resolvePausedStep: (sessionId: string, stepId: string, action: 'continue' | 'skip' | 'stop') => void
@@ -189,13 +192,21 @@ export const useSessionStore = create<AppStore>((set, get) => ({
   setActiveSession: (activeSessionId) => set({ activeSessionId }),
 
   setSessions: (sessions) =>
-    set((state) => ({
-      sessions,
-      activeSessionId:
-        state.activeSessionId && sessions.some((session) => session.id === state.activeSessionId)
-          ? state.activeSessionId
-          : sessions[0]?.id ?? null,
-    })),
+    set((state) => {
+      // Backend execution sessions may finish loading after a local Scratch was
+      // opened. Preserve that singleton instead of replacing it on hydration.
+      const scratch = state.sessions.find((session) => session.type === 'manual' && session.source === 'scratch')
+      const merged = scratch && !sessions.some((session) => session.id === scratch.id)
+        ? [scratch, ...sessions]
+        : sessions
+      return {
+        sessions: merged,
+        activeSessionId:
+          state.activeSessionId && merged.some((session) => session.id === state.activeSessionId)
+            ? state.activeSessionId
+            : merged[0]?.id ?? null,
+      }
+    }),
 
   addSession: (session) =>
     set((state) => ({
@@ -266,17 +277,23 @@ export const useSessionStore = create<AppStore>((set, get) => ({
     }
   },
 
-  startNewFlow: () => {
-    const id = `manual-${Date.now()}`
+  startScratchSession: () => {
+    const existing = get().sessions.find((session) => session.type === 'manual' && session.source === 'scratch')
+    if (existing) {
+      set({ activeSessionId: existing.id })
+      return existing.id
+    }
+    const id = `scratch-${Date.now()}`
     const stepId = `${id}-input`
     set((state) => ({
       activeSessionId: id,
       sessions: [{
         id,
         type: 'manual',
-        name: 'Untitled flow',
+        name: 'Scratch',
         status: 'draft',
         startedAt: Date.now(),
+        source: 'scratch',
         environment: 'Production',
         currentStep: 1,
         totalSteps: 1,
@@ -286,12 +303,30 @@ export const useSessionStore = create<AppStore>((set, get) => ({
     return id
   },
 
+  resetScratchSession: (id) => {
+    const stepId = `${id}-input-${Date.now()}`
+    set((state) => ({
+      activeSessionId: id,
+      sessions: state.sessions.map((session) => session.id === id ? {
+        ...session,
+        name: 'Scratch',
+        status: 'draft',
+        currentStep: 1,
+        totalSteps: 1,
+        summary: undefined,
+        variables: undefined,
+        matchedRule: undefined,
+        steps: [{ id: stepId, type: 'manual-input', status: 'pending' }],
+      } : session),
+    }))
+  },
+
   appendManualStep: (sessionId, request = {}) => {
     const stepId = `${sessionId}-manual-${Date.now()}`
     set((state) => ({
       sessions: state.sessions.map((session) => session.id === sessionId ? {
         ...session,
-        status: session.status === 'paused' ? session.status : 'idle',
+        status: session.status === 'paused' || session.status === 'draft' ? session.status : 'idle',
         totalSteps: (session.totalSteps ?? session.steps.length) + 1,
         steps: [...session.steps, {
           id: stepId,
