@@ -15,6 +15,7 @@ services/runtime/runtime
 *.db-wal
 
 # Editor & tools
+.idea/
 .vscode/
 .claude/
 memory/
