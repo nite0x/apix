@@ -30,7 +30,7 @@ describe('manual API save control', () => {
     expect(screen.queryByText('Unsaved')).toBeNull()
   })
 
-  it('keeps the complete request data for Save as Flow conversion', () => {
+  it('keeps the complete request data for manual execution', () => {
     vi.useFakeTimers()
     render(<ManualForm sessionId="session-1" stepId="step-1" />)
 

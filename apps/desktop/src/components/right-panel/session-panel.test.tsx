@@ -60,14 +60,14 @@ describe('SessionPanel rules tab', () => {
   })
 })
 
-describe('SessionPanel Scratch tab', () => {
-  it('describes a manual draft as Scratch instead of a Flow', () => {
+describe('SessionPanel draft tab', () => {
+  it('uses execution-session language for a manual draft', () => {
     render(
       <SessionPanel
         session={{
-          id: 'scratch-1',
+          id: 'manual-1',
           type: 'manual',
-          name: 'Scratch',
+          name: 'Manual run',
           status: 'draft',
           startedAt: Date.now(),
           steps: [{ id: 'request-1', type: 'manual-input', status: 'pending' }],
@@ -78,9 +78,8 @@ describe('SessionPanel Scratch tab', () => {
       />,
     )
 
-    expect(screen.getByText('Scratch status')).toBeTruthy()
-    expect(screen.getByText('1 request')).toBeTruthy()
-    expect(screen.queryByText('Flow status')).toBeNull()
-    expect(screen.queryByText('New flow')).toBeNull()
+    expect(screen.getByText('Session status')).toBeTruthy()
+    expect(screen.getByText('New session')).toBeTruthy()
+    expect(screen.queryByText(/Flow status/)).toBeNull()
   })
 })

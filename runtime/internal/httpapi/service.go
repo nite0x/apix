@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 
 	"github.com/apix/apix/runtime/internal/core"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -14,6 +15,31 @@ type HTTPService struct {
 	execution *executionService
 	flow      *flowService
 }
+
+// SendRequestResult is returned to MCP clients after a request completes.
+// The api_runs record remains the durable source of truth; this result gives
+// an AI the same immediate response without requiring a follow-up lookup.
+type SendRequestResult struct {
+	RunID      string `json:"run_id"`
+	Status     *int   `json:"status,omitempty"`
+	Body       any    `json:"body"`
+	Headers    any    `json:"headers,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
+	Truncated  bool   `json:"truncated"`
+}
+
+var sendRequestOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "required": ["run_id", "body", "duration_ms", "truncated"],
+  "properties": {
+    "run_id": {"type": "string"},
+    "status": {"type": "integer"},
+    "body": {},
+    "headers": {},
+    "duration_ms": {"type": "integer"},
+    "truncated": {"type": "boolean"}
+  }
+}`)
 
 func New() *HTTPService {
 	return &HTTPService{}
@@ -68,6 +94,7 @@ For sequences: first GET/list to discover IDs, then use them in subsequent calls
 				mcp.WithString("task",
 					mcp.Description("Brief description of the overall task (used for session labeling)"),
 				),
+				mcp.WithRawOutputSchema(sendRequestOutputSchema),
 			),
 			ExtractInput: func(args map[string]any) (input map[string]any, sessionID, task string) {
 				sessionID, _ = args["session_id"].(string)
@@ -114,16 +141,13 @@ func (s *HTTPService) Execute(ctx context.Context, tool string, input map[string
 		if run == nil {
 			return nil, err
 		}
-		var status any
-		if run.ResponseStatus != nil {
-			status = *run.ResponseStatus
-		}
-		result := map[string]any{
-			"run_id":   run.ID,
-			"status":   status,
-			"body":     run.ResponseBody,
-			"duration": run.DurationMS,
-			"headers":  run.ResponseHeaders,
+		result := SendRequestResult{
+			RunID:      run.ID,
+			Status:     run.ResponseStatus,
+			Body:       run.ResponseBody,
+			Headers:    run.ResponseHeaders,
+			DurationMS: run.DurationMS,
+			Truncated:  run.ResponseTruncated,
 		}
 		return result, err
 	}
@@ -141,11 +165,11 @@ func (s *HTTPService) ExtractVars(tool string, output any) map[string]*core.Vari
 	if tool != "send_request" {
 		return vars
 	}
-	result, ok := output.(map[string]any)
+	result, ok := output.(SendRequestResult)
 	if !ok {
 		return vars
 	}
-	body, ok := result["body"].(map[string]any)
+	body, ok := result.Body.(map[string]any)
 	if !ok {
 		return vars
 	}

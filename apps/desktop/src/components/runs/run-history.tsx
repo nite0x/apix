@@ -18,7 +18,7 @@ import { formatClock, formatDuration, formatJson, formatSize, formatTimestamp } 
 interface Props {
   onClose: () => void
   currentFlowName?: string | null
-  onRerun?: (run: BackendRun, destination: 'scratch' | 'flow') => void | Promise<void>
+  onRerun?: (run: BackendRun, destination: 'new-flow' | 'current-flow') => void | Promise<void>
 }
 
 function statusClass(run: BackendRun): string {
@@ -115,10 +115,10 @@ export function RunHistory({ onClose, currentFlowName = null, onRerun }: Props) 
       setRerunTarget(run)
       return
     }
-    void onRerun(run, 'scratch')
+    void onRerun(run, 'new-flow')
   }
 
-  function confirmRerun(destination: 'scratch' | 'flow') {
+  function confirmRerun(destination: 'new-flow' | 'current-flow') {
     if (!rerunTarget || !onRerun) return
     const target = rerunTarget
     setRerunTarget(null)
@@ -301,8 +301,8 @@ export function RunHistory({ onClose, currentFlowName = null, onRerun }: Props) 
               </p>
               <div className="lib-confirm-acts">
                 <button type="button" className="ed-btn" onClick={() => setRerunTarget(null)}>取消</button>
-                <button type="button" className="ed-btn" onClick={() => confirmRerun('scratch')}>在 Scratch 中打开</button>
-                <button type="button" className="ed-btn primary" onClick={() => confirmRerun('flow')}>添加到当前 Flow</button>
+                <button type="button" className="ed-btn" onClick={() => confirmRerun('new-flow')}>在新 Flow 中打开</button>
+                <button type="button" className="ed-btn primary" onClick={() => confirmRerun('current-flow')}>添加到当前 Flow</button>
               </div>
             </div>
           </div>

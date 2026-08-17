@@ -1,12 +1,27 @@
 import { spawn } from "node:child_process";
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import http from "node:http";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const runtimeDir = resolve(rootDir, "runtime");
 const goEnv = { ...process.env };
+
+// Use the same durable database as the packaged desktop app. Previously the
+// development runtime used runtime/apix.db while the installed app used its
+// platform data directory, which made data appear to disappear when switching
+// between the two launch modes.
+const defaultDataDir = process.platform === "darwin"
+  ? join(homedir(), "Library", "Application Support", "dev.apix.desktop")
+  : process.platform === "win32"
+    ? join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "dev.apix.desktop")
+    : join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "dev.apix.desktop");
+
+goEnv.APIX_DB_PATH ||= join(defaultDataDir, "apix.db");
+mkdirSync(dirname(goEnv.APIX_DB_PATH), { recursive: true });
 
 delete goEnv.GOROOT;
 delete goEnv.GOTOOLDIR;

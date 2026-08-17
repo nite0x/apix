@@ -37,7 +37,7 @@ export function Timeline({ session, onOpenApi, onAddStep, onResolvePaused }: Pro
             <span className="add-step-title">{session.type === 'manual' ? 'Add next request' : 'Add next step'}</span>
             <span className="add-step-sub">
               {session.type === 'manual'
-                ? 'Test another API in this Scratch session.'
+                ? 'Test another API in this manual session.'
                 : 'Choose an API, start from a blank request, or let AI continue from here.'}
             </span>
           </span>

@@ -19,7 +19,6 @@ function renderSidebar() {
   render(
     <Sidebar
       onNewRequest={vi.fn()}
-      onNewFlow={vi.fn()}
       onOpenSession={vi.fn()}
       onOpenFlow={vi.fn()}
       onRenameFlow={vi.fn()}
@@ -37,12 +36,11 @@ describe('Sidebar', () => {
     expect(screen.getByRole('button', { name: /Request history/ })).toBeTruthy()
   })
 
-  it('keeps New request global and New flow inside the Flows section', () => {
+  it('uses one New request action to create Flow documents', () => {
     renderSidebar()
 
     expect(screen.getByRole('button', { name: 'New request' })).toBeTruthy()
-    const flows = screen.getByRole('region', { name: 'Flows' })
-    expect(flows.querySelector('button[aria-label="New flow"]')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'New request' })).toHaveLength(1)
   })
 
   it('shows the real rule count from the store, not a hardcoded 2', () => {
@@ -78,22 +76,21 @@ describe('Sidebar', () => {
     expect(screen.getByRole('button', { name: /Recent run/ }).getAttribute('aria-current')).toBeNull()
   })
 
-  it('does not list the singleton Scratch as a Live or Recent entity', () => {
+  it('lists backend manual sessions alongside other execution sessions', () => {
     useSessionStore.setState({
-      activeSessionId: 'scratch-1',
+      activeSessionId: 'manual-1',
       sessions: [{
-        id: 'scratch-1',
+        id: 'manual-1',
         type: 'manual',
-        name: 'Scratch',
-        status: 'draft',
-        source: 'scratch',
+        name: 'Manual run',
+        status: 'running',
         startedAt: 1,
         steps: [],
       }],
     })
 
     renderSidebar()
-    expect(screen.queryByRole('button', { name: /Scratch/ })).toBeNull()
-    expect(screen.queryByRole('region', { name: 'Live' })).toBeNull()
+    expect(screen.getByRole('button', { name: /Manual run/ })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Live' })).toBeTruthy()
   })
 })

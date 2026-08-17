@@ -59,6 +59,20 @@ describe('flow-store new flow', () => {
     expect(state.selectedFlowId).toBe('new-1')
     expect(state.saveStateById['new-1']).toBe('saved')
   })
+
+  it('keeps each new request as a separate Flow document', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse(201, makeFlow({ id: 'new-1' })))
+      .mockResolvedValueOnce(jsonResponse(201, makeFlow({ id: 'new-2' }))))
+
+    await useFlowStore.getState().createFlow()
+    await useFlowStore.getState().createFlow()
+
+    const state = useFlowStore.getState()
+    expect(state.summaries.map((summary) => summary.id)).toEqual(['new-2', 'new-1'])
+    expect(Object.keys(state.drafts).sort()).toEqual(['new-1', 'new-2'])
+    expect(state.selectedFlowId).toBe('new-2')
+  })
 })
 
 describe('flow-store autosave', () => {

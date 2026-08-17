@@ -1,4 +1,5 @@
-import { IconBolt, IconHistory, IconPlus, IconRobot, IconCursorText, IconPlug, IconSettings, IconShieldCheck, IconVariable } from '@tabler/icons-react'
+import { IconHistory, IconPlus, IconRobot, IconCursorText, IconPlug, IconSettings, IconShieldCheck, IconVariable } from '@tabler/icons-react'
+import apixIcon from '../../assets/apix-icon.png'
 import { useSessionStore } from '../../store/session-store'
 import type { Session } from '../../store/session-store'
 import { useRuleStore } from '../../store/rule-store'
@@ -29,7 +30,6 @@ function SessionItem({ session, active, onClick }: { session: Session; active: b
 
 interface Props {
   onNewRequest: () => void
-  onNewFlow: () => void
   onOpenSession: (id: string) => void
   onOpenFlow: (id: string) => void
   onRenameFlow: (id: string) => void
@@ -41,7 +41,6 @@ interface Props {
 
 export function Sidebar({
   onNewRequest,
-  onNewFlow,
   onOpenSession,
   onOpenFlow,
   onRenameFlow,
@@ -56,16 +55,14 @@ export function Sidebar({
   const flowSummaries = useFlowStore((s) => s.summaries)
   const selectedFlowId = useFlowStore((s) => s.selectedFlowId)
   const activeFlows = flowSummaries.filter((s) => !s.archived_at)
-  // Scratch is a singleton workspace, not a managed sidebar entity. Live and
-  // Recent are reserved for AI/MCP execution sessions.
-  const executionSessions = sessions.filter((session) => session.type !== 'manual')
-  const liveSessions = executionSessions.filter((s) => s.status === 'running' || s.status === 'paused' || s.status === 'draft')
-  const recentSessions = executionSessions.filter((s) => s.status !== 'running' && s.status !== 'paused' && s.status !== 'draft')
+  // Sessions are execution history only. Editable request documents live in Flows.
+  const liveSessions = sessions.filter((s) => s.status === 'running' || s.status === 'paused' || s.status === 'draft')
+  const recentSessions = sessions.filter((s) => s.status !== 'running' && s.status !== 'paused' && s.status !== 'draft')
 
   return (
     <div className="sb">
       <div className="sb-brand">
-        <div className="bmark"><IconBolt size={14} color="#fff" /></div>
+        <img className="bmark" src={apixIcon} alt="" />
         <span className="bname">Apix</span>
         <span className="bver">v4</span>
       </div>
@@ -81,12 +78,7 @@ export function Sidebar({
         </button>
 
         <section className="sb-group" aria-labelledby="sidebar-flows">
-          <div className="sb-sec-row">
-            <div className="sb-sec" id="sidebar-flows">Flows</div>
-            <button type="button" className="sb-sec-action" onClick={onNewFlow} aria-label="New flow" title="New flow">
-              <IconPlus size={12} />
-            </button>
-          </div>
+          <div className="sb-sec" id="sidebar-flows">Flows</div>
           {activeFlows.length === 0 && <div className="sb-empty">No flows yet</div>}
           {activeFlows.map((summary) => (
             <FlowSidebarItem

@@ -35,46 +35,13 @@ describe('session step removal', () => {
   })
 })
 
-describe('Scratch session creation', () => {
-  it('starts an ephemeral multi-request workspace with one blank request', () => {
-    useSessionStore.setState({ sessions: [], activeSessionId: null })
-
-    const id = useSessionStore.getState().startScratchSession()
-    const scratch = useSessionStore.getState().sessions[0]
-
-    expect(scratch.id).toBe(id)
-    expect(scratch.type).toBe('manual')
-    expect(scratch.name).toBe('Scratch')
-    expect(scratch.status).toBe('draft')
-    expect(scratch.steps).toHaveLength(1)
-    expect(scratch.steps[0].type).toBe('manual-input')
-
-    const sameId = useSessionStore.getState().startScratchSession()
-    expect(sameId).toBe(id)
-    expect(useSessionStore.getState().sessions).toHaveLength(1)
-
-    useSessionStore.getState().appendManualStep(id)
-    expect(useSessionStore.getState().sessions[0].status).toBe('draft')
-    expect(useSessionStore.getState().sessions[0].steps).toHaveLength(2)
-
-    useSessionStore.getState().resetScratchSession(id)
-    expect(useSessionStore.getState().sessions[0].steps).toHaveLength(1)
-    expect(useSessionStore.getState().sessions[0].status).toBe('draft')
-  })
-
-  it('preserves the local Scratch when backend sessions finish loading', () => {
-    useSessionStore.setState({ sessions: [], activeSessionId: null })
-    const scratchId = useSessionStore.getState().startScratchSession()
+describe('session hydration', () => {
+  it('treats sessions as backend execution state', () => {
     useSessionStore.getState().setSessions([{
-      id: 'ai-1',
-      type: 'ai',
-      name: 'AI run',
-      status: 'running',
-      startedAt: 1,
-      steps: [],
+      id: 'ai-1', type: 'ai', name: 'AI run', status: 'running', startedAt: 1, steps: [],
     }])
 
-    expect(useSessionStore.getState().sessions.map((item) => item.id)).toEqual([scratchId, 'ai-1'])
-    expect(useSessionStore.getState().activeSessionId).toBe(scratchId)
+    expect(useSessionStore.getState().sessions.map((item) => item.id)).toEqual(['ai-1'])
+    expect(useSessionStore.getState().activeSessionId).toBe('ai-1')
   })
 })

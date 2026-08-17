@@ -40,8 +40,6 @@ export function Shell() {
   const loadState = useSessionStore((s) => s.loadState)
   const loadSessions = useSessionStore((s) => s.loadSessions)
   const appendManualStep = useSessionStore((s) => s.appendManualStep)
-  const startScratchSession = useSessionStore((s) => s.startScratchSession)
-  const resetScratchSession = useSessionStore((s) => s.resetScratchSession)
   const setActiveSession = useSessionStore((s) => s.setActiveSession)
   const resolvePausedStep = useSessionStore((s) => s.resolvePausedStep)
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
@@ -75,7 +73,6 @@ export function Shell() {
   const [panelTab, setPanelTab] = useState<'session' | 'rules'>('session')
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   const [undoFlow, setUndoFlow] = useState<{ id: string; name: string } | null>(null)
-  const [savingScratchAsFlow, setSavingScratchAsFlow] = useState(false)
 
   useEffect(() => {
     void loadSessions()
@@ -189,14 +186,14 @@ export function Shell() {
     setOverlay('runs')
   }
 
-  async function reopenHistoryRun(run: BackendRun, destination: 'scratch' | 'flow') {
+  async function reopenHistoryRun(run: BackendRun, destination: 'new-flow' | 'current-flow') {
     const request: RequestData = {
       ...run.request_snapshot,
       query_params: (run.request_snapshot.query_params ?? []).map((item) => ({ ...item })),
       headers: (run.request_snapshot.headers ?? []).map((item) => ({ ...item })),
     }
 
-    if (destination === 'flow' && selectedFlowId && flowDraft) {
+    if (destination === 'current-flow' && selectedFlowId && flowDraft) {
       updateFlowDraft(selectedFlowId, (draft) => ({
         ...draft,
         steps: [
@@ -215,36 +212,22 @@ export function Shell() {
     }
 
     setOverlay(null)
-    if (selectedFlowId) {
-      await flushSave(selectedFlowId).catch(() => undefined)
-    }
-    useFlowStore.setState({ selectedFlowId: null })
+    if (selectedFlowId) await flushSave(selectedFlowId).catch(() => undefined)
     useFlowRunStore.setState({ activeRunId: null })
-
-    const store = useSessionStore.getState()
-    const scratch = store.sessions.find(
-      (session) => session.type === 'manual' && session.source === 'scratch',
-    )
-    const scratchId = scratch?.id ?? startScratchSession()
-    const stepId = scratch
-      ? appendManualStep(scratch.id, {
-          method: request.method,
-          url: request.url,
-          apiRequestId: run.api_request_id ?? undefined,
-        })
-      : useSessionStore.getState().sessions
-          .find((session) => session.id === scratchId)
-          ?.steps[0]?.id
-
-    setActiveSession(scratchId)
-    if (stepId) {
-      useSessionStore.getState().updateStep(scratchId, stepId, {
-        method: request.method,
-        url: request.url,
-        apiRequestId: run.api_request_id ?? undefined,
-        requestBody: request.method !== 'GET' ? request.body : undefined,
-        requestData: request,
-      })
+    try {
+      const flow = await createFlow()
+      updateFlowDraft(flow.id, (draft) => ({
+        ...draft,
+        steps: [{
+          ...createBlankFlowStep(0),
+          name: requestPath(request.url),
+          source_api_request_id: run.api_request_id ?? null,
+          request,
+        }],
+      }))
+      await flushSave(flow.id)
+    } catch {
+      // Keep the current list unchanged when a new Flow cannot be persisted.
     }
   }
 
@@ -291,9 +274,11 @@ export function Shell() {
     resolvePausedStep(activeSession.id, step.id, action)
   }
 
-  async function startFlow() {
+  async function createBlankFlow() {
     closeLayers()
-    // Create a durable Flow on the backend so a refresh never loses it.
+    if (selectedFlowId) await flushSave(selectedFlowId).catch(() => undefined)
+    useFlowRunStore.setState({ activeRunId: null })
+    // A request document is always a Flow; the editor supplies its first blank step.
     try {
       await createFlow()
     } catch {
@@ -308,59 +293,7 @@ export function Shell() {
   }
 
   async function openNewRequest() {
-    closeLayers()
-    if (selectedFlowId) {
-      await flushSave(selectedFlowId).catch(() => undefined)
-    }
-    useFlowStore.setState({ selectedFlowId: null })
-    useFlowRunStore.setState({ activeRunId: null })
-    const scratch = useSessionStore.getState().sessions.find(
-      (session) => session.type === 'manual' && session.source === 'scratch',
-    )
-    if (!scratch) {
-      startScratchSession()
-      return
-    }
-    setActiveSession(scratch.id)
-    appendManualStep(scratch.id)
-  }
-
-  async function saveScratchAsFlow() {
-    if (!activeSession || activeSession.type !== 'manual' || savingScratchAsFlow) return
-    setSavingScratchAsFlow(true)
-    try {
-      const scratch = activeSession
-      const flow = await createFlow()
-      updateFlowDraft(flow.id, (draft) => ({
-        ...draft,
-        steps: scratch.steps
-          .filter((step) => step.type === 'manual-input' || step.type === 'http')
-          .map((step, position) => {
-            const request = step.requestData ?? {
-              method: step.method ?? 'GET',
-              url: step.url ?? '',
-              query_params: [],
-              headers: [],
-              body_type: step.requestBody ? 'json' : 'none',
-              body: step.requestBody ?? '',
-            }
-            return {
-              ...createBlankFlowStep(position),
-              name: requestPath(request.url),
-              source_api_request_id: step.apiRequestId ?? null,
-              request,
-            }
-          }),
-      }))
-      await flushSave(flow.id)
-    } finally {
-      setSavingScratchAsFlow(false)
-    }
-  }
-
-  function clearScratch() {
-    if (!activeSession || activeSession.type !== 'manual') return
-    resetScratchSession(activeSession.id)
+    await createBlankFlow()
   }
 
   async function openSession(id: string) {
@@ -417,7 +350,6 @@ export function Shell() {
     <div className="app">
       <Sidebar
         onNewRequest={() => void openNewRequest()}
-        onNewFlow={() => void startFlow()}
         onOpenSession={(id) => void openSession(id)}
         onOpenFlow={openFlow}
         onRenameFlow={requestRenameFlow}
@@ -452,9 +384,6 @@ export function Shell() {
               onSearch={openSearch}
               onLibrary={openLibrary}
               onRunHistory={openRunHistory}
-              onSaveAsFlow={() => void saveScratchAsFlow()}
-              onClearScratch={clearScratch}
-              savingAsFlow={savingScratchAsFlow}
             />
             <div className="tl-wrap">
               {loadState === 'loading' && !activeSession ? (

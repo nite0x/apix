@@ -51,7 +51,7 @@ func (e *Executor) Execute(
 	// 1. Get or create session
 	session, existed := e.sessions.Get(sessionID)
 	if !existed {
-		session = e.sessions.GetOrCreate(sessionID, task, "claude-desktop")
+		session = e.sessions.GetOrCreate(sessionID, task, "mcp")
 		e.hub.Push(session.ID, Event{
 			Type:    EventSessionStart,
 			Payload: session,

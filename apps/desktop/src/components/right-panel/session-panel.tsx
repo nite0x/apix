@@ -28,9 +28,6 @@ export function SessionPanel({ session, activeTab, onTabChange, onManageRules }:
 
   const doneCount = session.steps.filter((step) => step.status === 'done').length
   const pendingCount = session.steps.filter((step) => step.status === 'pending' || step.status === 'running' || step.status === 'paused').length
-  const isScratch = session.type === 'manual'
-  const requestLabel = `${session.steps.length} request${session.steps.length === 1 ? '' : 's'}`
-
   return (
     <aside className="rp" aria-label="Session details">
       <div className="rp-tabs" role="tablist">
@@ -42,16 +39,15 @@ export function SessionPanel({ session, activeTab, onTabChange, onManageRules }:
         {activeTab === 'session' ? (
           session.status === 'draft' ? (
             <>
-              <div className="rs"><div className="rl">{isScratch ? 'Scratch status' : 'Session status'}</div><div className="run-card"><div className="run-line"><span className="context-chip ctx-paused">Draft</span><strong>{isScratch ? requestLabel : 'New session'}</strong></div><div className="run-line muted-copy">{isScratch ? 'Requests run independently' : 'No requests sent yet'}</div></div></div>
-              <div className="rs"><div className="rl">Add requests</div><div className="info-card"><strong>Blank request or API Library</strong>Keep testing APIs here without creating a managed Flow.</div></div>
+              <div className="rs"><div className="rl">Session status</div><div className="run-card"><div className="run-line"><span className="context-chip ctx-paused">Draft</span><strong>New session</strong></div><div className="run-line muted-copy">No requests sent yet</div></div></div>
               <div className="rs"><div className="rl">Environment</div><div className="env-row"><span className="env-dot" />{session.environment ?? 'Production'}</div></div>
             </>
           ) : (
             <>
               <div className="rs">
-                <div className="rl">{isScratch ? 'Scratch status' : 'Run status'}</div>
+                <div className="rl">Run status</div>
                 <div className="run-card">
-                  <div className="run-line"><span className={`context-chip ctx-${session.status}`}>{session.status[0].toUpperCase() + session.status.slice(1)}</span><strong>{isScratch ? requestLabel : `Step ${session.currentStep ?? Math.max(doneCount + 1, 1)}`}</strong></div>
+                  <div className="run-line"><span className={`context-chip ctx-${session.status}`}>{session.status[0].toUpperCase() + session.status.slice(1)}</span><strong>{`Step ${session.currentStep ?? Math.max(doneCount + 1, 1)}`}</strong></div>
                   <div className="run-line"><span className="done-copy">{doneCount} done</span><span className="pending-copy">/ {pendingCount} pending</span></div>
                   <div className="run-line"><span className="context-chip ctx-prod">{session.environment ?? 'Production'}</span><span className="elapsed-copy">{session.elapsedMs ?? 0}ms elapsed</span></div>
                 </div>

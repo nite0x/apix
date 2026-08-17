@@ -98,8 +98,6 @@ interface AppStore {
   updateStep: (sessionId: string, stepId: string, patch: Partial<Step>) => void
   removeStep: (sessionId: string, stepId: string) => void
   loadSessions: () => Promise<void>
-  startScratchSession: () => string
-  resetScratchSession: (id: string) => void
   appendManualStep: (sessionId: string, request?: { method?: string; url?: string; apiRequestId?: string }) => string
   configureManualStep: (sessionId: string, stepId: string, request: { method?: string; url?: string; apiRequestId?: string }) => void
   resolvePausedStep: (sessionId: string, stepId: string, action: 'continue' | 'skip' | 'stop') => void
@@ -193,18 +191,12 @@ export const useSessionStore = create<AppStore>((set, get) => ({
 
   setSessions: (sessions) =>
     set((state) => {
-      // Backend execution sessions may finish loading after a local Scratch was
-      // opened. Preserve that singleton instead of replacing it on hydration.
-      const scratch = state.sessions.find((session) => session.type === 'manual' && session.source === 'scratch')
-      const merged = scratch && !sessions.some((session) => session.id === scratch.id)
-        ? [scratch, ...sessions]
-        : sessions
       return {
-        sessions: merged,
+        sessions,
         activeSessionId:
-          state.activeSessionId && merged.some((session) => session.id === state.activeSessionId)
+          state.activeSessionId && sessions.some((session) => session.id === state.activeSessionId)
             ? state.activeSessionId
-            : merged[0]?.id ?? null,
+            : sessions[0]?.id ?? null,
       }
     }),
 
@@ -275,50 +267,6 @@ export const useSessionStore = create<AppStore>((set, get) => ({
     } catch {
       set({ loadState: 'error' })
     }
-  },
-
-  startScratchSession: () => {
-    const existing = get().sessions.find((session) => session.type === 'manual' && session.source === 'scratch')
-    if (existing) {
-      set({ activeSessionId: existing.id })
-      return existing.id
-    }
-    const id = `scratch-${Date.now()}`
-    const stepId = `${id}-input`
-    set((state) => ({
-      activeSessionId: id,
-      sessions: [{
-        id,
-        type: 'manual',
-        name: 'Scratch',
-        status: 'draft',
-        startedAt: Date.now(),
-        source: 'scratch',
-        environment: 'Production',
-        currentStep: 1,
-        totalSteps: 1,
-        steps: [{ id: stepId, type: 'manual-input', status: 'pending' }],
-      }, ...state.sessions],
-    }))
-    return id
-  },
-
-  resetScratchSession: (id) => {
-    const stepId = `${id}-input-${Date.now()}`
-    set((state) => ({
-      activeSessionId: id,
-      sessions: state.sessions.map((session) => session.id === id ? {
-        ...session,
-        name: 'Scratch',
-        status: 'draft',
-        currentStep: 1,
-        totalSteps: 1,
-        summary: undefined,
-        variables: undefined,
-        matchedRule: undefined,
-        steps: [{ id: stepId, type: 'manual-input', status: 'pending' }],
-      } : session),
-    }))
   },
 
   appendManualStep: (sessionId, request = {}) => {

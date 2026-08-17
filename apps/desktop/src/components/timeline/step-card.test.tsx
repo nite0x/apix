@@ -58,7 +58,7 @@ describe('manual API test card', () => {
       sessions: [{
         id: 'session-1',
         type: 'manual',
-        name: 'Scratch',
+        name: 'Manual run',
         status: 'idle',
         startedAt: 1,
         steps: [step],

@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-import { IconApi, IconGitBranch, IconHistory, IconPlayerPlay, IconPlayerStop, IconSearch, IconTrash } from '@tabler/icons-react'
+import { IconApi, IconHistory, IconPlayerPlay, IconPlayerStop, IconSearch } from '@tabler/icons-react'
 import type { Session } from '../../store/session-store'
 
 interface Props {
@@ -9,9 +8,6 @@ interface Props {
   onSearch: () => void
   onLibrary: () => void
   onRunHistory: () => void
-  onSaveAsFlow?: () => void
-  onClearScratch?: () => void
-  savingAsFlow?: boolean
 }
 
 export function Topbar({
@@ -21,29 +17,10 @@ export function Topbar({
   onSearch,
   onLibrary,
   onRunHistory,
-  onSaveAsFlow,
-  onClearScratch,
-  savingAsFlow = false,
 }: Props) {
-  const [confirmingClear, setConfirmingClear] = useState(false)
-  const isScratch = session?.type === 'manual'
-
-  useEffect(() => {
-    setConfirmingClear(false)
-  }, [session?.id])
-
-  function handleClearScratch() {
-    if (!confirmingClear) {
-      setConfirmingClear(true)
-      return
-    }
-    onClearScratch?.()
-    setConfirmingClear(false)
-  }
-
   const pill = !session ? '' :
     session.status === 'paused' ? 'pill pl-paused' :
-    isScratch ? 'pill pl-manual' :
+    session.type === 'manual' ? 'pill pl-manual' :
     session.status === 'running' ? 'pill pl-run' :
     session.status === 'done' ? 'pill pl-done' :
     session.status === 'failed' ? 'pill pl-err' :
@@ -51,11 +28,9 @@ export function Topbar({
 
   const pillText = !session ? '' :
     session.status === 'running'
-      ? isScratch ? 'Scratch session' : `Running · step ${session.steps.filter(s => s.status === 'done').length + 1}`
+      ? `Running · step ${session.steps.filter(s => s.status === 'done').length + 1}`
       : session.status === 'paused'
         ? 'Paused by rule'
-        : isScratch
-          ? 'Scratch session'
       : session.status === 'done'
         ? `Done · ${session.steps.filter(s => s.type !== 'think').length} steps`
         : session.status === 'failed'
@@ -70,12 +45,10 @@ export function Topbar({
       {session ? (
         <>
           <div className="tb-title" style={titleStyle}>
-            <span>{isScratch ? 'Scratch' : session.name}</span>
-            {(session.currentStep || isScratch) && (
+            <span>{session.name}</span>
+            {session.currentStep && (
               <small>
-                {isScratch
-                  ? `${session.steps.length} request${session.steps.length === 1 ? '' : 's'}`
-                  : `Step ${session.currentStep} of ${session.totalSteps ?? session.steps.length}`}
+                {`Step ${session.currentStep} of ${session.totalSteps ?? session.steps.length}`}
               </small>
             )}
           </div>
@@ -93,30 +66,6 @@ export function Topbar({
           <button type="button" className="tb-btn tb-review" onClick={onReview}><IconPlayerPlay size={13} /> Review</button>
           <button type="button" className="tb-btn tb-stop" onClick={onStop}><IconPlayerStop size={13} /> Stop</button>
           <div className="tb-sep" />
-        </>
-      )}
-      {isScratch && onSaveAsFlow && (
-        <button type="button" className="tb-btn tb-save-flow" onClick={onSaveAsFlow} disabled={savingAsFlow}>
-          <IconGitBranch size={13} />
-          {savingAsFlow ? 'Saving…' : 'Save as Flow'}
-        </button>
-      )}
-      {isScratch && onClearScratch && (
-        <>
-          <button
-            type="button"
-            className={`tb-btn${confirmingClear ? ' tb-stop' : ''}`}
-            onClick={handleClearScratch}
-            disabled={savingAsFlow}
-          >
-            <IconTrash size={13} />
-            {confirmingClear ? 'Confirm clear' : 'Clear'}
-          </button>
-          {confirmingClear && (
-            <button type="button" className="tb-btn" onClick={() => setConfirmingClear(false)}>
-              Cancel
-            </button>
-          )}
         </>
       )}
       <button type="button" className="tb-search" aria-label="搜索接口" onClick={onSearch}><IconSearch size={13} /> 搜索接口… <kbd>⌘K</kbd></button>

@@ -51,10 +51,8 @@ a { color: inherit; text-decoration: none; }
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  background: #20201f;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
+  object-fit: contain;
   flex-shrink: 0;
 }
 

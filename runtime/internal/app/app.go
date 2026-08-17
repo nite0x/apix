@@ -1,9 +1,10 @@
 package app
 
 import (
-	"context"
 	"log"
+	"net/http"
 	"os"
+	"strings"
 
 	"github.com/apix/apix/runtime/internal/api"
 	"github.com/apix/apix/runtime/internal/core"
@@ -14,6 +15,12 @@ import (
 )
 
 func Run(_ []string) error {
+	// stdout is reserved for callers that embed this binary. Keep every normal
+	// runtime log on stderr so it can never corrupt a protocol response.
+	log.SetOutput(os.Stderr)
+	gin.DefaultWriter = os.Stderr
+	gin.DefaultErrorWriter = os.Stderr
+
 	// 1. Storage
 	db := store.NewSQLiteStore(sqlitePath())
 	// 2. Core modules
@@ -31,10 +38,17 @@ func Run(_ []string) error {
 	// 3. MCP server
 	mcp := mcpserver.NewServer(executor)
 
-	// 4. REST API + WebSocket on :4317
+	// 4. REST API, WebSocket, and Streamable HTTP MCP on localhost.
 	gin.SetMode(gin.ReleaseMode)
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.LoggerWithWriter(os.Stderr), gin.RecoveryWithWriter(os.Stderr))
 	r.Use(func(c *gin.Context) {
+		// Streamable MCP has its own strict Origin guard below. Keep the
+		// legacy browser CORS policy away from /mcp.
+		if c.Request.URL.Path == "/mcp" {
+			c.Next()
+			return
+		}
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type")
@@ -56,19 +70,36 @@ func Run(_ []string) error {
 
 	// 5. Register HTTP endpoints for both MCP and the frontend.
 	mcp.RegisterHTTPTools(httpService)
+	r.Any("/mcp", allowMCPOrigin(), gin.WrapH(mcp.HTTPHandler()))
 	httpService.Routes(r.Group("/api"))
 
-	// 6. Start HTTP server
-	go func() {
-		log.Println("Apix API listening on :4317")
-		if err := r.Run(":4317"); err != nil {
-			log.Fatal(err)
-		}
-	}()
+	// 6. One independent Runtime owns both transports. AI clients connect to
+	// http://127.0.0.1:4317/mcp; desktop clients continue to use /api and /ws.
+	log.Println("Apix Runtime listening on http://127.0.0.1:4317 (MCP: /mcp)")
+	return r.Run("127.0.0.1:4317")
+}
 
-	// 7. MCP Server (stdio, blocking — Claude Desktop connects here)
-	log.Println("Apix MCP Server starting...")
-	return mcp.ServeStdio(context.Background())
+// allowMCPOrigin rejects browser requests unless their exact Origin appears
+// in APIX_MCP_ALLOWED_ORIGINS. Native MCP clients normally omit Origin and are
+// allowed because the Runtime is bound to loopback only.
+func allowMCPOrigin() gin.HandlerFunc {
+	allowed := map[string]struct{}{}
+	for _, value := range strings.Split(os.Getenv("APIX_MCP_ALLOWED_ORIGINS"), ",") {
+		if origin := strings.TrimSpace(value); origin != "" {
+			allowed[origin] = struct{}{}
+		}
+	}
+
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		if origin != "" {
+			if _, ok := allowed[origin]; !ok {
+				c.AbortWithStatus(http.StatusForbidden)
+				return
+			}
+		}
+		c.Next()
+	}
 }
 
 func sqlitePath() string {
