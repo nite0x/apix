@@ -1,6 +1,9 @@
 package httpapi
 
-import "time"
+import (
+	"github.com/apix/apix/runtime/internal/database"
+	"time"
+)
 
 // ── Flow definition ──────────────────────────────────
 
@@ -40,20 +43,59 @@ type FlowVariableDefinition struct {
 }
 
 type FlowStep struct {
-	ID                 string         `json:"id"`
-	Position           int            `json:"position"`
-	Type               string         `json:"type"`
-	Name               string         `json:"name"`
-	Enabled            bool           `json:"enabled"`
-	SourceAPIRequestID *string        `json:"source_api_request_id"`
-	Request            RequestData    `json:"request"`
-	Config             FlowStepConfig `json:"config"`
+	ID                 string             `json:"id"`
+	Position           int                `json:"position"`
+	Type               string             `json:"type"`
+	Name               string             `json:"name"`
+	Enabled            bool               `json:"enabled"`
+	SourceAPIRequestID *string            `json:"source_api_request_id"`
+	Request            RequestData        `json:"request"`
+	SQL                *database.Command  `json:"sql,omitempty"`
+	Service            *ServiceStepConfig `json:"service,omitempty"`
+	Config             FlowStepConfig     `json:"config"`
 }
 
 type FlowStepConfig struct {
+	Assertions      []FlowAssertion `json:"assertions,omitempty"`
+	ExpectedStatus  *int            `json:"expected_status,omitempty"`
+	ExpectedRows    *int            `json:"expected_rows,omitempty"`
 	TimeoutMS       int             `json:"timeout_ms,omitempty"`
 	ContinueOnError bool            `json:"continue_on_error"`
 	Extractors      []FlowExtractor `json:"extractors"`
+}
+
+// FlowAssertion compares a response value as text; body paths use dot notation.
+type FlowAssertion struct {
+	Source   string `json:"source"`
+	Path     string `json:"path,omitempty"`
+	Operator string `json:"operator"`
+	Expected string `json:"expected,omitempty"`
+}
+
+type FlowExtractedVariable struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Secret bool   `json:"secret"`
+	Source string `json:"source"`
+	Path   string `json:"path,omitempty"`
+}
+
+type FlowHTTPResult struct {
+	ExtractedVariables []FlowExtractedVariable `json:"extracted_variables"`
+}
+
+type ServiceStepConfig struct {
+	ServiceID string `json:"service_id"`
+	Action    string `json:"action"`
+}
+
+type AssertionResult struct {
+	Path     string `json:"path,omitempty"`
+	Operator string `json:"operator,omitempty"`
+	Kind     string `json:"kind"`
+	Expected any    `json:"expected"`
+	Actual   any    `json:"actual"`
+	Passed   bool   `json:"passed"`
 }
 
 type FlowExtractor struct {
@@ -83,37 +125,44 @@ type FlowSummary struct {
 // ── Flow run ─────────────────────────────────────────
 
 type FlowRun struct {
-	ID               string        `json:"id"`
-	ProjectID        string        `json:"project_id"`
-	FlowID           *string       `json:"flow_id"`
-	FlowVersion      int64         `json:"flow_version"`
-	FlowNameSnapshot string        `json:"flow_name_snapshot"`
-	EnvironmentID    *string       `json:"environment_id"`
-	TriggerType      string        `json:"trigger_type"`
-	Status           string        `json:"status"`
-	CurrentStep      int           `json:"current_step"`
-	TotalSteps       int           `json:"total_steps"`
-	ErrorCode        string        `json:"error_code,omitempty"`
-	ErrorMessage     string        `json:"error_message,omitempty"`
-	CreatedAt        time.Time     `json:"created_at"`
-	StartedAt        *time.Time    `json:"started_at"`
-	FinishedAt       *time.Time    `json:"finished_at"`
-	Steps            []FlowRunStep `json:"steps,omitempty"`
+	Variables        map[string]any `json:"variables,omitempty"`
+	CleanupError     string         `json:"cleanup_error,omitempty"`
+	ID               string         `json:"id"`
+	ProjectID        string         `json:"project_id"`
+	FlowID           *string        `json:"flow_id"`
+	FlowVersion      int64          `json:"flow_version"`
+	FlowNameSnapshot string         `json:"flow_name_snapshot"`
+	EnvironmentID    *string        `json:"environment_id"`
+	TriggerType      string         `json:"trigger_type"`
+	Status           string         `json:"status"`
+	CurrentStep      int            `json:"current_step"`
+	TotalSteps       int            `json:"total_steps"`
+	ErrorCode        string         `json:"error_code,omitempty"`
+	ErrorMessage     string         `json:"error_message,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	StartedAt        *time.Time     `json:"started_at"`
+	FinishedAt       *time.Time     `json:"finished_at"`
+	Steps            []FlowRunStep  `json:"steps,omitempty"`
 }
 
 type FlowRunStep struct {
-	ID              string      `json:"id"`
-	FlowRunID       string      `json:"flow_run_id"`
-	FlowStepID      *string     `json:"flow_step_id"`
-	Position        int         `json:"position"`
-	NameSnapshot    string      `json:"name_snapshot"`
-	RequestSnapshot RequestData `json:"request_snapshot"`
-	Status          string      `json:"status"`
-	APIRunID        *string     `json:"api_run_id"`
-	ErrorCode       string      `json:"error_code,omitempty"`
-	ErrorMessage    string      `json:"error_message,omitempty"`
-	StartedAt       *time.Time  `json:"started_at"`
-	FinishedAt      *time.Time  `json:"finished_at"`
+	Type            string             `json:"type"`
+	SQLSnapshot     *database.Command  `json:"sql_snapshot,omitempty"`
+	ServiceSnapshot *ServiceStepConfig `json:"service_snapshot,omitempty"`
+	Result          any                `json:"result,omitempty"`
+	Assertions      []AssertionResult  `json:"assertions,omitempty"`
+	ID              string             `json:"id"`
+	FlowRunID       string             `json:"flow_run_id"`
+	FlowStepID      *string            `json:"flow_step_id"`
+	Position        int                `json:"position"`
+	NameSnapshot    string             `json:"name_snapshot"`
+	RequestSnapshot RequestData        `json:"request_snapshot"`
+	Status          string             `json:"status"`
+	APIRunID        *string            `json:"api_run_id"`
+	ErrorCode       string             `json:"error_code,omitempty"`
+	ErrorMessage    string             `json:"error_message,omitempty"`
+	StartedAt       *time.Time         `json:"started_at"`
+	FinishedAt      *time.Time         `json:"finished_at"`
 }
 
 // flowSnapshot is the immutable payload stored in flow_runs.flow_snapshot so a

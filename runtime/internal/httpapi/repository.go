@@ -558,6 +558,11 @@ func (r *repository) getRun(id string) (*APIRun, error) {
 	_ = json.Unmarshal([]byte(snapshot), &run.RequestSnapshot)
 	_ = json.Unmarshal([]byte(headers), &run.ResponseHeaders)
 	_ = json.Unmarshal([]byte(body), &run.ResponseBody)
+	// Older snapshots may predate URL/form redaction; apply the same policy on read.
+	run.RequestSnapshot = redactRequest(run.RequestSnapshot)
+	run.ResponseHeaders = redactedJSONCopy(run.ResponseHeaders)
+	run.ResponseBody = redactedJSONCopy(run.ResponseBody)
+	run.ErrorMessage = redactExecutionError(run.ErrorMessage)
 	return &run, nil
 }
 

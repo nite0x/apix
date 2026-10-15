@@ -18,7 +18,7 @@ func (r *repository) createFlowRun(flow *Flow, envID *string, trigger string, va
 	enabled := make([]FlowStep, 0, len(flow.Steps))
 	for _, step := range flow.Steps {
 		if step.Enabled {
-			if strings.TrimSpace(step.Request.URL) == "" {
+			if (step.Type == "http" || step.Type == "") && strings.TrimSpace(step.Request.URL) == "" {
 				return nil, fmt.Errorf("%w: step %q requires a url", errNoRunnableStep, step.Name)
 			}
 			enabled = append(enabled, step)
@@ -33,6 +33,17 @@ func (r *repository) createFlowRun(flow *Flow, envID *string, trigger string, va
 	if variablesSnapshot == nil {
 		variablesSnapshot = map[string]any{}
 	}
+	// Include defaults for inspection without changing the execution inputs.
+	visibleVariables := map[string]any{}
+	for _, def := range flow.Variables {
+		if def.DefaultValue != "" {
+			visibleVariables[def.Name] = def.DefaultValue
+		}
+	}
+	for name, value := range variablesSnapshot {
+		visibleVariables[name] = value
+	}
+	variablesSnapshot = visibleVariables
 
 	snapshot := flowSnapshot{
 		Name:        flow.Name,
@@ -55,6 +66,7 @@ func (r *repository) createFlowRun(flow *Flow, envID *string, trigger string, va
 		CurrentStep:      0,
 		TotalSteps:       len(enabled),
 		CreatedAt:        now,
+		Variables:        variablesSnapshot,
 	}
 
 	tx, err := r.db.Begin()
@@ -74,6 +86,9 @@ func (r *repository) createFlowRun(flow *Flow, envID *string, trigger string, va
 	for i, step := range enabled {
 		stepID := step.ID
 		runStep := FlowRunStep{
+			Type:            step.Type,
+			SQLSnapshot:     step.SQL,
+			ServiceSnapshot: step.Service,
 			ID:              uuid.NewString(),
 			FlowRunID:       run.ID,
 			FlowStepID:      &stepID,
@@ -83,9 +98,10 @@ func (r *repository) createFlowRun(flow *Flow, envID *string, trigger string, va
 			Status:          "pending",
 		}
 		if _, err := tx.Exec(`INSERT INTO flow_run_steps
-			(id, flow_run_id, flow_step_id, position, name_snapshot, request_snapshot, status)
-			VALUES (?,?,?,?,?,?,?)`, runStep.ID, runStep.FlowRunID, runStep.FlowStepID, runStep.Position,
-			runStep.NameSnapshot, marshalJSON(runStep.RequestSnapshot), runStep.Status); err != nil {
+			(id, flow_run_id, flow_step_id, position, name_snapshot, request_snapshot, status, type, sql_snapshot, service_snapshot)
+			VALUES (?,?,?,?,?,?,?,?,?,?)`, runStep.ID, runStep.FlowRunID, runStep.FlowStepID, runStep.Position,
+			runStep.NameSnapshot, marshalJSON(runStep.RequestSnapshot), runStep.Status, step.Type,
+			marshalJSON(step.SQL), marshalJSON(step.Service)); err != nil {
 			return nil, err
 		}
 		run.Steps = append(run.Steps, runStep)
@@ -104,10 +120,10 @@ func (r *repository) getFlowRun(id string) (*FlowRun, error) {
 	var started, finished sql.NullTime
 	err := r.db.QueryRow(`SELECT id, project_id, flow_id, flow_version, flow_name_snapshot, flow_snapshot,
 		environment_id, trigger_type, status, current_step, total_steps, variables_snapshot,
-		error_code, error_message, created_at, started_at, finished_at FROM flow_runs WHERE id=?`, id).Scan(
+		error_code, error_message, created_at, started_at, finished_at, COALESCE(cleanup_error,'') FROM flow_runs WHERE id=?`, id).Scan(
 		&run.ID, &run.ProjectID, &flowID, &run.FlowVersion, &run.FlowNameSnapshot, &snapshot,
 		&envID, &run.TriggerType, &run.Status, &run.CurrentStep, &run.TotalSteps, &variables,
-		&errCode, &errMsg, &run.CreatedAt, &started, &finished)
+		&errCode, &errMsg, &run.CreatedAt, &started, &finished, &run.CleanupError)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errNotFound
 	}
@@ -121,6 +137,7 @@ func (r *repository) getFlowRun(id string) (*FlowRun, error) {
 		run.EnvironmentID = &envID.String
 	}
 	run.ErrorCode, run.ErrorMessage = errCode.String, errMsg.String
+	_ = json.Unmarshal([]byte(variables), &run.Variables)
 	if started.Valid {
 		run.StartedAt = &started.Time
 	}
@@ -137,7 +154,7 @@ func (r *repository) getFlowRun(id string) (*FlowRun, error) {
 
 func (r *repository) listFlowRunSteps(runID string) ([]FlowRunStep, error) {
 	rows, err := r.db.Query(`SELECT id, flow_run_id, flow_step_id, position, name_snapshot, request_snapshot,
-		status, api_run_id, error_code, error_message, started_at, finished_at
+		status, api_run_id, error_code, error_message, started_at, finished_at, type, sql_snapshot, service_snapshot, result, assertions
 		FROM flow_run_steps WHERE flow_run_id=? ORDER BY position`, runID)
 	if err != nil {
 		return nil, err
@@ -148,9 +165,11 @@ func (r *repository) listFlowRunSteps(runID string) ([]FlowRunStep, error) {
 		var s FlowRunStep
 		var flowStepID, apiRunID, errCode, errMsg sql.NullString
 		var requestJSON string
+		var sqlJSON, serviceJSON, resultJSON sql.NullString
+		var assertionJSON string
 		var started, finished sql.NullTime
 		if err := rows.Scan(&s.ID, &s.FlowRunID, &flowStepID, &s.Position, &s.NameSnapshot, &requestJSON,
-			&s.Status, &apiRunID, &errCode, &errMsg, &started, &finished); err != nil {
+			&s.Status, &apiRunID, &errCode, &errMsg, &started, &finished, &s.Type, &sqlJSON, &serviceJSON, &resultJSON, &assertionJSON); err != nil {
 			return nil, err
 		}
 		if flowStepID.Valid {
@@ -167,6 +186,10 @@ func (r *repository) listFlowRunSteps(runID string) ([]FlowRunStep, error) {
 			s.FinishedAt = &finished.Time
 		}
 		_ = json.Unmarshal([]byte(requestJSON), &s.RequestSnapshot)
+		_ = json.Unmarshal([]byte(sqlJSON.String), &s.SQLSnapshot)
+		_ = json.Unmarshal([]byte(serviceJSON.String), &s.ServiceSnapshot)
+		_ = json.Unmarshal([]byte(resultJSON.String), &s.Result)
+		_ = json.Unmarshal([]byte(assertionJSON), &s.Assertions)
 		out = append(out, s)
 	}
 	return out, rows.Err()
@@ -211,8 +234,16 @@ func (r *repository) setFlowRunStatus(id, status string) error {
 }
 
 func (r *repository) startFlowRun(id string) error {
-	_, err := r.db.Exec(`UPDATE flow_runs SET status='running', started_at=COALESCE(started_at, ?) WHERE id=?`, time.Now().UTC(), id)
-	return err
+	result, err := r.db.Exec(`UPDATE flow_runs SET status='running', started_at=COALESCE(started_at, ?) WHERE id=? AND status='queued'`, time.Now().UTC(), id)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return fmt.Errorf("flow run %s is not queued", id)
+	}
+	return nil
 }
 
 func (r *repository) setFlowRunCurrentStep(id string, current int) error {
@@ -221,7 +252,7 @@ func (r *repository) setFlowRunCurrentStep(id string, current int) error {
 }
 
 func (r *repository) finishFlowRun(id, status, errCode, errMsg string) error {
-	_, err := r.db.Exec(`UPDATE flow_runs SET status=?, error_code=?, error_message=?, finished_at=? WHERE id=?`,
+	_, err := r.db.Exec(`UPDATE flow_runs SET status=?, error_code=?, error_message=?, finished_at=? WHERE id=? AND status IN ('queued','running','paused')`,
 		status, optionalString(errCode), optionalString(errMsg), time.Now().UTC(), id)
 	return err
 }
@@ -230,6 +261,19 @@ func (r *repository) setFlowRunStepStatus(stepRunID, status string, apiRunID *st
 	_, err := r.db.Exec(`UPDATE flow_run_steps SET status=?, api_run_id=COALESCE(?, api_run_id),
 		error_code=?, error_message=?, started_at=COALESCE(?, started_at), finished_at=COALESCE(?, finished_at) WHERE id=?`,
 		status, apiRunID, optionalString(errCode), optionalString(errMsg), started, finished, stepRunID)
+	return err
+}
+
+func (r *repository) setFlowRunStepResult(id string, result any, assertions []AssertionResult) error {
+	if assertions == nil {
+		assertions = []AssertionResult{}
+	}
+	_, err := r.db.Exec(`UPDATE flow_run_steps SET result=?, assertions=? WHERE id=?`, marshalJSON(result), marshalJSON(assertions), id)
+	return err
+}
+
+func (r *repository) setFlowRunCleanupError(id, message string) error {
+	_, err := r.db.Exec(`UPDATE flow_runs SET cleanup_error=? WHERE id=?`, optionalString(message), id)
 	return err
 }
 

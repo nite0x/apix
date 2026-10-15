@@ -85,20 +85,64 @@ func (r *repository) validateFlowAggregate(f *Flow) error {
 		if step.Type == "" {
 			step.Type = "http"
 		}
-		if step.Type != "http" {
+		if step.Type != "http" && step.Type != "sql" && step.Type != "service" {
 			return fmt.Errorf("unsupported step type %q", step.Type)
+		}
+		if (step.Type != "sql" && step.SQL != nil) || (step.Type != "service" && step.Service != nil) {
+			return fmt.Errorf("step %q carries a payload for a different step type", step.Name)
+		}
+		if step.Type != "http" && (strings.TrimSpace(step.Request.URL) != "" || step.Request.Body != "" || len(step.Request.Headers) > 0 || len(step.Request.QueryParams) > 0 || step.Request.AuthConfig != nil) {
+			return fmt.Errorf("step %q carries an HTTP request payload for a different step type", step.Name)
 		}
 		if step.Config.TimeoutMS != 0 && (step.Config.TimeoutMS < 1000 || step.Config.TimeoutMS > 300000) {
 			return fmt.Errorf("step timeout_ms must be between 1000 and 300000")
 		}
-		if step.Enabled {
+		if step.Config.ExpectedStatus != nil && (*step.Config.ExpectedStatus < 100 || *step.Config.ExpectedStatus > 599 || step.Type != "http") {
+			return fmt.Errorf("expected_status must be an HTTP status between 100 and 599")
+		}
+		if step.Config.ExpectedRows != nil && (*step.Config.ExpectedRows < 0 || step.Type != "sql" || step.SQL == nil || step.SQL.Mode != "query") {
+			return fmt.Errorf("expected_rows requires a SQL query and a nonnegative count")
+		}
+		if step.Type != "http" && (len(step.Config.Extractors) > 0 || step.SourceAPIRequestID != nil) {
+			return fmt.Errorf("extractors and source_api_request_id only apply to HTTP steps")
+		}
+		if step.Enabled && step.Type == "http" {
 			method := strings.ToUpper(strings.TrimSpace(step.Request.Method))
 			if !validMethods[method] {
 				return fmt.Errorf("step %q has invalid method", step.Name)
 			}
 		}
+		if step.Enabled && step.Type == "sql" {
+			if step.SQL == nil || strings.TrimSpace(step.SQL.ConnectionID) == "" || strings.TrimSpace(step.SQL.SQL) == "" {
+				return fmt.Errorf("SQL step %q requires connection_id and sql", step.Name)
+			}
+			if step.SQL.Mode != "query" && step.SQL.Mode != "exec" {
+				return fmt.Errorf("SQL mode must be query or exec")
+			}
+		}
+		if step.Enabled && step.Type == "service" {
+			if step.Service == nil || strings.TrimSpace(step.Service.ServiceID) == "" || (step.Service.Action != "start" && step.Service.Action != "stop") {
+				return fmt.Errorf("service step %q requires service_id and start or stop action", step.Name)
+			}
+		}
 		if err := validateExtractors(step.Config.Extractors); err != nil {
 			return err
+		}
+		if len(step.Config.Assertions) > 0 && step.Type != "http" {
+			return fmt.Errorf("response assertions only apply to HTTP steps")
+		}
+		for _, assertion := range step.Config.Assertions {
+			if assertion.Source != "body" && assertion.Source != "header" && assertion.Source != "status" {
+				return fmt.Errorf("invalid assertion source %q", assertion.Source)
+			}
+			if assertion.Source == "header" && strings.TrimSpace(assertion.Path) == "" {
+				return fmt.Errorf("header assertion requires a header name")
+			}
+			switch assertion.Operator {
+			case "equals", "not_equals", "contains", "exists":
+			default:
+				return fmt.Errorf("invalid assertion operator %q", assertion.Operator)
+			}
 		}
 		if step.SourceAPIRequestID != nil {
 			if err := r.assertRequestInProject(*step.SourceAPIRequestID, f.ProjectID); err != nil {
@@ -123,6 +167,12 @@ func validateExtractors(extractors []FlowExtractor) error {
 		case "body", "header", "status":
 		default:
 			return fmt.Errorf("extractor %q has invalid source", e.Name)
+		}
+		if e.Source == "header" && strings.TrimSpace(e.Path) == "" {
+			return fmt.Errorf("extractor %q requires a header name", e.Name)
+		}
+		if e.Scope != "" && e.Scope != "run" {
+			return fmt.Errorf("extractor %q must use run scope", e.Name)
 		}
 	}
 	return nil
@@ -172,9 +222,13 @@ func normalizeFlowSteps(f *Flow) {
 		if step.Config.Extractors == nil {
 			step.Config.Extractors = []FlowExtractor{}
 		}
-		normalizeRequest(&step.Request)
-		if strings.TrimSpace(step.Name) == "" || step.Name == "New request" {
-			step.Name = flowStepName(step.Request.URL)
+		if step.Type == "http" {
+			normalizeRequest(&step.Request)
+			if strings.TrimSpace(step.Name) == "" || step.Name == "New request" {
+				step.Name = flowStepName(step.Request.URL)
+			}
+		} else if strings.TrimSpace(step.Name) == "" {
+			step.Name = step.Type + " step"
 		}
 	}
 	if f.Variables == nil {
@@ -285,7 +339,7 @@ func (r *repository) getFlow(id string) (*Flow, error) {
 }
 
 func (r *repository) listFlowSteps(flowID string) ([]FlowStep, error) {
-	rows, err := r.db.Query(`SELECT id, position, type, name, enabled, source_api_request_id, request_data, config
+	rows, err := r.db.Query(`SELECT id, position, type, name, enabled, source_api_request_id, request_data, config, sql_data, service_data
 		FROM flow_steps WHERE flow_id=? ORDER BY position`, flowID)
 	if err != nil {
 		return nil, err
@@ -296,8 +350,9 @@ func (r *repository) listFlowSteps(flowID string) ([]FlowStep, error) {
 		var step FlowStep
 		var source sql.NullString
 		var requestJSON, configJSON string
+		var sqlJSON, serviceJSON sql.NullString
 		var enabled int
-		if err := rows.Scan(&step.ID, &step.Position, &step.Type, &step.Name, &enabled, &source, &requestJSON, &configJSON); err != nil {
+		if err := rows.Scan(&step.ID, &step.Position, &step.Type, &step.Name, &enabled, &source, &requestJSON, &configJSON, &sqlJSON, &serviceJSON); err != nil {
 			return nil, err
 		}
 		step.Enabled = enabled == 1
@@ -306,6 +361,8 @@ func (r *repository) listFlowSteps(flowID string) ([]FlowStep, error) {
 		}
 		_ = json.Unmarshal([]byte(requestJSON), &step.Request)
 		_ = json.Unmarshal([]byte(configJSON), &step.Config)
+		_ = json.Unmarshal([]byte(sqlJSON.String), &step.SQL)
+		_ = json.Unmarshal([]byte(serviceJSON.String), &step.Service)
 		if step.Config.Extractors == nil {
 			step.Config.Extractors = []FlowExtractor{}
 		}
@@ -414,9 +471,9 @@ func (r *repository) updateFlow(in *Flow, expectedVersion int64) (*Flow, error) 
 	for i := range in.Steps {
 		step := &in.Steps[i]
 		if _, err := tx.Exec(`INSERT INTO flow_steps
-			(id, flow_id, position, type, name, enabled, source_api_request_id, request_data, config, created_at, updated_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?)`, step.ID, in.ID, step.Position, step.Type, step.Name,
-			boolToInt(step.Enabled), step.SourceAPIRequestID, marshalJSON(step.Request), marshalJSON(step.Config), now, now); err != nil {
+			(id, flow_id, position, type, name, enabled, source_api_request_id, request_data, config, created_at, updated_at, sql_data, service_data)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, step.ID, in.ID, step.Position, step.Type, step.Name,
+			boolToInt(step.Enabled), step.SourceAPIRequestID, marshalJSON(step.Request), marshalJSON(step.Config), now, now, marshalJSON(step.SQL), marshalJSON(step.Service)); err != nil {
 			return nil, err
 		}
 	}
@@ -512,9 +569,9 @@ func (r *repository) duplicateFlow(id string) (*Flow, error) {
 	}
 	for _, step := range source.Steps {
 		if _, err := tx.Exec(`INSERT INTO flow_steps
-			(id, flow_id, position, type, name, enabled, source_api_request_id, request_data, config, created_at, updated_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), newID, step.Position, step.Type, step.Name,
-			boolToInt(step.Enabled), step.SourceAPIRequestID, marshalJSON(step.Request), marshalJSON(step.Config), now, now); err != nil {
+			(id, flow_id, position, type, name, enabled, source_api_request_id, request_data, config, created_at, updated_at, sql_data, service_data)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), newID, step.Position, step.Type, step.Name,
+			boolToInt(step.Enabled), step.SourceAPIRequestID, marshalJSON(step.Request), marshalJSON(step.Config), now, now, marshalJSON(step.SQL), marshalJSON(step.Service)); err != nil {
 			return nil, err
 		}
 	}

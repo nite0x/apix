@@ -139,29 +139,17 @@ func (s *HTTPService) flowRoutes(r gin.IRouter) {
 			EnvironmentID       string            `json:"environment_id"`
 			Variables           map[string]string `json:"variables"`
 		}
-		_ = c.ShouldBindJSON(&body)
-		flow, err := s.repo.getFlow(c.Param("id"))
+		if c.Request.ContentLength != 0 {
+			if err := c.ShouldBindJSON(&body); err != nil {
+				writeBadRequest(c, err)
+				return
+			}
+		}
+		run, err := s.startFlow(c.Param("id"), body.ExpectedFlowVersion, body.EnvironmentID, body.Variables, "manual")
 		if err != nil {
 			writeFlowError(c, s, c.Param("id"), err)
 			return
 		}
-		if body.ExpectedFlowVersion != 0 && flow.EditVersion != body.ExpectedFlowVersion {
-			writeFlowConflict(c, s, flow.ID)
-			return
-		}
-		var envID *string
-		if body.EnvironmentID != "" {
-			envID = &body.EnvironmentID
-		} else {
-			envID = flow.EnvironmentID
-		}
-		redacted := redactRunVariables(flow.Variables, body.Variables)
-		run, err := s.repo.createFlowRun(flow, envID, "manual", redacted)
-		if err != nil {
-			writeFlowError(c, s, flow.ID, err)
-			return
-		}
-		s.flow.StartRun(run.ID, body.Variables)
 		c.JSON(http.StatusAccepted, run)
 	})
 

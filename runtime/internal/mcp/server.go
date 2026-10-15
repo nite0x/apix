@@ -47,7 +47,9 @@ func (s *Server) RegisterHTTPTools(service *httpapi.HTTPService) {
 
 			output, err := s.executor.Execute(ctx, sessionID, task, toolName, input)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				result := mcp.NewToolResultStructuredOnly(map[string]any{"error": err.Error(), "session_id": sessionID, "result": output})
+				result.IsError = true
+				return result, nil
 			}
 			return mcp.NewToolResultStructuredOnly(output), nil
 		})

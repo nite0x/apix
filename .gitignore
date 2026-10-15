@@ -1,6 +1,7 @@
 node_modules/
 dist/
 target/
+release/
 src-tauri/binaries/
 services/runtime/runtime
 
@@ -13,6 +14,7 @@ services/runtime/runtime
 *.db
 *.db-shm
 *.db-wal
+*.credentials.key
 
 # Editor & tools
 .idea/

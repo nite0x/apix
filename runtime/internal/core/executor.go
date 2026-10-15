@@ -165,6 +165,11 @@ func (e *Executor) Execute(
 }
 
 func runReference(output any) map[string]any {
+	if result, ok := output.(interface{ RunReference() string }); ok {
+		if id := result.RunReference(); id != "" {
+			return map[string]any{"api_run_id": id}
+		}
+	}
 	values, ok := output.(map[string]any)
 	if !ok {
 		return nil
@@ -214,6 +219,9 @@ func (e *Executor) pauseAndWait(ctx context.Context, session *Session, step *Ste
 
 // Resume is called by the REST API to unblock a paused step.
 func (e *Executor) Resume(stepID string, action string, modifiedInput any) error {
+	if action != "continue" && action != "skip" && action != "stop" {
+		return fmt.Errorf("invalid resume action %q", action)
+	}
 	e.mu.Lock()
 	ch, ok := e.pauseChans[stepID]
 	e.mu.Unlock()
@@ -221,7 +229,11 @@ func (e *Executor) Resume(stepID string, action string, modifiedInput any) error
 	if !ok {
 		return fmt.Errorf("step %s is not paused", stepID)
 	}
-	ch <- PauseResult{Action: action, ModifiedInput: modifiedInput}
+	select {
+	case ch <- PauseResult{Action: action, ModifiedInput: modifiedInput}:
+	default:
+		return fmt.Errorf("resume already pending for step %s", stepID)
+	}
 	return nil
 }
 

@@ -16,6 +16,7 @@
     "build": "pnpm --dir src-tauri tauri build",
     "build:web": "pnpm --dir apps/desktop build",
     "build:sidecar": "node scripts/build-sidecar.mjs",
+    "build:runtime": "node scripts/build-runtime.mjs",
     "typecheck": "pnpm --dir apps/desktop typecheck"
   },
   "devDependencies": {

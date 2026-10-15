@@ -3,15 +3,20 @@ package core
 import (
 	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 type Hub struct {
 	mu      sync.RWMutex
+	writeMu sync.Mutex
+	sink    func(Event)
 	clients map[string][]*websocket.Conn
 	global  []*websocket.Conn
 }
+
+func (h *Hub) SetEventSink(sink func(Event)) { h.sink = sink }
 
 func NewHub() *Hub {
 	return &Hub{
@@ -39,13 +44,23 @@ func (h *Hub) Unregister(conn *websocket.Conn) {
 
 func (h *Hub) Push(sessionID string, event Event) {
 	event.SessionID = sessionID
+	if h.sink != nil {
+		h.sink(event)
+	}
 	data, err := json.Marshal(event)
 	if err != nil {
 		return
 	}
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for _, conn := range h.global {
-		conn.WriteMessage(websocket.TextMessage, data) //nolint:errcheck
+	connections := append([]*websocket.Conn(nil), h.global...)
+	h.mu.RUnlock()
+	for _, conn := range connections {
+		_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			h.Unregister(conn)
+			_ = conn.Close()
+		}
 	}
 }

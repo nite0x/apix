@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 
 	"github.com/apix/apix/runtime/internal/core"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -26,6 +27,14 @@ type SendRequestResult struct {
 	Headers    any    `json:"headers,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
 	Truncated  bool   `json:"truncated"`
+}
+
+func (r SendRequestResult) RunReference() string { return r.RunID }
+func (r SendRequestResult) HTTPStatus() int {
+	if r.Status == nil {
+		return 0
+	}
+	return *r.Status
 }
 
 var sendRequestOutputSchema = json.RawMessage(`{
@@ -151,7 +160,7 @@ func (s *HTTPService) Execute(ctx context.Context, tool string, input map[string
 		}
 		return result, err
 	}
-	return nil, nil
+	return nil, fmt.Errorf("unknown HTTP tool %q", tool)
 }
 
 func inputString(input map[string]any, key string) string {

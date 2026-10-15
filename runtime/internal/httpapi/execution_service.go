@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 )
 
 const maxStoredResponseBytes = 256 * 1024
+
+var errorURLPattern = regexp.MustCompile(`https?://[^\s"<>]+`)
 
 type executionService struct {
 	repo   *repository
@@ -66,10 +69,17 @@ func (s *executionService) Run(ctx context.Context, command RunCommand, vars *co
 	finished := time.Now().UTC()
 	run.FinishedAt = &finished
 	run.DurationMS = duration
+	if status != 0 {
+		run.ResponseStatus = &status
+		run.ResponseHeaders = redactHeaders(headers)
+		run.ResponseBody = body
+		run.ResponseSize = size
+		run.ResponseTruncated = truncated
+	}
 	if execErr != nil {
 		run.Status = "failed"
 		run.ErrorCode = "request_failed"
-		run.ErrorMessage = execErr.Error()
+		run.ErrorMessage = redactExecutionError(execErr.Error())
 		var netErr net.Error
 		if errors.As(execErr, &netErr) && netErr.Timeout() {
 			run.Status = "timed_out"
@@ -77,11 +87,6 @@ func (s *executionService) Run(ctx context.Context, command RunCommand, vars *co
 		}
 	} else {
 		run.Status = "succeeded"
-		run.ResponseStatus = &status
-		run.ResponseHeaders = redactHeaders(headers)
-		run.ResponseBody = body
-		run.ResponseSize = size
-		run.ResponseTruncated = truncated
 	}
 	if err := s.repo.finishRun(run); err != nil {
 		return nil, err
@@ -169,9 +174,7 @@ func (s *executionService) perform(ctx context.Context, data RequestData) (int, 
 	defer response.Body.Close()
 	limited := io.LimitReader(response.Body, maxStoredResponseBytes+1)
 	raw, readErr := io.ReadAll(limited)
-	if readErr != nil {
-		return 0, nil, nil, 0, false, duration, readErr
-	}
+	duration = time.Since(started).Milliseconds()
 	size := int64(len(raw))
 	truncated := len(raw) > maxStoredResponseBytes
 	if truncated {
@@ -181,7 +184,7 @@ func (s *executionService) perform(ctx context.Context, data RequestData) (int, 
 	if len(raw) > 0 && json.Unmarshal(raw, &body) != nil {
 		body = string(raw)
 	}
-	return response.StatusCode, response.Header, body, size, truncated, duration, nil
+	return response.StatusCode, response.Header, body, size, truncated, duration, readErr
 }
 
 func substituteRequest(request RequestData, vars *core.Variables) RequestData {
@@ -237,6 +240,7 @@ func applyAuth(req *http.Request, auth map[string]any) {
 }
 
 func redactRequest(request RequestData) RequestData {
+	request.URL = redactRequestURL(request.URL)
 	request.Headers = append([]KeyValue(nil), request.Headers...)
 	request.QueryParams = append([]KeyValue(nil), request.QueryParams...)
 	for i := range request.Headers {
@@ -258,10 +262,41 @@ func redactRequest(request RequestData) RequestData {
 			}
 		}
 	}
+	if request.BodyType == "urlencoded" || request.BodyType == "x-www-form-urlencoded" || request.BodyType == "form" {
+		if values, err := url.ParseQuery(request.Body); err == nil {
+			redactQuery(values)
+			request.Body = values.Encode()
+		}
+	}
 	if request.AuthConfig != nil {
 		request.AuthConfig = map[string]any{"type": request.AuthConfig["type"], "redacted": true}
 	}
 	return request
+}
+
+func redactQuery(values url.Values) {
+	for name := range values {
+		if isSensitiveName(name) {
+			values.Set(name, "••••••")
+		}
+	}
+}
+
+func redactRequestURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "（无效 URL）"
+	}
+	u.User = nil
+	u.Fragment = ""
+	query := u.Query()
+	redactQuery(query)
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
+func redactExecutionError(message string) string {
+	return errorURLPattern.ReplaceAllStringFunc(message, redactRequestURL)
 }
 
 func redactJSONValue(value any) {
@@ -295,5 +330,5 @@ func redactHeaders(headers http.Header) map[string][]string {
 
 func isSensitiveName(name string) bool {
 	name = strings.ToLower(strings.TrimSpace(name))
-	return name == "authorization" || name == "proxy-authorization" || name == "cookie" || name == "set-cookie" || strings.Contains(name, "api-key") || strings.Contains(name, "token")
+	return name == "authorization" || name == "proxy-authorization" || name == "cookie" || name == "set-cookie" || name == "key" || name == "api_key" || strings.Contains(name, "api-key") || strings.Contains(name, "token") || strings.Contains(name, "password") || strings.Contains(name, "secret")
 }

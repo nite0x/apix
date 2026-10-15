@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Apix · 主页</title><link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/activity/assets/style.css">
+  <link rel="stylesheet" href="/activity/assets/flows.css">
+  <script src="/activity/assets/app.js" type="module"></script>
+</head>
+<body>
+  <aside id="sidebar" class="sidebar" aria-label="工作台导航">
+    <a class="brand" href="/" data-route aria-label="Apix 主页"><span class="brand-mark" aria-hidden="true">a<span>·</span></span><strong>apix</strong></a>
+    <div class="nav-heading">工作空间</div>
+    <nav id="page-nav" class="page-nav" aria-label="主导航">
+      <a href="/" data-route aria-current="page" aria-label="主页" title="主页"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg><span class="nav-label">主页</span><span class="nav-tooltip" aria-hidden="true">主页</span></a>
+      <a href="/services" data-route aria-label="服务" title="服务"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h4M12 17.5h4"/></svg><span class="nav-label">服务</span><span class="nav-tooltip" aria-hidden="true">服务</span></a>
+      <a href="/requests" data-route aria-label="接口" title="接口"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h15m-4-4 4 4-4 4M20 16H5m4-4-4 4 4 4"/></svg><span class="nav-label">接口</span><span class="nav-tooltip" aria-hidden="true">接口</span></a>
+      <a href="/databases" data-route aria-label="数据库" title="数据库"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/></svg><span class="nav-label">数据库</span><span class="nav-tooltip" aria-hidden="true">数据库</span></a>
+      <a href="/flows" data-route aria-label="测试流程" title="测试流程"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="15" y="15" width="6" height="6" rx="1.5"/><path d="M6 9v9h9M9 6h9v9"/></svg><span class="nav-label">测试流程</span><span class="nav-tooltip" aria-hidden="true">测试流程</span></a>
+      <a href="/logs" data-route aria-label="日志" title="日志"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg><span class="nav-label">日志</span><span class="nav-tooltip" aria-hidden="true">日志</span></a>
+    </nav>
+    <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-expanded="true" aria-controls="page-nav" aria-label="折叠侧边栏" title="折叠侧边栏"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m7-11-3 3 3 3"/></svg><span class="nav-label">折叠侧边栏</span></button>
+  </aside>
+  <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="收起侧边栏" tabindex="-1" hidden></button>
+  <div class="workspace">
+  <header class="topbar">
+    <span class="workspace-caption">本地测试工作台</span>
+    <div class="connection" role="status"><span id="connection-dot" class="dot pending"></span><span id="connection">正在连接</span><span class="local-label">LOCAL</span></div>
+  </header>
+  <main>
+    <div class="page-heading"><div><div id="page-eyebrow" class="eyebrow">RUNTIME OVERVIEW</div><h1 id="page-title" tabindex="-1">主页</h1><p id="page-description">本地运行概况，从这里进入服务、接口和日志。</p></div><div class="heading-actions"><span id="updated">等待首次同步</span><button id="refresh" type="button" class="button">↻ <span>刷新</span></button></div></div>
+    <div id="error-banner" class="error-banner" role="alert" hidden></div>
+    <div data-page="home">
+      <div class="metrics" aria-label="活动概况">
+        <a class="metric" href="/services" data-route><span class="metric-label">运行中的服务</span><div><strong id="running-count">—</strong><span id="services-note">等待同步</span></div><span class="metric-indicator green"></span></a>
+        <a class="metric" href="/requests" data-route><span class="metric-label">最近接口执行</span><div><strong id="requests-count">—</strong><span>最近 50 条记录</span></div><span class="metric-indicator blue"></span></a>
+        <a class="metric" href="/logs" data-route><span class="metric-label">已接收日志</span><div><strong id="logs-count">—</strong><span>本次页面接收</span></div><span class="metric-indicator gray"></span></a>
+      </div>
+      <section class="home-links" aria-label="工作台入口">
+        <a class="home-card" href="/services" data-route><span class="home-icon" aria-hidden="true">◫</span><h2>服务</h2><p>查看本地服务状态，启动或停止已配置的服务。</p><span class="home-link">管理服务 →</span></a>
+        <a class="home-card" href="/requests" data-route><span class="home-icon" aria-hidden="true">↗</span><h2>接口</h2><p>搜索最近的接口执行记录，查看请求和返回详情。</p><span class="home-link">查看接口 →</span></a>
+        <a class="home-card" href="/databases" data-route><span class="home-icon" aria-hidden="true">▤</span><h2>数据库</h2><p>新增 MySQL 连接配置，测试连通性或移除已有连接。</p><span class="home-link">管理数据库 →</span></a>
+        <a class="home-card" href="/flows" data-route><span class="home-icon" aria-hidden="true">⌘</span><h2>测试流程</h2><p>把请求串成可复用的测试，传递变量、校验结果。</p><span class="home-link">编排流程 →</span></a>
+        <a class="home-card" href="/logs" data-route><span class="home-icon" aria-hidden="true">≡</span><h2>日志</h2><p>实时查看运行事件及服务输出，按来源筛选日志。</p><span class="home-link">打开日志 →</span></a>
+      </section>
+    </div>
+    <section data-page="services" class="panel services-panel page-panel" aria-labelledby="services-title" hidden><div class="panel-heading"><h2 id="services-title"><span class="section-icon">◫</span> 本地服务</h2><span class="subtle" id="service-total">—</span></div><div id="services" class="service-list"><div class="empty">正在读取服务状态…</div></div><div class="panel-foot">显示已配置的服务，自动识别健康地址上的已有实例</div></section>
+    <section data-page="requests" class="panel requests-panel page-panel" aria-labelledby="requests-title" hidden><div class="panel-heading"><h2 id="requests-title"><span class="section-icon">↗</span> 接口执行记录</h2><label class="search"><span aria-hidden="true">⌕</span><input id="request-search" type="search" placeholder="搜索 URL 或请求方法" aria-label="搜索接口记录"></label></div><div class="request-scroll"><table><thead><tr><th>请求</th><th>响应</th><th>耗时</th><th>执行时间</th></tr></thead><tbody id="requests"><tr><td colspan="4" class="empty">正在读取接口记录…</td></tr></tbody></table></div></section>
+    <section data-page="logs" class="panel logs-panel page-panel" aria-labelledby="logs-title" hidden><div class="panel-heading"><h2 id="logs-title"><span class="section-icon">≡</span> 实时日志 <span class="live-pill" id="log-live">LIVE</span></h2><div class="log-tools"><select id="log-source" aria-label="筛选日志来源"><option value="all">全部来源</option><option value="runtime">运行事件</option></select><label class="autoscroll"><input id="autoscroll" type="checkbox" checked>自动滚动</label><button id="pause" type="button" class="button small" aria-pressed="false">暂停显示</button></div></div><div id="log-output" class="log-output" tabindex="0" aria-label="实时日志内容"><div class="log-empty">等待活动日志…<span>通过 MCP 执行操作后，运行事件和服务输出会出现在这里。</span></div></div><div class="log-footer"><span><span class="dot" id="log-dot"></span> <span id="log-status">每秒自动更新</span></span><span>时间使用本地时区 · 最多保留最近 1,000 条显示记录</span></div></section>
+    <section data-page="databases" class="panel page-panel" aria-labelledby="databases-title" hidden>
+      <div class="panel-heading"><h2 id="databases-title"><span class="section-icon" aria-hidden="true">▤</span> 数据库连接 <span id="database-total" class="subtle">—</span></h2><button id="database-add" class="button primary" type="button" aria-haspopup="dialog" aria-controls="database-editor">＋ 新增连接</button></div>
+      <div id="database-feedback" class="database-notice" role="status" hidden></div>
+      <div id="databases" class="database-list" aria-live="polite"><div class="empty">正在读取数据库连接…</div></div>
+      <div class="panel-foot">支持 MySQL · 连接可用于 MCP 的 SQL 执行和测试流程</div>
+    </section>
+    <section data-page="flows" id="flow-workspace" aria-label="测试流程工作区" hidden><div class="empty">正在读取测试流程…</div></section>
+    <footer class="page-footer"><span>Apix <span class="footer-divider">/</span> Runtime Monitor</span><span>服务启停 · 接口记录 · 数据库连接 · 测试流程 · 实时日志</span></footer>
+  </main>
+  </div>
+  <dialog id="request-detail" class="request-detail" aria-labelledby="detail-title">
+    <div class="detail-heading"><div><div class="eyebrow">REQUEST INSPECTOR</div><h2 id="detail-title">接口执行详情</h2></div><div class="detail-tools"><button id="detail-refresh" class="button small" type="button">刷新详情</button><button id="detail-close" class="button small" type="button" aria-label="关闭请求详情" autofocus>关闭 ×</button></div></div>
+    <div id="detail-content" class="detail-content" aria-live="polite"></div>
+    <div class="detail-foot">请求与返回为已保存的快照 · 常见敏感字段已脱敏 · 响应正文最多保留 256 KB</div>
+  </dialog>
+  <dialog id="service-detail" class="request-detail" aria-labelledby="service-detail-title">
+    <div class="detail-heading"><div><div class="eyebrow">SERVICE INSPECTOR</div><h2 id="service-detail-title">服务详情</h2></div><div class="detail-tools"><button id="service-detail-refresh" class="button small" type="button">刷新详情</button><button id="service-detail-close" class="button small" type="button" aria-label="关闭服务详情" autofocus>关闭 ×</button></div></div>
+    <div id="service-detail-content" class="detail-content" aria-live="polite"></div>
+    <div class="detail-foot">优先复用已有服务 · 保留原有归属 · 仅停止由当前操作启动的进程</div>
+  </dialog>
+  <dialog id="database-editor" class="database-dialog" aria-labelledby="database-editor-title">
+    <form id="database-form">
+      <div class="detail-heading"><div><div class="eyebrow">MYSQL CONNECTION</div><h2 id="database-editor-title">新增数据库连接</h2></div><button id="database-editor-close" class="button small" type="button" aria-label="关闭新增连接">关闭 ×</button></div>
+      <div class="database-form-body">
+        <label for="database-name">连接名称</label><input id="database-name" name="name" required maxlength="256" placeholder="例如：本地测试库" autocomplete="off" autofocus>
+        <div class="database-field-row"><div><label for="database-host">主机</label><input id="database-host" name="host" required maxlength="253" placeholder="127.0.0.1 或数据库域名" autocomplete="off" spellcheck="false"></div><div><label for="database-port">端口</label><input id="database-port" name="port" type="number" required min="1" max="65535" value="3306" inputmode="numeric"></div></div>
+        <label for="database-schema">库名</label><input id="database-schema" name="database" required maxlength="256" placeholder="例如：test_db" autocomplete="off" spellcheck="false">
+        <label for="database-username">用户名</label><input id="database-username" name="username" required maxlength="256" placeholder="例如：test_user" autocomplete="off" spellcheck="false">
+        <label for="database-password">密码</label><input id="database-password" name="password" type="password" maxlength="4096" placeholder="数据库密码（允许为空）" autocomplete="new-password" aria-describedby="database-password-hint">
+        <p id="database-password-hint" class="database-hint">密码在本机加密保存。保存后即可测试连接，无需重启。</p>
+        <div id="database-form-error" class="detail-alert error" role="alert" hidden></div>
+      </div>
+      <div class="database-dialog-actions"><button id="database-editor-cancel" class="button" type="button">取消</button><button id="database-save" class="button primary" type="submit">保存连接</button></div>
+    </form>
+  </dialog>
+  <dialog id="database-delete" class="database-dialog" aria-labelledby="database-delete-title" aria-describedby="database-delete-description">
+    <div class="detail-heading"><h2 id="database-delete-title">删除连接配置</h2></div>
+    <div class="database-form-body"><p id="database-delete-description"></p><p class="database-hint">只移除 Apix 中的连接配置，不会删除 MySQL 数据库或表数据。引用此连接的测试流程需重新配置后才能运行。</p><div id="database-delete-error" class="detail-alert error" role="alert" hidden></div></div>
+    <div class="database-dialog-actions"><button id="database-delete-cancel" class="button" type="button" autofocus>取消</button><button id="database-delete-confirm" class="button danger" type="button">删除连接</button></div>
+  </dialog>
+</body>
+</html>

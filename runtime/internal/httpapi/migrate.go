@@ -5,14 +5,14 @@ import (
 	"fmt"
 )
 
-const httpSchemaVersion = 3
+const httpSchemaVersion = 4
 
 // MigrateSchema installs the current HTTP domain schema.
 //
 // The jump from v1 to v2 was a deliberate destructive replacement. From v2
-// onward migrations are non-destructive: v2→v3 only adds the Flow tables and
-// keeps every existing collection/request/working-copy/run intact. Fresh
-// installs still create the full schema (including Flow tables) in one pass.
+// onward migrations preserve existing data. v2 adds Flow tables; v3 expands
+// their step kinds and execution evidence. Fresh installs create the current
+// schema in one pass. Unknown versions are rejected without replacing tables.
 func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 	s.db = db
 
@@ -41,6 +41,16 @@ func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 		}
 		s.initRepositories()
 		return nil
+	}
+	if err == nil && version == 3 {
+		if err := migrateV3toV4(db); err != nil {
+			return err
+		}
+		s.initRepositories()
+		return nil
+	}
+	if err == nil && version != 1 {
+		return fmt.Errorf("unsupported HTTP schema version %d; refusing to replace data", version)
 	}
 
 	// Fresh install or legacy (v1) schema: build the full model from scratch.
@@ -99,11 +109,13 @@ func flowSchemaStatements() []string {
 			id                    TEXT PRIMARY KEY,
 			flow_id               TEXT NOT NULL REFERENCES flows(id) ON DELETE CASCADE,
 			position              INTEGER NOT NULL,
-			type                  TEXT NOT NULL CHECK (type IN ('http')),
+			type                  TEXT NOT NULL CHECK (type IN ('http','sql','service')),
 			name                  TEXT NOT NULL,
 			enabled               INTEGER NOT NULL DEFAULT 1,
 			source_api_request_id TEXT REFERENCES api_requests(id) ON DELETE SET NULL,
 			request_data          TEXT NOT NULL,
+			sql_data              TEXT,
+			service_data          TEXT,
 			config                TEXT NOT NULL DEFAULT '{}',
 			created_at            DATETIME NOT NULL,
 			updated_at            DATETIME NOT NULL,
@@ -127,6 +139,7 @@ func flowSchemaStatements() []string {
 			variables_snapshot TEXT NOT NULL DEFAULT '{}',
 			error_code         TEXT,
 			error_message      TEXT,
+			cleanup_error      TEXT,
 			created_at         DATETIME NOT NULL,
 			started_at         DATETIME,
 			finished_at        DATETIME
@@ -140,6 +153,11 @@ func flowSchemaStatements() []string {
 			position         INTEGER NOT NULL,
 			name_snapshot    TEXT NOT NULL,
 			request_snapshot TEXT NOT NULL,
+			type             TEXT NOT NULL DEFAULT 'http',
+			sql_snapshot     TEXT,
+			service_snapshot TEXT,
+			result           TEXT,
+			assertions       TEXT NOT NULL DEFAULT '[]',
 			status           TEXT NOT NULL CHECK (
 				status IN ('pending','running','paused','succeeded','failed','skipped','cancelled')
 			),
@@ -152,6 +170,45 @@ func flowSchemaStatements() []string {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_flow_run_steps_order ON flow_run_steps(flow_run_id, position)`,
 	}
+}
+
+// Preserve every definition, run and HTTP snapshot while widening the step CHECK.
+// flow_run_steps has no foreign key to flow_steps, so rebuilding only this table
+// does not delete execution history.
+func migrateV3toV4(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	statements := []string{
+		`CREATE TABLE flow_steps_v4 (
+		 id TEXT PRIMARY KEY, flow_id TEXT NOT NULL REFERENCES flows(id) ON DELETE CASCADE,
+		 position INTEGER NOT NULL, type TEXT NOT NULL CHECK(type IN ('http','sql','service')),
+		 name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+		 source_api_request_id TEXT REFERENCES api_requests(id) ON DELETE SET NULL,
+		 request_data TEXT NOT NULL, sql_data TEXT, service_data TEXT,
+		 config TEXT NOT NULL DEFAULT '{}', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
+		 UNIQUE(flow_id, position))`,
+		`INSERT INTO flow_steps_v4(id,flow_id,position,type,name,enabled,source_api_request_id,request_data,config,created_at,updated_at)
+		 SELECT id,flow_id,position,type,name,enabled,source_api_request_id,request_data,config,created_at,updated_at FROM flow_steps`,
+		`DROP TABLE flow_steps`,
+		`ALTER TABLE flow_steps_v4 RENAME TO flow_steps`,
+		`CREATE INDEX idx_flow_steps_order ON flow_steps(flow_id, position)`,
+		`ALTER TABLE flow_runs ADD COLUMN cleanup_error TEXT`,
+		`ALTER TABLE flow_run_steps ADD COLUMN type TEXT NOT NULL DEFAULT 'http'`,
+		`ALTER TABLE flow_run_steps ADD COLUMN sql_snapshot TEXT`,
+		`ALTER TABLE flow_run_steps ADD COLUMN service_snapshot TEXT`,
+		`ALTER TABLE flow_run_steps ADD COLUMN result TEXT`,
+		`ALTER TABLE flow_run_steps ADD COLUMN assertions TEXT NOT NULL DEFAULT '[]'`,
+		`UPDATE schema_metadata SET version=4, updated_at=datetime('now') WHERE name='http_domain'`,
+	}
+	for _, stmt := range statements {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("upgrade flow schema: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 func rebuildHTTPSchema(db *sql.DB) error {

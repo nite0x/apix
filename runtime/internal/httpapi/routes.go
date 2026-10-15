@@ -265,6 +265,7 @@ func (s *HTTPService) runRoutes(r gin.IRouter) {
 			writeAPIError(c, err)
 			return
 		}
+		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, item)
 	})
 	g.POST("/:id/pin", func(c *gin.Context) {

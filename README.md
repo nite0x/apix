@@ -6,6 +6,13 @@ Apix is a local-first desktop developer tool for MCP-assisted API debugging, wor
 
 ## Status
 
+The backend-only MVP supports MySQL SQL execution, local service process
+management, and mixed HTTP/SQL/service test flows through MCP and REST.
+It runs without the desktop UI. See [the backend MVP guide](runtime/MVP.md)
+for configuration, tools, and a runnable MySQL-backed example.
+
+Build the standalone runtime and example API with `pnpm build:runtime`.
+
 Apix is an early public release. The current codebase includes the desktop
 shell, local runtime, WebSocket event stream, HTTP collection management, and
 manual request execution. Expect the product surface and internal contracts to
