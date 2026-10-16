@@ -1,4 +1,4 @@
-// Package database provides the MySQL execution capability for the runtime.
+// Package database provides MySQL and PostgreSQL-compatible SQL execution.
 package database
 
 import (
@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,10 +26,12 @@ var (
 type Connection struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
+	Type     string `json:"type"`
 	Host     string `json:"host,omitempty"`
 	Port     int    `json:"port,omitempty"`
 	Database string `json:"database,omitempty"`
 	Username string `json:"username,omitempty"`
+	SSLMode  string `json:"ssl_mode,omitempty"`
 }
 
 // ConnectionInput accepts a password without ever returning it in Connection.
@@ -46,7 +47,7 @@ func (input *ConnectionInput) UnmarshalJSON(data []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&value); err != nil {
-		return fmt.Errorf("%w: expected id, name, host, port, database, username and password fields", ErrInvalid)
+		return fmt.Errorf("%w: expected id, name, type, host, port, database, username, ssl_mode and password fields", ErrInvalid)
 	}
 	*input = ConnectionInput(value)
 	return nil
@@ -112,7 +113,14 @@ func New(db *sql.DB) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize database connection settings: %w", err)
 	}
-	return &Service{store: db, pools: make(map[string]poolEntry), secrets: secretStore{db: db}}, nil
+	s := &Service{store: db, pools: make(map[string]poolEntry), secrets: secretStore{db: db}}
+	if err := s.migrateDriverSettings(); err != nil {
+		return nil, err
+	}
+	if err := s.initHistory(); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 func (s *Service) PutConnection(ctx context.Context, item Connection) (*Connection, error) {
@@ -125,6 +133,44 @@ func (s *Service) SaveConnection(ctx context.Context, input ConnectionInput) (*C
 	item.Host = strings.TrimSpace(item.Host)
 	item.Database = strings.TrimSpace(item.Database)
 	item.Username = strings.TrimSpace(item.Username)
+	item.Type = strings.ToLower(strings.TrimSpace(item.Type))
+	item.SSLMode = strings.ToLower(strings.TrimSpace(item.SSLMode))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var storedType, storedSSL string
+	err := s.store.QueryRowContext(ctx, `SELECT driver_type,ssl_mode FROM database_connection_settings WHERE connection_id=?`, item.ID).Scan(&storedType, &storedSSL)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if item.Type == "" {
+		item.Type = storedType
+		if item.Type == "" {
+			item.Type = "mysql"
+		}
+	}
+	if item.Type == "postgres" {
+		item.Type = "postgresql"
+	}
+	if item.Type != "mysql" && item.Type != "postgresql" && item.Type != "hologres" {
+		return nil, fmt.Errorf("%w: type must be mysql, postgresql or hologres", ErrInvalid)
+	}
+	if item.SSLMode == "" && item.Type == storedType {
+		item.SSLMode = storedSSL
+	}
+	if item.Type == "mysql" {
+		if item.SSLMode != "" {
+			return nil, fmt.Errorf("%w: ssl_mode is only supported for PostgreSQL and Hologres", ErrInvalid)
+		}
+	} else {
+		if item.SSLMode == "" {
+			item.SSLMode = "prefer"
+		}
+		switch item.SSLMode {
+		case "disable", "prefer", "require", "verify-full":
+		default:
+			return nil, fmt.Errorf("%w: ssl_mode must be disable, prefer, require or verify-full", ErrInvalid)
+		}
+	}
 	if item.Name == "" {
 		return nil, fmt.Errorf("%w: name is required", ErrInvalid)
 	}
@@ -132,7 +178,7 @@ func (s *Service) SaveConnection(ctx context.Context, input ConnectionInput) (*C
 		return nil, fmt.Errorf("%w: connection fields exceed maximum length", ErrInvalid)
 	}
 	if item.Port == 0 {
-		item.Port = 3306
+		item.Port = defaultPort(item.Type)
 	}
 	if item.Host == "" || strings.ContainsAny(item.Host, "/@?#\\ \t\r\n\x00") || strings.Contains(item.Host, ":") && net.ParseIP(item.Host) == nil || item.Database == "" || item.Username == "" || strings.ContainsRune(item.Database+item.Username, 0) || item.Port < 1 || item.Port > 65535 {
 		return nil, fmt.Errorf("%w: host, port (1-65535), database and username are required", ErrInvalid)
@@ -140,8 +186,6 @@ func (s *Service) SaveConnection(ctx context.Context, input ConnectionInput) (*C
 	if item.ID == "" {
 		item.ID = uuid.NewString()
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var encrypted []byte
 	if input.Password == nil {
 		err := s.store.QueryRowContext(ctx, `SELECT password_encrypted FROM database_connection_settings WHERE connection_id=?`, item.ID).Scan(&encrypted)
@@ -170,8 +214,8 @@ func (s *Service) SaveConnection(ctx context.Context, input ConnectionInput) (*C
 	if err != nil {
 		return nil, fmt.Errorf("save database connection: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO database_connection_settings(connection_id,host,port,database_name,username,password_encrypted) VALUES(?,?,?,?,?,?)
-			ON CONFLICT(connection_id) DO UPDATE SET host=excluded.host,port=excluded.port,database_name=excluded.database_name,username=excluded.username,password_encrypted=excluded.password_encrypted`, item.ID, item.Host, item.Port, item.Database, item.Username, encrypted)
+	_, err = tx.ExecContext(ctx, `INSERT INTO database_connection_settings(connection_id,host,port,database_name,username,password_encrypted,driver_type,ssl_mode) VALUES(?,?,?,?,?,?,?,?)
+			ON CONFLICT(connection_id) DO UPDATE SET host=excluded.host,port=excluded.port,database_name=excluded.database_name,username=excluded.username,password_encrypted=excluded.password_encrypted,driver_type=excluded.driver_type,ssl_mode=excluded.ssl_mode`, item.ID, item.Host, item.Port, item.Database, item.Username, encrypted, item.Type, item.SSLMode)
 	if err != nil {
 		return nil, fmt.Errorf("save database connection settings: %w", err)
 	}
@@ -219,7 +263,7 @@ func (s *Service) DeleteConnection(ctx context.Context, id string) error {
 }
 
 func (s *Service) ListConnections(ctx context.Context) ([]Connection, error) {
-	rows, err := s.store.QueryContext(ctx, `SELECT c.id,c.name,COALESCE(d.host,''),COALESCE(d.port,0),COALESCE(d.database_name,''),COALESCE(d.username,'') FROM database_connections c LEFT JOIN database_connection_settings d ON c.id=d.connection_id ORDER BY c.name,c.id`)
+	rows, err := s.store.QueryContext(ctx, `SELECT c.id,c.name,COALESCE(d.host,''),COALESCE(d.port,0),COALESCE(d.database_name,''),COALESCE(d.username,''),COALESCE(d.driver_type,'mysql'),COALESCE(d.ssl_mode,'') FROM database_connections c LEFT JOIN database_connection_settings d ON c.id=d.connection_id ORDER BY c.name,c.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +271,7 @@ func (s *Service) ListConnections(ctx context.Context) ([]Connection, error) {
 	items := make([]Connection, 0)
 	for rows.Next() {
 		var item Connection
-		if err := rows.Scan(&item.ID, &item.Name, &item.Host, &item.Port, &item.Database, &item.Username); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Host, &item.Port, &item.Database, &item.Username, &item.Type, &item.SSLMode); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -238,15 +282,15 @@ func (s *Service) ListConnections(ctx context.Context) ([]Connection, error) {
 func (s *Service) pool(ctx context.Context, id string) (*sql.DB, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cfg, err := s.connectionConfig(ctx, id)
+	item, password, err := s.connectionCredentials(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	cfg.InterpolateParams = false
-	if cfg.Timeout == 0 {
-		cfg.Timeout = 5 * time.Second
-	}
-	fingerprint := sha256.Sum256([]byte(cfg.FormatDSN()))
+	data, _ := json.Marshal(struct {
+		Connection
+		Password string
+	}{item, password})
+	fingerprint := sha256.Sum256(data)
 	if s.closed {
 		return nil, errors.New("database service is closed")
 	}
@@ -257,9 +301,9 @@ func (s *Service) pool(ctx context.Context, id string) (*sql.DB, error) {
 		_ = entry.db.Close()
 		delete(s.pools, id)
 	}
-	connector, err := mysql.NewConnector(cfg)
+	connector, err := connectionConnector(item, password)
 	if err != nil {
-		return nil, fmt.Errorf("%w: cannot configure MySQL connection", ErrInvalid)
+		return nil, err
 	}
 	db := sql.OpenDB(connector)
 	db.SetMaxOpenConns(4)
@@ -271,31 +315,11 @@ func (s *Service) pool(ctx context.Context, id string) (*sql.DB, error) {
 
 // Called under s.mu so connection updates and secret access are serialized.
 func (s *Service) connectionConfig(ctx context.Context, id string) (*mysql.Config, error) {
-	var host, name, username string
-	var port int
-	var encrypted []byte
-	if err := s.store.QueryRowContext(ctx, `SELECT COALESCE(d.host,''),COALESCE(d.port,0),COALESCE(d.database_name,''),COALESCE(d.username,''),d.password_encrypted FROM database_connections c LEFT JOIN database_connection_settings d ON c.id=d.connection_id WHERE c.id=?`, id).Scan(&host, &port, &name, &username, &encrypted); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
+	item, password, err := s.connectionCredentials(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	if host == "" || len(encrypted) == 0 {
-		return nil, fmt.Errorf("%w: direct connection settings are missing", ErrInvalid)
-	}
-	password, err := s.secrets.open(id, encrypted)
-	if err != nil {
-		return nil, errors.New("cannot decrypt database password for this local user")
-	}
-	cfg := mysql.NewConfig()
-	cfg.Net = "tcp"
-	cfg.Addr = net.JoinHostPort(host, strconv.Itoa(port))
-	cfg.DBName = name
-	cfg.User = username
-	cfg.Passwd = password
-	cfg.ParseTime = true
-	cfg.Params = map[string]string{"charset": "utf8mb4"}
-	return cfg, nil
+	return mysqlConfig(item, password)
 }
 
 func (s *Service) TestConnection(ctx context.Context, id string) error {
@@ -308,18 +332,23 @@ func (s *Service) TestConnection(ctx context.Context, id string) error {
 	return db.PingContext(ctx)
 }
 
-func (s *Service) Execute(ctx context.Context, cmd Command) (*Result, error) {
+func (s *Service) Execute(ctx context.Context, cmd Command) (result *Result, err error) {
 	if err := validate(&cmd); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(cmd.TimeoutMS)*time.Millisecond)
 	defer cancel()
 	started := time.Now()
+	id, err := s.beginExecution(ctx, cmd, started)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { s.finishExecution(id, started, result, err) }()
 	db, err := s.pool(ctx, cmd.ConnectionID)
 	if err != nil {
 		return nil, err
 	}
-	result, err := execute(ctx, db, cmd)
+	result, err = execute(ctx, db, cmd)
 	if result != nil {
 		result.DurationMS = time.Since(started).Milliseconds()
 	}

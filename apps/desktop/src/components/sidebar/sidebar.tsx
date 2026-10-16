@@ -108,6 +108,7 @@ export function Sidebar({
 
         <section className="sb-group sb-tools" aria-labelledby="sidebar-tools">
           <div className="sb-sec" id="sidebar-tools">Tools</div>
+          <a className="si" href="http://127.0.0.1:4317/tests" target="_blank" rel="noreferrer"><span className="si-icon"><IconHistory size={13} /></span><span className="si-label">接口测试</span></a>
           <button type="button" className="si" onClick={onOpenRunHistory}><span className="si-icon"><IconHistory size={13} /></span><span className="si-label">Request history</span></button>
           <button type="button" className="si" onClick={onOpenRules}><span className="si-icon"><IconShieldCheck size={13} /></span><span className="si-label">Pause rules</span>{ruleCount > 0 && <span className="tool-count">{ruleCount}</span>}</button>
           <button type="button" className="si" onClick={onOpenVariables}><span className="si-icon"><IconVariable size={13} /></span><span className="si-label">Variables</span></button>

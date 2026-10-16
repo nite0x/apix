@@ -1,8 +1,10 @@
 # Apix 服务端测试 MVP
 
-这一版可以独立运行，供 AI 通过 MCP 调用，也可以直接调用 REST API。完成的主要能力是：发送 HTTP 请求、执行 MySQL SQL、启停本地服务，以及把这些操作保存为顺序执行的测试流程。运行记录、检查结果和日志会保存下来，不需要打开页面。
+这一版可以独立运行，供 AI 通过 MCP 调用，也可以直接调用 REST API。完成的主要能力是：发送 HTTP 请求、执行 MySQL / PostgreSQL / Hologres SQL、启停本地服务，以及把这些操作保存为顺序执行的测试流程。运行记录、检查结果和日志会保存下来，不需要打开页面。
 
-Runtime 已嵌入五个页面。启动后打开 `http://127.0.0.1:4317/` 进入主页，通过左侧导航切换：主页 `/` 显示运行概况，服务 `/services` 查看状态和启停服务，接口 `/requests` 查看最近 50 条执行记录，数据库 `/databases` 新增、测试和删除 MySQL 连接配置，日志 `/logs` 查看运行事件及服务 stdout/stderr。侧边栏支持折叠为图标导航，悬停或键盘聚焦显示名称，当前页面高亮，并在本机浏览器记住折叠状态；窄屏默认折叠。服务、接口和日志每秒自动更新，支持接口搜索、日志来源筛选和暂停显示；服务卡片的“查看日志”可直接跳转并筛选对应服务。各页面地址支持直接打开、刷新和浏览器前进后退。自定义 `APIX_ADDR` 时使用相应地址。
+Runtime 已嵌入工作台页面。启动后打开 `http://127.0.0.1:4317/` 进入主页，通过左侧导航切换：主页 `/` 显示运行概况，服务 `/services` 查看状态和启停服务，接口 `/requests` 查看最近 50 条执行记录，数据库 `/databases` 管理 MySQL 连接，接口测试 `/tests` 按批次查看不同入参的验证结果并管理可复用用例，测试流程 `/flows` 编排有步骤依赖的业务流程，日志 `/logs` 查看运行事件及服务 stdout/stderr。侧边栏支持折叠为图标导航，悬停或键盘聚焦显示名称，当前页面高亮，并在本机浏览器记住折叠状态；窄屏默认折叠。服务、接口和日志每秒自动更新，支持接口搜索、日志来源筛选和暂停显示；服务卡片的“查看日志”可直接跳转并筛选对应服务。各页面地址支持直接打开、刷新和浏览器前进后退。自定义 `APIX_ADDR` 时使用相应地址。
+
+接口测试支持临时用例、保存用例、批量运行、独立重试和断言预期/实际对比。AI 使用 `begin_test_batch` 开始本次任务，后续调用显式携带 `batch_id`，结束时调用 `finish_test_batch`；不需要为独立接口输入变体创建 Flow。完整调用示例见成品包内的 `API_TESTING.md`（源码位置为 `docs/API_TESTING.md`）。
 
 点击接口记录打开右侧详情抽屉，分为“响应”“请求”“执行记录”：查看请求 URL、查询参数、请求头和正文，以及响应状态、响应头、正文、起止时间、耗时和错误。JSON 自动格式化，文本/HTML 按文本展示；执行中的请求会自动更新，关闭可按 Esc。详情复用数据库中的执行快照，旧记录也能查看。
 
@@ -10,7 +12,10 @@ Runtime 已嵌入五个页面。启动后打开 `http://127.0.0.1:4317/` 进入�
 
 服务卡片提供“启动”“停止”和“查看详情”。启动时优先定位并复用已运行的服务，未发现时才使用保存的配置创建进程；状态查询也会通过健康地址发现外部运行的服务。详情展示命令、参数、工作目录、超时、PID、归属、实时健康检查和最近 100 条日志，每 3 秒更新，也可手动刷新。继续使用原来的数据目录才能保留配置和历史。测试流程管理中的服务由对应流程负责停止和清理，外部服务显示“外部运行中”，页面不会接管停止权。
 
-页面随可执行程序分发，不需要启动 Vite 或安装前端依赖。服务配置、接口执行等操作通过 MCP 或 REST；页面提供已有服务的启停按钮和数据库连接管理。
+页面随可执行程序分发，不需要启动 Vite 或安装前端依赖。页面、MCP 和 REST 共用执行能力与历史记录。
+
+- **手动 SQL**：在“数据库 → SQL 执行”选择连接、填写 SQL 并执行。MySQL 使用 `?`，PostgreSQL / Hologres 使用 `$1`、`$2` 绑定参数；参数填写为 JSON 数组。查询模式展示结果表格，执行模式用于写入或 DDL，直接提交并展示影响行数。可以配置超时和返回行数，从历史记录“填入编辑器”再次调试。
+- **手动服务**：在“服务”点击“新增服务”，填写名称、工作目录、启动程序、参数、健康检查地址和启动超时，选择“仅保存”或“保存并启动”。参数每行一个，程序路径和参数分开填写。启动失败会保留已保存的配置，可在服务列表查看状态、日志和重试启动。
 
 ## 启动
 
@@ -82,6 +87,8 @@ http://127.0.0.1:4317/mcp
 | 任务 | MCP 工具 |
 | --- | --- |
 | 发送单个请求 | `send_request` |
+| 开始、查看、结束接口测试批次 | `begin_test_batch`、`list_test_batches`、`get_test_batch`、`finish_test_batch` |
+| 保存、读取、运行及归档独立测试用例 | `save_test_case`、`list_test_cases`、`get_test_case`、`run_test_case`、`archive_test_case` |
 | 保存、列出、测试、删除数据库连接 | `save_database_connection`、`list_database_connections`、`test_database_connection`、`delete_database_connection` |
 | 执行 SQL | `execute_sql` |
 | 保存、列出服务 | `save_service`、`list_services` |
@@ -109,6 +116,16 @@ node scripts/smoke-backend.mjs YOUR_CONNECTION_ID
 完整示例流程参数在 `runtime/examples/demo-flow.json`（成品包内为 `demo-flow.json`）。脚本默认连接 `http://127.0.0.1:4317`；自定义 Runtime 地址时设置 `APIX_RUNTIME_URL`。
 
 ## 配置数据库
+
+支持 `type: "mysql"`、`"postgresql"` 和 `"hologres"`。默认端口分别为 3306、5432 和 80；Hologres 使用 PostgreSQL 协议。新增连接时未传 `type` 默认使用 MySQL；更新连接时省略 `type` 则保留原数据库类型。旧连接迁移后继续使用 MySQL，可以点击“编辑”切换类型，密码留空保留原密码。
+
+PostgreSQL / Hologres 支持 `ssl_mode`：`prefer`（默认）、`require`、`verify-full` 和 `disable`。`verify-full` 验证证书和主机名，使用操作系统或 PostgreSQL 客户端环境配置的信任证书。Hologres 主机、端口和数据库以实例控制台为准；VPC 地址需要 Runtime 所在机器可达该网络。
+
+SQL 参数按数据库原生语法绑定：MySQL 使用 `?`，PostgreSQL / Hologres 使用 `$1`、`$2` 等。例如 `SELECT $1::text AS value` 配合 `params: ["hello"]`。SQL 执行、连接测试和测试流程根据已保存的类型自动选择驱动，执行记录保持统一。
+
+数据库页面的“SQL 执行记录”自动展示最近 100 条 SQL，支持按连接筛选和搜索语句或错误信息。点击语句可展开完整 SQL、绑定参数和失败原因，列表同时显示状态、耗时、执行时间及返回或影响行数。成功的查询可点击“查看结果”，以表格查看字段和数据，空值显示为 `NULL`；空结果保留字段名，截断结果提示已保存行数与总行数未知。通过 MCP `execute_sql`、`POST /api/database/execute` 和测试流程执行的 SQL 及返回结果统一保存到本地 SQLite，重启后仍可查看。结果仅在打开时加载，不会随列表自动刷新重复传输。原版本未保存的 SQL 无法追溯，旧记录未保存的查询结果需要重新执行 SQL 后查看。连接测试不作为 SQL 执行记录。
+
+可通过 `GET /api/database/executions` 读取最近记录，使用 `connection_id` 查询参数获取指定连接的最近 100 条记录。
 
 打开 `http://127.0.0.1:4317/databases`，点击“新增连接”，填写连接名称、主机、端口（默认 3306）、库名、用户名和密码，保存后点击“测试连接”。密码允许为空，保存后立即生效，无需重启或配置环境变量。已有连接在重新进入页面或点击“刷新”时更新。旧版连接保留名称和 ID，需重新填写直接连接信息后才能使用；也可以删除后重新添加。
 
@@ -140,7 +157,7 @@ REST `PUT /api/database/connections` 的正文直接传上面的 `connection` �
 {"connection_id":"mysql-test"}
 ```
 
-SQL 分两种模式：`query` 返回数据行，`exec` 执行写入并返回 `rows_affected`。每次执行一条语句；使用 `?` 和 `params` 传值。
+SQL 分两种模式：`query` 返回数据行，`exec` 执行写入并返回 `rows_affected`。每次执行一条语句；MySQL 使用 `?`，PostgreSQL / Hologres 使用 `$1`、`$2` 等占位符，通过 `params` 传值。
 
 调用 `execute_sql`：
 
@@ -274,7 +291,7 @@ MCP 保存流程时，未写 `enabled` 的步骤默认启用，`stop_on_error` �
 
 `expected_rows` 检查返回的数据行数，不是 `SELECT COUNT(*)` 的字段值。`SELECT COUNT(*)` 即使计数为零，也通常返回一行。需要验证是否存在一条记录时，请直接查询匹配的记录。
 
-HTTP 提取器使用简单点路径，如 `id` 或 `data.user.id`。SQL 变量只替换整个参数值 `"{{user_id}}"`，语句保持 `?` 占位符；不要把变量直接拼接进 SQL。
+HTTP 提取器使用简单点路径，如 `id` 或 `data.user.id`。SQL 变量只替换整个参数值 `"{{user_id}}"`，语句保持该数据库的原生占位符（MySQL 为 `?`，PostgreSQL / Hologres 为 `$1`、`$2`）；不要把变量直接拼接进 SQL。
 
 失败时后续普通步骤会停止。因此示例中的删除 SQL 不保证在前面失败后执行，需要根据已创建的数据手动补清理。服务停止另有保障：无论成功、失败还是取消，Flow 都会清理本次运行启动的服务；不需要依赖最后的停止步骤被执行。
 
@@ -336,6 +353,7 @@ Runtime 日志记录执行元数据，不写入 MySQL 连接串和密码。接�
 | `POST /api/database/connections/:id/test` | 测试数据库连接 |
 | `DELETE /api/database/connections/:id` | 删除 Apix 连接配置，成功返回 204，不删除远端数据库 |
 | `POST /api/database/execute` | 执行 SQL，正文直接传 `command` 内的对象 |
+| `GET /api/database/executions/:id/result` | 读取 SQL 记录保存的结果，返回 `{"result": ...}`；旧记录或无结果时 `result` 为 `null`，记录不存在返回 404 |
 | `GET /api/services`、`PUT /api/services` | 列出、保存服务，正文直接传 `service` 内的对象 |
 | `POST /api/services/:id/start`、`POST /api/services/:id/stop` | 手动启停服务 |
 | `GET /api/services/:id/status`、`GET /api/services/:id/logs?after=0` | 查询服务状态、日志 |

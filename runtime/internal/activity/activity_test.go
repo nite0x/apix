@@ -63,13 +63,13 @@ func TestReadOnlyMonitorHistoryCursorsAndEmbeddedAssets(t *testing.T) {
 	if page.Code != 200 || !strings.Contains(page.Body.String(), "实时日志") || page.Header().Get("Content-Security-Policy") == "" {
 		t.Fatalf("page=%d", page.Code)
 	}
-	for _, path := range []string{"/", "/activity", "/services", "/requests", "/databases", "/flows", "/flows?id=example", "/logs", "/logs?source=svc"} {
+	for _, path := range []string{"/", "/activity", "/services", "/requests", "/databases", "/flows", "/flows?id=example", "/tests", "/tests?batch=example", "/logs", "/logs?source=svc"} {
 		w := get(path)
 		if w.Code != 200 || !strings.Contains(w.Body.String(), `aria-label="主导航"`) || w.Header().Get("Content-Security-Policy") == "" {
 			t.Fatalf("page route %s: %d", path, w.Code)
 		}
 	}
-	for _, path := range []string{"/activity/assets/app.js", "/activity/assets/request-detail.js", "/activity/assets/service-detail.js", "/activity/assets/databases.js", "/activity/assets/style.css", "/activity/assets/flows.js", "/activity/assets/flow-model.js", "/activity/assets/flows.css"} {
+	for _, path := range []string{"/activity/assets/app.js", "/activity/assets/request-detail.js", "/activity/assets/service-detail.js", "/activity/assets/databases.js", "/activity/assets/style.css", "/activity/assets/flows.js", "/activity/assets/flow-model.js", "/activity/assets/flows.css", "/activity/assets/testing.js", "/activity/assets/testing.css", "/activity/assets/manual-request.js", "/activity/assets/manual-request.css", "/activity/assets/service-editor.js", "/activity/assets/manual-tools.css"} {
 		if w := get(path); w.Code != 200 {
 			t.Fatalf("missing embedded asset %s", path)
 		}

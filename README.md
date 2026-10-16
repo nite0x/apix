@@ -6,12 +6,24 @@ Apix is a local-first desktop developer tool for MCP-assisted API debugging, wor
 
 ## Status
 
-The backend-only MVP supports MySQL SQL execution, local service process
+The backend-only MVP supports MySQL, PostgreSQL and Hologres SQL execution, local service process
 management, and mixed HTTP/SQL/service test flows through MCP and REST.
 It runs without the desktop UI. See [the backend MVP guide](runtime/MVP.md)
 for configuration, tools, and a runnable MySQL-backed example.
 
+For independent API checks with different inputs, use [API testing batches and reusable cases](docs/API_TESTING.md). The Runtime page at `/tests` groups each task's named attempts and assertion outcomes; Flows remain available for dependent business sequences.
+
 Build the standalone runtime and example API with `pnpm build:runtime`.
+
+To send an HTTP request manually, open the Runtime's `/requests` page. Choose a
+method and URL, add query parameters, headers, or a JSON/text/form body, then send.
+Responses and execution history appear on the same page; historical requests can
+be loaded back into the editor. Replace any redacted fields before resending.
+
+The Runtime's `/databases` page also provides manual SQL execution with JSON
+binding parameters, result tables, affected row counts, and reusable history.
+Use `/services` to add a service's executable, arguments, working directory,
+health URL and startup timeout, then save or start it directly.
 
 Apix is an early public release. The current codebase includes the desktop
 shell, local runtime, WebSocket event stream, HTTP collection management, and

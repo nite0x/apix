@@ -66,11 +66,12 @@ func Routes(r gin.IRouter, db *sql.DB, services *localservice.Service, history *
 	r.GET("/requests", servePage)
 	r.GET("/databases", servePage)
 	r.GET("/flows", servePage)
+	r.GET("/tests", servePage)
 	r.GET("/logs", servePage)
 	web, _ := fs.Sub(assets, "web")
 	r.GET("/activity/assets/:name", func(c *gin.Context) {
 		name := c.Param("name")
-		if name != "app.js" && name != "request-detail.js" && name != "service-detail.js" && name != "databases.js" && name != "style.css" && name != "flows.js" && name != "flow-model.js" && name != "flows.css" {
+		if name != "app.js" && name != "request-detail.js" && name != "service-detail.js" && name != "databases.js" && name != "style.css" && name != "flows.js" && name != "flow-model.js" && name != "flows.css" && name != "testing.js" && name != "testing.css" && name != "manual-request.js" && name != "manual-request.css" && name != "service-editor.js" && name != "manual-tools.css" {
 			c.Status(404)
 			return
 		}

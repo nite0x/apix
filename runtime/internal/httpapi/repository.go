@@ -145,19 +145,31 @@ func (r *repository) listRequests(collectionID string) ([]APIRequest, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]APIRequest, 0)
+	ids := make([]string, 0)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// The runtime uses a single SQLite connection. Release it before loading
+	// each request, otherwise the nested query waits forever for this cursor.
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	out := make([]APIRequest, 0, len(ids))
+	for _, id := range ids {
 		item, err := r.getRequest(id)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, *item)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *repository) getRequest(id string) (*APIRequest, error) {
@@ -575,19 +587,29 @@ func (r *repository) listRuns(projectID string, limit int) ([]APIRun, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []APIRun
+	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	var out []APIRun
+	for _, id := range ids {
 		run, err := r.getRun(id)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, *run)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *repository) pinRun(id string, pinned bool) error {

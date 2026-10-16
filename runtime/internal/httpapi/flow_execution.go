@@ -427,6 +427,17 @@ func extractValue(e FlowExtractor, run *APIRun) (string, bool) {
 	case "header":
 		headers, ok := run.ResponseHeaders.(map[string][]string)
 		if !ok {
+			// Persisted API runs decode JSON headers as map[string]any.
+			if values, ok := run.ResponseHeaders.(map[string]any); ok {
+				for name, value := range values {
+					if strings.EqualFold(name, e.Path) {
+						if list, ok := value.([]any); ok && len(list) > 0 {
+							text, ok := list[0].(string)
+							return text, ok
+						}
+					}
+				}
+			}
 			return "", false
 		}
 		for name, values := range headers {

@@ -3,7 +3,7 @@ const content = document.getElementById('detail-content');
 const refreshButton = document.getElementById('detail-refresh');
 const detail = { id: null, controller: null, timer: null, version: 0, key: '', opener: null, tab: 'response' };
 const statusLabels = { running: '执行中', succeeded: '请求完成', failed: '执行失败', timed_out: '请求超时', cancelled: '已取消' };
-const triggerLabels = { ai: 'AI 调用', manual: '手动执行', flow: '测试流程' };
+const triggerLabels = { ai: 'AI 调用', manual: '手动执行', flow: '测试流程', test: '接口测试' };
 
 function el(tag, className, text) {
   const element = document.createElement(tag);

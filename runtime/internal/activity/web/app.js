@@ -1,8 +1,11 @@
 'use strict';
 import { openRequestDetail } from './request-detail.js';
 import { openServiceDetail } from './service-detail.js';
-import { refreshDatabases, closeDatabaseDialogs } from './databases.js';
+import { refreshDatabases, refreshSQLHistory, closeDatabaseDialogs } from './databases.js';
 import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flows.js';
+import { activateTesting, deactivateTesting, refreshTesting } from './testing.js';
+import { loadManualRequest } from './manual-request.js';
+import { closeServiceEditor } from './service-editor.js';
 (() => {
   const $ = id => document.getElementById(id);
   const state = { services: [], requests: [], logs: [], eventCursor: null, serviceCursor: null, totalLogs: 0, paused: false, busy: false, online: false, timer: null, requestKey: '', serviceKey: '', logVersion: 0 };
@@ -41,10 +44,11 @@ import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flow
   });
   const pages = {
     '/': { id: 'home', title: '主页', eyebrow: 'RUNTIME OVERVIEW', description: '本地运行概况，从这里进入服务、接口和日志。' },
-    '/services': { id: 'services', title: '服务', eyebrow: 'LOCAL SERVICES', description: '管理已配置的本地服务，查看运行状态和启停结果。' },
-    '/requests': { id: 'requests', title: '接口', eyebrow: 'API REQUESTS', description: '最近 50 条接口执行记录，点击记录查看请求和返回详情。' },
-    '/databases': { id: 'databases', title: '数据库', eyebrow: 'DATABASE CONNECTIONS', description: '管理 MySQL 连接配置，测试连通性，供 SQL 执行和测试流程使用。' },
+    '/services': { id: 'services', title: '服务', eyebrow: 'LOCAL SERVICES', description: '新增本地服务配置，手动启动或停止服务，查看状态和运行日志。' },
+    '/requests': { id: 'requests', title: '接口', eyebrow: 'API REQUESTS', description: '手动发送 HTTP 请求，查看响应，或从最近 50 条执行记录中填入请求再次调试。' },
+    '/databases': { id: 'databases', title: '数据库', eyebrow: 'DATABASE CONNECTIONS', description: '手动执行 SQL、查看结果，管理 MySQL、PostgreSQL 和 Hologres 连接。' },
     '/flows': { id: 'flows', title: '测试流程', eyebrow: 'FLOW STUDIO', description: '让每一步都有依据。编排请求，传递数据，验证你的完整业务流程。' },
+    '/tests': { id: 'tests', title: '接口测试', eyebrow: 'API TESTING', description: '按测试批次追踪每一次验证，用不同入参检查接口，并保存可重复运行的用例。' },
     '/logs': { id: 'logs', title: '日志', eyebrow: 'LIVE LOGS', description: '运行事件与服务输出实时汇总，支持来源筛选和暂停显示。' },
   };
   function showPage(focus = false) {
@@ -52,6 +56,7 @@ import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flow
     if ($('request-detail').open) $('request-detail').close();
     if ($('service-detail').open) $('service-detail').close();
     closeDatabaseDialogs();
+    closeServiceEditor();
     document.querySelectorAll('[data-page]').forEach(element => { element.hidden = element.dataset.page !== page.id; });
     document.querySelectorAll('.page-nav a').forEach(link => {
       if (pages[link.pathname]?.id === page.id) link.setAttribute('aria-current', 'page');
@@ -61,8 +66,9 @@ import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flow
     $('page-title').textContent = page.title; $('page-eyebrow').textContent = page.eyebrow; $('page-description').textContent = page.description;
     applyLogSource();
     if (page.id === 'logs') renderLogs();
-    if (page.id === 'databases') refreshDatabases();
+    if (page.id === 'databases') { refreshDatabases(); refreshSQLHistory(); }
     if (page.id === 'flows') activateFlows(); else deactivateFlows();
+    if (page.id === 'tests') activateTesting(); else deactivateTesting();
     if (focus) { $('page-title').focus({ preventScroll: true }); window.scrollTo(0, 0); }
   }
   async function navigate(path) {
@@ -106,7 +112,7 @@ import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flow
       const feedback = serviceFeedback.get(service.id); if (feedback) { const message = node('div', `service-feedback ${feedback.error ? 'error' : ''}`, feedback.message); message.setAttribute('role', feedback.error ? 'alert' : 'status'); card.append(message); }
       fragment.append(card);
     }
-    if (!state.services.length) fragment.append(empty('还没有配置服务', '通过 MCP 添加并启动服务后，状态会显示在这里。'));
+    if (!state.services.length) fragment.append(empty('还没有配置服务', '点击“新增服务”填写配置并启动，也可以通过 MCP 添加。'));
     $('services').replaceChildren(fragment);
     const selected = $('log-source').value;
     $('log-source').replaceChildren(new Option('全部来源', 'all'), new Option('运行事件', 'runtime'), ...state.services.map(s => new Option(s.name, s.id)));
@@ -131,13 +137,15 @@ import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flow
     const fragment = document.createDocumentFragment(); const items = state.requests.filter(r => `${r.method} ${r.url}`.toLowerCase().includes(query));
     for (const item of items) {
       const row = node('tr', 'request-row'); const request = node('td'); const cell = node('div', 'request-cell'); const method = node('span', `method ${String(item.method).toLowerCase()}`, item.method); const url = node('button', 'request-url request-link', item.url); url.type = 'button'; url.title = `${item.url} · 点击查看详情`; url.setAttribute('aria-label', `查看 ${item.method} ${item.url} 的请求详情`); url.setAttribute('aria-haspopup', 'dialog'); url.setAttribute('aria-controls', 'request-detail');
-      url.addEventListener('click', event => { event.stopPropagation(); openRequestDetail(item.id, url); }); row.addEventListener('click', () => openRequestDetail(item.id, url)); cell.append(method, url); request.append(cell);
+      url.addEventListener('click', event => { event.stopPropagation(); openRequestDetail(item.id, url); }); row.addEventListener('click', () => openRequestDetail(item.id, url));
+      const reuse = node('button', 'text-button', '填入编辑器'); reuse.type = 'button'; reuse.setAttribute('aria-label', `填入 ${item.method} ${item.url}`); reuse.addEventListener('click', event => { event.stopPropagation(); loadManualRequest(item.id); });
+      cell.append(method, url, reuse); request.append(cell);
       const pending = item.status === 'running'; const failed = ['failed', 'timed_out', 'cancelled'].includes(item.status) || item.response_status >= 400;
       const statusText = item.response_status ?? ({ running: '执行中', timed_out: '超时', failed: '失败', cancelled: '已取消' }[item.status] || '—');
       const status = node('td', pending ? 'response-pending' : failed ? 'response-error' : 'response-ok', statusText); status.title = item.error_code || (item.response_status ? `HTTP ${item.response_status}` : item.status);
       const duration = node('td', '', pending ? '—' : `${item.duration_ms} ms`); const at = node('td', '', clock(item.started_at)); at.title = `${new Date(item.started_at).toLocaleString('zh-CN')} · ${item.trigger === 'ai' ? 'AI 调用' : item.trigger === 'manual' ? '手动执行' : item.trigger}`; row.append(request, status, duration, at); fragment.append(row);
     }
-    if (!items.length) { const row = node('tr'); const td = node('td', 'empty', query ? '没有匹配的接口记录' : '还没有执行过接口'); td.colSpan = 4; if (!query) td.append(node('small', '', '通过 MCP 发送请求后，记录会自动出现在这里。')); row.append(td); fragment.append(row); }
+    if (!items.length) { const row = node('tr'); const td = node('td', 'empty', query ? '没有匹配的接口记录' : '还没有执行过接口'); td.colSpan = 4; if (!query) td.append(node('small', '', '在上方发送请求，或通过 MCP 调用接口，记录会自动出现在这里。')); row.append(td); fragment.append(row); }
     $('requests').replaceChildren(fragment);
   }
   function addLogs(data) {
@@ -175,6 +183,7 @@ import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flow
       const response = await fetch(`/api/activity?${query}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`); const data = await response.json();
       state.services = data.services; state.requests = data.requests; state.eventCursor = data.event_cursor; state.serviceCursor = data.service_cursor;
       renderServices(); applyLogSource(); renderRequests(); addLogs(data); setOnline(true); $('error-banner').hidden = true; $('updated').textContent = `最近同步 ${clock(data.time)}`; if (data.more) delay = 100;
+      if (location.pathname === '/databases') refreshSQLHistory();
     } catch (error) { setOnline(false); delay = 3000; $('error-banner').textContent = '暂时无法连接 Apix。正在自动重试，已加载的记录会保留。'; $('error-banner').hidden = false; }
     finally { state.busy = false; $('refresh').disabled = false; state.timer = setTimeout(refresh, delay); }
   }
@@ -184,7 +193,7 @@ import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flow
     event.preventDefault(); navigate(link.pathname + link.search);
   });
   window.addEventListener('popstate', () => showPage(true));
-  $('refresh').addEventListener('click', () => { refresh(); if (location.pathname === '/databases') refreshDatabases(); if (location.pathname === '/flows') refreshFlows(); }); $('request-search').addEventListener('input', () => renderRequests(true));
+  $('refresh').addEventListener('click', () => { refresh(); if (location.pathname === '/databases') { refreshDatabases(); refreshSQLHistory(); } if (location.pathname === '/flows') refreshFlows(); if (location.pathname === '/tests') refreshTesting(); }); $('request-search').addEventListener('input', () => renderRequests(true));
   $('log-source').addEventListener('change', () => {
     const query = new URLSearchParams(location.search);
     if ($('log-source').value === 'all') query.delete('source'); else query.set('source', $('log-source').value);
@@ -192,5 +201,7 @@ import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flow
   });
   $('autoscroll').addEventListener('change', () => { if (!state.paused) renderLogs(); });
   $('pause').addEventListener('click', () => { state.paused = !state.paused; $('pause').setAttribute('aria-pressed', String(state.paused)); $('pause').textContent = state.paused ? '继续显示' : '暂停显示'; $('log-live').textContent = state.paused ? 'PAUSED' : 'LIVE'; $('log-live').classList.toggle('paused', state.paused); $('log-status').textContent = state.paused ? '日志显示已暂停，后台继续接收' : '每秒自动更新'; if (!state.paused) renderLogs(); });
+  document.addEventListener('manual-request-completed', refresh);
+  document.addEventListener('service-configuration-changed', refresh);
   window.addEventListener('online', refresh); showPage(); refresh();
 })();

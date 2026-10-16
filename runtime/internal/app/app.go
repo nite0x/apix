@@ -64,7 +64,7 @@ func Run(_ []string) error {
 	// 2. Core modules
 	hub := core.NewHub()
 	hub.SetEventSink(func(event core.Event) {
-		if strings.HasPrefix(string(event.Type), "flow_run.") {
+		if strings.HasPrefix(string(event.Type), "flow_run.") || strings.HasPrefix(string(event.Type), "test_case.") || strings.HasPrefix(string(event.Type), "test_batch.") {
 			return
 		}
 		// Session payloads include request bodies and variables; only log metadata.

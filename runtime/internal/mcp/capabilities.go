@@ -103,13 +103,14 @@ func numberArg(args map[string]any, key string) (int64, error) {
 }
 
 func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Service, services *localservice.Service, history *journal.Store) {
-	connection := object(map[string]any{"id": str(), "name": str(), "host": str(), "port": integer(), "database": str(), "username": str(), "password": str()}, "name", "host", "database", "username")
+	s.registerTestTools(http, history)
+	connection := object(map[string]any{"id": str(), "name": str(), "type": enum("mysql", "postgresql", "hologres"), "host": str(), "port": integer(), "database": str(), "username": str(), "password": str(), "ssl_mode": enum("disable", "prefer", "require", "verify-full")}, "name", "host", "database", "username")
 	sqlCommand := object(map[string]any{"connection_id": str(), "mode": enum("query", "exec"), "sql": str(), "params": array(map[string]any{}), "timeout_ms": integer(), "max_rows": integer()}, "connection_id", "mode", "sql")
 	service := object(map[string]any{"id": str(), "name": str(), "work_dir": str(), "command": str(), "args": array(str()), "health_url": str(), "startup_timeout_ms": integer()}, "name", "work_dir", "command", "health_url")
 	add := func(name, desc string, schema map[string]any, record bool, handler toolHandler) {
 		s.addCapability(name, desc, schema, history, record, handler)
 	}
-	add("save_database_connection", "Save a MySQL connection using host, port (default 3306), database, username and password. Passwords are encrypted locally and never returned. Omit password on updates to preserve it; use an empty string for an empty password.", object(map[string]any{"connection": connection}, "connection"), true, func(ctx context.Context, a map[string]any) (any, error) {
+	add("save_database_connection", "Save a MySQL, PostgreSQL or Hologres connection. New connections default to mysql; omitted type preserves the existing driver on updates. Default ports: mysql 3306, postgresql 5432, hologres 80. PostgreSQL/Hologres ssl_mode defaults to prefer. Passwords are encrypted locally and never returned. Omit password on updates to preserve it; use an empty string for an empty password.", object(map[string]any{"connection": connection}, "connection"), true, func(ctx context.Context, a map[string]any) (any, error) {
 		var c database.ConnectionInput
 		if err := decode(a["connection"], &c); err != nil {
 			return nil, err
@@ -128,7 +129,7 @@ func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Se
 		err := db.DeleteConnection(ctx, textArg(a, "connection_id"))
 		return map[string]any{"deleted": err == nil}, err
 	})
-	add("execute_sql", "Execute one parameterized MySQL statement. query returns rows, exec returns rows_affected. Bind values with ? placeholders and params. Truncated results have row_count=-1.", object(map[string]any{"command": sqlCommand}, "command"), true, func(ctx context.Context, a map[string]any) (any, error) {
+	add("execute_sql", "Execute a parameterized statement using the saved connection type (MySQL, PostgreSQL or Hologres). query returns rows, exec returns rows_affected. Bind params with ? for MySQL, or native $1, $2 placeholders for PostgreSQL/Hologres. Truncated results have row_count=-1.", object(map[string]any{"command": sqlCommand}, "command"), true, func(ctx context.Context, a map[string]any) (any, error) {
 		var c database.Command
 		if err := decode(a["command"], &c); err != nil {
 			return nil, err

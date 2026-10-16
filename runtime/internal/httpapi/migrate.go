@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const httpSchemaVersion = 4
+const httpSchemaVersion = 5
 
 // MigrateSchema installs the current HTTP domain schema.
 //
@@ -46,6 +46,16 @@ func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 		if err := migrateV3toV4(db); err != nil {
 			return err
 		}
+		if err := migrateV4toV5(db); err != nil {
+			return err
+		}
+		s.initRepositories()
+		return nil
+	}
+	if err == nil && version == 4 {
+		if err := migrateV4toV5(db); err != nil {
+			return err
+		}
 		s.initRepositories()
 		return nil
 	}
@@ -70,7 +80,7 @@ func migrateV2toV3(db *sql.DB) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	for _, stmt := range flowSchemaStatements() {
+	for _, stmt := range append(flowSchemaStatements(), testSchemaStatements()...) {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("create flow schema: %w", err)
 		}
@@ -361,6 +371,7 @@ func rebuildHTTPSchema(db *sql.DB) error {
 		`INSERT OR IGNORE INTO projects(id, name, description) VALUES ('default', 'My APIs', 'Default local project')`,
 	}
 	stmts = append(stmts, flowSchemaStatements()...)
+	stmts = append(stmts, testSchemaStatements()...)
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("create HTTP schema: %w", err)

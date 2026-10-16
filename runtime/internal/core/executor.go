@@ -10,14 +10,15 @@ import (
 )
 
 type Executor struct {
-	sessions   *SessionManager
-	rules      *RuleEngine
-	hub        *Hub
-	store      Store
-	execute    func(context.Context, string, map[string]any, *Variables) (any, error)
-	extract    func(string, any) map[string]*Variable
-	pauseChans map[string]chan PauseResult
-	mu         sync.Mutex
+	sessions     *SessionManager
+	rules        *RuleEngine
+	hub          *Hub
+	store        Store
+	execute      func(context.Context, string, map[string]any, *Variables) (any, error)
+	extract      func(string, any) map[string]*Variable
+	pauseChans   map[string]chan PauseResult
+	mu           sync.Mutex
+	sessionLocks sync.Map
 }
 
 func NewExecutor(
@@ -47,6 +48,12 @@ func (e *Executor) Execute(
 	tool string,
 	input map[string]any,
 ) (any, error) {
+	// A Session owns mutable step/variable state. Parallel AI calls in the
+	// same batch enter it serially; different batches remain independent.
+	lock, _ := e.sessionLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock.(*sync.Mutex).Lock()
+	defer lock.(*sync.Mutex).Unlock()
+	independentTest := input["test_run_id"] != nil
 
 	// 1. Get or create session
 	session, existed := e.sessions.Get(sessionID)
@@ -124,7 +131,7 @@ func (e *Executor) Execute(
 	}
 
 	if err != nil {
-		return nil, e.failStep(session, step, err.Error())
+		return output, e.failStep(session, step, err.Error())
 	}
 
 	// 6. Check pause rules (after execution, e.g. 4xx)
@@ -137,6 +144,9 @@ func (e *Executor) Execute(
 
 	// 7. Extract variables
 	extractedVars := e.extract(tool, output)
+	if independentTest {
+		extractedVars = nil
+	}
 	for name, v := range extractedVars {
 		if v.Scope == "global" {
 			session.Variables.Global[name] = v
@@ -238,6 +248,9 @@ func (e *Executor) Resume(stepID string, action string, modifiedInput any) error
 }
 
 func (e *Executor) failStep(session *Session, step *Step, errMsg string) error {
+	if values, ok := step.Input.(map[string]any); ok && values["test_run_id"] != nil {
+		step.Input = map[string]any{"test_run_id": values["test_run_id"]}
+	}
 	step.Status = StepError
 	step.Error = errMsg
 	session.Status = SessionError
@@ -270,6 +283,23 @@ func (e *Executor) stopSession(session *Session) error {
 
 func (e *Executor) GetSessions() []*Session {
 	return e.sessions.List()
+}
+
+// CompleteSession closes the compatibility session after its explicit test
+// batch finishes; legacy clients should not show it as permanently running.
+func (e *Executor) CompleteSession(id string, failed bool) {
+	lock, _ := e.sessionLocks.LoadOrStore(id, &sync.Mutex{})
+	lock.(*sync.Mutex).Lock()
+	defer lock.(*sync.Mutex).Unlock()
+	if _, ok := e.sessions.Get(id); !ok {
+		return
+	}
+	status, event := SessionDone, EventSessionDone
+	if failed {
+		status, event = SessionError, EventSessionError
+	}
+	e.sessions.UpdateStatus(id, status)
+	e.hub.Push(id, Event{Type: event})
 }
 
 func (e *Executor) GetSession(id string) (*Session, bool) {

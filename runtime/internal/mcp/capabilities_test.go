@@ -29,8 +29,9 @@ import (
 )
 
 type mvpClient struct {
-	client  *mcpclient.Client
-	context context.Context
+	client   *mcpclient.Client
+	context  context.Context
+	executor *core.Executor
 }
 
 func setupMVP(t *testing.T) *mvpClient {
@@ -94,7 +95,7 @@ func setupMVP(t *testing.T) *mvpClient {
 	if _, err := client.Initialize(ctx, mcp.InitializeRequest{Params: mcp.InitializeParams{ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION, ClientInfo: mcp.Implementation{Name: "mvp-integration", Version: "1"}}}); err != nil {
 		t.Fatal(err)
 	}
-	return &mvpClient{client: client, context: ctx}
+	return &mvpClient{client: client, context: ctx, executor: executor}
 }
 
 func (c *mvpClient) call(t *testing.T, name string, args map[string]any, wantError bool) map[string]any {
@@ -234,6 +235,28 @@ func TestDeleteDatabaseConnectionThroughMCP(t *testing.T) {
 		t.Fatalf("deleted connection is still listed: %#v", items)
 	}
 	c.call(t, "delete_database_connection", map[string]any{"connection_id": "delete-me"}, true)
+}
+
+func TestPostgreSQLConnectionSettingsThroughMCP(t *testing.T) {
+	c := setupMVP(t)
+	for _, kind := range []string{"postgresql", "hologres"} {
+		connection := map[string]any{"id": kind, "type": kind, "name": kind, "host": "localhost", "database": "test", "username": "tester", "password": "pg-route-secret", "ssl_mode": "require"}
+		saved := result(t, c.call(t, "save_database_connection", map[string]any{"connection": connection}, false))
+		if saved["type"] != kind || saved["ssl_mode"] != "require" || saved["password"] != nil {
+			t.Fatalf("PostgreSQL settings lost or password leaked: %#v", saved)
+		}
+		delete(connection, "type")
+		delete(connection, "password")
+		delete(connection, "ssl_mode")
+		saved = result(t, c.call(t, "save_database_connection", map[string]any{"connection": connection}, false))
+		if saved["type"] != kind || saved["ssl_mode"] != "require" {
+			t.Fatalf("legacy update replaced PostgreSQL settings: %#v", saved)
+		}
+	}
+	items := c.call(t, "list_database_connections", map[string]any{}, false)["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("PostgreSQL connections missing: %#v", items)
+	}
 }
 
 func TestMVPProcessHelper(t *testing.T) {

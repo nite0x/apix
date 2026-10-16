@@ -147,6 +147,8 @@ func (s *HTTPService) RecoverInterruptedRuns() error {
 		`UPDATE flow_run_steps SET status='cancelled',finished_at=?,error_code='runtime_restarted',error_message='runtime restarted; execution was interrupted' WHERE status IN ('pending','running','paused')`,
 		`UPDATE flow_runs SET status='failed',finished_at=?,error_code='runtime_restarted',error_message='runtime restarted; execution was interrupted' WHERE status IN ('queued','running','paused')`,
 		`UPDATE api_runs SET status='failed',finished_at=?,error_code='runtime_restarted',error_message='runtime restarted; request was interrupted' WHERE status='running'`,
+		`UPDATE test_case_runs SET status='error',finished_at=?,error_message='runtime restarted; test was interrupted' WHERE status='running'`,
+		`UPDATE test_batches SET status='interrupted',finished_at=? WHERE status='running'`,
 	} {
 		if _, err := tx.Exec(statement, now); err != nil {
 			return err

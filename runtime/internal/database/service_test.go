@@ -6,12 +6,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
@@ -31,6 +34,99 @@ func testService(t *testing.T) (*Service, *sql.DB) {
 	}
 	t.Cleanup(func() { _ = s.Close(); _ = db.Close() })
 	return s, db
+}
+
+// Exercise the actual connector: DSN formatting alone hides charset entries
+// incorrectly placed in Config.Params, because ParseDSN treats them specially.
+func TestMySQLConnectionCharset(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	serverResult := make(chan error, 1)
+	go func() {
+		serverResult <- func() error {
+			conn, err := listener.Accept()
+			if err != nil {
+				return err
+			}
+			defer conn.Close()
+			if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				return err
+			}
+			writePacket := func(sequence byte, payload []byte) error {
+				_, err := conn.Write(append([]byte{byte(len(payload)), byte(len(payload) >> 8), byte(len(payload) >> 16), sequence}, payload...))
+				return err
+			}
+			readPacket := func() ([]byte, error) {
+				var header [4]byte
+				if _, err := io.ReadFull(conn, header[:]); err != nil {
+					return nil, err
+				}
+				payload := make([]byte, int(header[0])|int(header[1])<<8|int(header[2])<<16)
+				_, err := io.ReadFull(conn, payload)
+				return payload, err
+			}
+			// Protocol 10 greeting: protocol 4.1, secure connection, native password.
+			greeting := append([]byte{10}, []byte("8.0.0-test\x00")...)
+			greeting = append(greeting, 1, 0, 0, 0)
+			greeting = append(greeting, []byte("12345678\x00")...)
+			greeting = append(greeting, 0x08, 0x82, 45, 2, 0, 0x08, 0, 21)
+			greeting = append(greeting, make([]byte, 10)...)
+			greeting = append(greeting, []byte("abcdefghijkl\x00mysql_native_password\x00")...)
+			if err := writePacket(0, greeting); err != nil {
+				return err
+			}
+			if _, err := readPacket(); err != nil {
+				return err
+			}
+			ok := []byte{0, 0, 0, 2, 0, 0, 0}
+			if err := writePacket(2, ok); err != nil {
+				return err
+			}
+			charsetSet := false
+			for {
+				packet, err := readPacket()
+				if err != nil {
+					return err
+				}
+				if len(packet) == 0 {
+					return errors.New("empty MySQL command")
+				}
+				switch packet[0] {
+				case 3: // COM_QUERY
+					if string(packet[1:]) != "SET NAMES utf8mb4" {
+						_ = writePacket(1, append([]byte{0xff, 0xa9, 0x04}, []byte("#HY000Unknown system variable 'charset'")...))
+						return fmt.Errorf("unexpected initialization SQL: %q", packet[1:])
+					}
+					charsetSet = true
+				case 14: // COM_PING
+					if !charsetSet {
+						return errors.New("connection pinged before setting utf8mb4")
+					}
+					return writePacket(1, ok)
+				default:
+					return fmt.Errorf("unexpected MySQL command: %d", packet[0])
+				}
+				if err := writePacket(1, ok); err != nil {
+					return err
+				}
+			}
+		}()
+	}()
+	s, _ := testService(t)
+	address := listener.Addr().(*net.TCPAddr)
+	item, err := s.PutConnection(context.Background(), Connection{Name: "charset", Host: "127.0.0.1", Port: address.Port, Database: "test", Username: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.TestConnection(context.Background(), item.ID); err != nil {
+		t.Errorf("test connection: %v", err)
+	}
+	if err := <-serverResult; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestConnectionConfigurationAndSecrets(t *testing.T) {

@@ -16,6 +16,7 @@ for (const [target, name] of [['.', 'apix-runtime'], ['./cmd/demo-service', 'api
 }
 copyFileSync(resolve(root, 'scripts/start-backend.ps1'), resolve(output, 'start.ps1'));
 copyFileSync(resolve(root, 'runtime/MVP.md'), resolve(output, 'README.md'));
+copyFileSync(resolve(root, 'docs/API_TESTING.md'), resolve(output, 'API_TESTING.md'));
 copyFileSync(resolve(root, 'runtime/examples/demo-flow.json'), resolve(output, 'demo-flow.json'));
 copyFileSync(resolve(root, 'scripts/smoke-backend.mjs'), resolve(output, 'smoke-backend.mjs'));
 console.log(`Backend MVP built in ${output}`);
