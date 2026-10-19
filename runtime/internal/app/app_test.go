@@ -15,12 +15,12 @@ import (
 
 func TestBrowserOrigins(t *testing.T) {
 	t.Setenv("APIX_ALLOWED_ORIGINS", "https://example.test")
-	for _, origin := range []string{"http://127.0.0.1:1420", "tauri://localhost", "https://example.test"} {
+	for _, origin := range []string{"https://example.test"} {
 		if !allowedBrowserOrigin(origin) {
 			t.Fatalf("rejected allowed origin %s", origin)
 		}
 	}
-	for _, origin := range []string{"https://evil.test", "null", "http://localhost:1420.evil.test"} {
+	for _, origin := range []string{"https://evil.test", "null", "http://127.0.0.1:1420", "tauri://localhost", "http://localhost:1420.evil.test"} {
 		if allowedBrowserOrigin(origin) {
 			t.Fatalf("allowed unexpected origin %s", origin)
 		}

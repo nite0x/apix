@@ -16,13 +16,15 @@ import (
 )
 
 // flowService owns backend sequential execution of Flow runs. Runs execute in a
-// goroutine so closing/refreshing the desktop app never interrupts them.
+// goroutine so closing/refreshing the browser never interrupts them.
 type flowService struct {
-	repo      *repository
-	exec      *executionService
-	hub       *core.Hub
-	rules     *core.RuleEngine
-	database  *database.Service
+	repo *repository
+	exec *executionService
+
+	rules    *core.RuleEngine
+	database interface {
+		Execute(context.Context, database.Command) (*database.Result, error)
+	}
 	services  *localservice.Service
 	eventSink func(eventType, runID, stepID string, payload any)
 	wg        sync.WaitGroup
@@ -42,21 +44,13 @@ func newFlowService(repo *repository, exec *executionService) *flowService {
 	}
 }
 
-func (fs *flowService) setHub(hub *core.Hub)                 { fs.hub = hub }
 func (fs *flowService) setRuleEngine(rules *core.RuleEngine) { fs.rules = rules }
 
 func (fs *flowService) emit(eventType, runID, stepID string, payload any) {
 	if fs.eventSink != nil {
 		fs.eventSink(eventType, runID, stepID, payload)
 	}
-	if fs.hub == nil {
-		return
-	}
-	fs.hub.Push(runID, core.Event{
-		Type:    core.EventType(eventType),
-		StepID:  stepID,
-		Payload: payload,
-	})
+
 }
 
 // StartRun launches the run asynchronously. inputVars are the real (unredacted)
@@ -190,6 +184,13 @@ func (fs *flowService) Resume(stepID, action string) error {
 	return nil
 }
 
+type flowStepOutcome struct {
+	status            string
+	code              string
+	message           string
+	persistenceFailed bool
+}
+
 func (fs *flowService) run(ctx context.Context, runID string, inputVars map[string]string) {
 	defer fs.clearCancel(runID)
 	run, err := fs.repo.getFlowRun(runID)
@@ -210,162 +211,233 @@ func (fs *flowService) run(ctx context.Context, runID string, inputVars map[stri
 	}
 	fs.emit("flow_run.started", runID, "", map[string]any{"total_steps": run.TotalSteps})
 	vars := fs.buildVariables(run, snapshot, inputVars)
+	outputs := flowOutputs{}
 	finalStatus, finalCode, finalMessage := "succeeded", "", ""
+	stopped, cleaning := false, false
+	var cleanupErrors []error
+	var cleanupCtx context.Context
+	var cleanupCancel context.CancelFunc
+	defer func() {
+		if cleanupCancel != nil {
+			cleanupCancel()
+		}
+	}()
+
 	for _, rs := range run.Steps {
-		if ctx.Err() != nil {
-			finalStatus = "cancelled"
-			break
+		definition := snapshot.Steps[rs.Position]
+		finally := definition.Config.Phase == "finally"
+		if finally && !cleaning {
+			cleaning = true
+			// Cancellation stops the body; cleanup has an independent total budget.
+			cleanupCtx, cleanupCancel = context.WithTimeout(context.Background(), 30*time.Second)
+			_ = fs.repo.setFlowRunStatus(runID, "running")
+			fs.emit("flow_run.cleanup_started", runID, "", nil)
 		}
-		config := snapshot.Steps[rs.Position].Config
-		if err := fs.repo.setFlowRunCurrentStep(runID, rs.Position); err != nil {
-			finalStatus, finalCode, finalMessage = "failed", "persistence_failed", err.Error()
-			break
-		}
-		start := time.Now().UTC()
-		if err := fs.repo.setFlowRunStepStatus(rs.ID, "running", nil, "", "", &start, nil); err != nil {
-			finalStatus, finalCode, finalMessage = "failed", "persistence_failed", err.Error()
-			break
-		}
-		fs.emit("flow_run.step_started", runID, rs.ID, map[string]any{"position": rs.Position, "name": rs.NameSnapshot, "type": rs.Type})
-		if (rs.Type == "http" || rs.Type == "") && fs.rules != nil {
-			input := map[string]any{"method": rs.RequestSnapshot.Method, "url": rs.RequestSnapshot.URL, "body": rs.RequestSnapshot.Body}
-			if rule := fs.rules.CheckBefore(input, "production"); rule != nil {
-				resumed, pauseErr := fs.pauseAndWait(ctx, runID, &rs, rule)
-				if pauseErr != nil || resumed.Action == "stop" {
-					finalStatus = "cancelled"
-					break
-				}
-				if resumed.Action == "skip" {
-					finished := time.Now().UTC()
-					if err := fs.repo.setFlowRunStepStatus(rs.ID, "skipped", nil, "", "", nil, &finished); err != nil {
-						finalStatus, finalCode, finalMessage = "failed", "persistence_failed", err.Error()
-						break
-					}
-					fs.emit("flow_run.step_finished", runID, rs.ID, map[string]any{"status": "skipped"})
-					continue
-				}
-				if err := fs.repo.setFlowRunStepStatus(rs.ID, "running", nil, "", "", nil, nil); err != nil {
+		if !finally && (stopped || ctx.Err() != nil) {
+			if ctx.Err() != nil {
+				finalStatus = "cancelled"
+			}
+			finished := time.Now().UTC()
+			reason := "not executed because an earlier step failed"
+			if ctx.Err() != nil {
+				reason = "run cancelled"
+			}
+			if err := fs.repo.setFlowRunStepStatus(rs.ID, "cancelled", nil, "not_executed", reason, nil, &finished); err != nil {
+				if finalStatus == "succeeded" {
 					finalStatus, finalCode, finalMessage = "failed", "persistence_failed", err.Error()
-					break
 				}
 			}
+			fs.emit("flow_run.step_finished", runID, rs.ID, map[string]any{"status": "cancelled", "error_code": "not_executed", "error_message": reason})
+			continue
 		}
-		timeoutMS := config.TimeoutMS
-		if timeoutMS == 0 {
-			timeoutMS = snapshot.Settings.RequestTimeoutMS
+		stepParent := ctx
+		if finally {
+			stepParent = cleanupCtx
 		}
-		if timeoutMS <= 0 {
-			timeoutMS = 60000
-		}
-		stepCtx, cancelStep := context.WithTimeout(ctx, time.Duration(timeoutMS)*time.Millisecond)
-		apiRun, result, assertions, execErr := fs.executeStep(stepCtx, run, &rs, config, vars)
-		cancelStep()
-		var apiRunID *string
-		if apiRun != nil {
-			apiRunID = &apiRun.ID
-		}
-		persistenceFailed := false
-		stepStatus, stepCode, stepMessage := "succeeded", "", ""
-		if execErr != nil {
-			stepStatus, stepCode, stepMessage = "failed", "step_failed", execErr.Error()
-			if errors.Is(execErr, errFlowAssertion) {
-				stepCode = "assertion_failed"
+		outcome := fs.runStep(stepParent, run, rs, definition, snapshot, vars, outputs)
+		if finally {
+			if outcome.status == "failed" || outcome.status == "cancelled" {
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("%s: %s", definition.Name, outcome.message))
 			}
-			if errors.Is(execErr, context.DeadlineExceeded) {
-				stepCode = "timeout"
+			// Cleanup always attempts the remaining steps, regardless of policy.
+			continue
+		}
+		if outcome.status == "cancelled" {
+			finalStatus, stopped = "cancelled", true
+		} else if outcome.status == "failed" {
+			// Preserve the first failure even when subsequent checks also fail.
+			if finalStatus == "succeeded" {
+				finalStatus, finalCode, finalMessage = "failed", outcome.code, outcome.message
 			}
-		}
-		if ctx.Err() != nil {
-			stepStatus, stepCode, stepMessage = "cancelled", "cancelled", "run cancelled"
-			finalStatus = "cancelled"
-		}
-		if stepStatus == "succeeded" && apiRun != nil {
-			if fs.rules != nil && apiRun.ResponseStatus != nil {
-				if rule := fs.rules.CheckAfter(map[string]any{"status": *apiRun.ResponseStatus}); rule != nil {
-					resumed, pauseErr := fs.pauseAndWait(ctx, runID, &rs, rule)
-					if pauseErr != nil || resumed.Action == "stop" {
-						stepStatus, stepCode, stepMessage = "cancelled", "cancelled", "run stopped"
-						finalStatus = "cancelled"
-					}
-				}
-			}
-			if stepStatus == "succeeded" {
-				extracted, extractErr := fs.applyExtractors(config.Extractors, apiRun, vars)
-				if extractErr != nil {
-					stepStatus, stepCode, stepMessage = "failed", "extractor_failed", extractErr.Error()
-				}
-				for name := range extracted {
-					fs.emit("flow_run.variable_extracted", runID, rs.ID, map[string]any{"name": name})
-				}
-				visible := make([]FlowExtractedVariable, 0, len(extracted))
-				for _, extractor := range config.Extractors {
-					value, ok := extracted[extractor.Name]
-					if !ok {
-						continue
-					}
-					secret := extractor.Secret
-					for _, def := range snapshot.Variables {
-						if def.Name == extractor.Name && def.Secret {
-							secret = true
-						}
-					}
-					if secret {
-						value = "••••••"
-					}
-					visible = append(visible, FlowExtractedVariable{Name: extractor.Name, Value: value, Secret: secret, Source: extractor.Source, Path: extractor.Path})
-				}
-				result = FlowHTTPResult{ExtractedVariables: visible}
-			}
-		}
-		if persistErr := fs.repo.setFlowRunStepResult(rs.ID, result, assertions); persistErr != nil {
-			persistenceFailed = true
-			stepStatus, stepCode, stepMessage = "failed", "persistence_failed", persistErr.Error()
-		}
-		finished := time.Now().UTC()
-		if err := fs.repo.setFlowRunStepStatus(rs.ID, stepStatus, apiRunID, stepCode, stepMessage, nil, &finished); err != nil {
-			stepStatus, stepCode, stepMessage = "failed", "persistence_failed", err.Error()
-			persistenceFailed = true
-		}
-		fs.emit("flow_run.step_finished", runID, rs.ID, map[string]any{"status": stepStatus, "api_run_id": apiRunID, "result": result, "assertions": assertions, "error_code": stepCode, "error_message": stepMessage})
-		if finalStatus == "cancelled" {
-			break
-		}
-		if stepStatus == "failed" {
-			finalStatus, finalCode, finalMessage = "failed", stepCode, stepMessage
-			if persistenceFailed || (!config.ContinueOnError && snapshot.Settings.StopOnError) {
-				break
-			}
+			stopped = outcome.persistenceFailed || !flowContinues(definition.Config, snapshot.Settings)
 		}
 	}
-	if finalStatus == "cancelled" || ctx.Err() != nil {
-		finalStatus, finalCode, finalMessage = "cancelled", "cancelled", "run cancelled"
+	// Existing service ownership cleanup runs after explicit finalizers, with a
+	// fresh budget so a timed-out finalizer cannot prevent service release.
+	if fs.services != nil {
+		if !cleaning {
+			fs.emit("flow_run.cleanup_started", runID, "", nil)
+		}
+		serviceCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanupErr := fs.services.Cleanup(serviceCtx, runID)
+		cancel()
+		if cleanupErr != nil {
+			cleanupErrors = append(cleanupErrors, cleanupErr)
+		}
 	}
+	if cleaning || fs.services != nil {
+		cleanupStatus := "succeeded"
+		if cleanupErr := errors.Join(cleanupErrors...); cleanupErr != nil {
+			cleanupStatus = "failed"
+			message := redactFlowMessage(cleanupErr.Error(), outputs)
+			if err := fs.repo.setFlowRunCleanupError(runID, message); err != nil {
+				message += "; cleanup result could not be persisted"
+			}
+			if finalStatus == "succeeded" {
+				finalStatus, finalCode, finalMessage = "failed", "cleanup_failed", message
+			}
+			fs.emit("flow_run.cleanup_finished", runID, "", map[string]any{"status": cleanupStatus, "error_message": message})
+		} else {
+			fs.emit("flow_run.cleanup_finished", runID, "", map[string]any{"status": cleanupStatus})
+		}
+	}
+	if ctx.Err() != nil || finalStatus == "cancelled" {
+		finalStatus = "cancelled"
+		if finalCode == "" {
+			finalCode, finalMessage = "cancelled", "run cancelled"
+		}
+	}
+	// Also closes a step interrupted while waiting for a pause decision.
 	if finalStatus != "succeeded" {
 		_ = fs.repo.cancelPendingFlowRunSteps(runID)
-	}
-	// Cleanup uses a fresh context even when the run was cancelled.
-	if fs.services != nil {
-		fs.emit("flow_run.cleanup_started", runID, "", nil)
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		cleanupErr := fs.services.Cleanup(cleanupCtx, runID)
-		cleanupCancel()
-		if cleanupErr != nil {
-			_ = fs.repo.setFlowRunCleanupError(runID, cleanupErr.Error())
-			if finalStatus == "succeeded" {
-				finalStatus, finalCode, finalMessage = "failed", "cleanup_failed", cleanupErr.Error()
-			}
-			fs.emit("flow_run.cleanup_finished", runID, "", map[string]any{"status": "failed", "error_message": cleanupErr.Error()})
-		} else {
-			fs.emit("flow_run.cleanup_finished", runID, "", map[string]any{"status": "succeeded"})
-		}
-	}
-	if ctx.Err() != nil {
-		finalStatus, finalCode, finalMessage = "cancelled", "cancelled", "run cancelled"
 	}
 	if err := fs.repo.finishFlowRun(runID, finalStatus, finalCode, finalMessage); err != nil {
 		finalStatus, finalCode, finalMessage = "failed", "persistence_failed", "could not persist final run status: "+err.Error()
 	}
 	fs.emit("flow_run.finished", runID, "", map[string]any{"status": finalStatus, "error_code": finalCode, "error_message": finalMessage})
+}
+
+func (fs *flowService) runStep(ctx context.Context, run *FlowRun, rs FlowRunStep, definition FlowStep, snapshot flowSnapshot, vars *core.Variables, outputs flowOutputs) flowStepOutcome {
+	outcome := flowStepOutcome{status: "succeeded"}
+	fail := func(code string, err error) {
+		outcome.status, outcome.code, outcome.message = "failed", code, redactFlowMessage(err.Error(), outputs)
+		if code == "persistence_failed" {
+			outcome.persistenceFailed = true
+		}
+	}
+	start := time.Now().UTC()
+	if err := fs.repo.setFlowRunCurrentStep(run.ID, rs.Position); err != nil {
+		fail("persistence_failed", err)
+		return outcome
+	}
+	if err := fs.repo.setFlowRunStepStatus(rs.ID, "running", nil, "", "", &start, nil); err != nil {
+		fail("persistence_failed", err)
+		return outcome
+	}
+	fs.emit("flow_run.step_started", run.ID, rs.ID, map[string]any{"position": rs.Position, "name": rs.NameSnapshot, "type": rs.Type, "phase": definition.Config.Phase})
+	var result any
+	var assertions []AssertionResult
+	var apiRunID *string
+	resolved, resolveErr := resolveFlowStep(definition, outputs)
+	if resolveErr != nil {
+		fail("input_unavailable", resolveErr)
+		if definition.Config.Phase == "finally" && definition.Config.SkipIfMissingOutputs && errors.Is(resolveErr, errFlowOutputMissing) {
+			outcome.status, outcome.code = "skipped", "output_unavailable"
+		}
+	} else {
+		rs.RequestSnapshot, rs.SQLSnapshot, rs.ServiceSnapshot = resolved.Request, resolved.SQL, resolved.Service
+		if (rs.Type == "http" || rs.Type == "") && fs.rules != nil {
+			input := map[string]any{"method": rs.RequestSnapshot.Method, "url": rs.RequestSnapshot.URL, "body": rs.RequestSnapshot.Body}
+			if rule := fs.rules.CheckBefore(input, "production"); rule != nil {
+				resumed, pauseErr := fs.pauseAndWait(ctx, run.ID, &rs, rule)
+				if pauseErr != nil || resumed.Action == "stop" {
+					outcome.status, outcome.code, outcome.message = "cancelled", "cancelled", "run stopped"
+				} else if resumed.Action == "skip" {
+					outcome.status, outcome.code, outcome.message = "skipped", "manual_skip", "step skipped by user"
+				} else if err := fs.repo.setFlowRunStepStatus(rs.ID, "running", nil, "", "", nil, nil); err != nil {
+					fail("persistence_failed", err)
+				}
+			}
+		}
+		if outcome.status == "succeeded" {
+			timeoutMS := resolved.Config.TimeoutMS
+			if timeoutMS == 0 {
+				timeoutMS = snapshot.Settings.RequestTimeoutMS
+			}
+			if timeoutMS <= 0 {
+				timeoutMS = 60000
+			}
+			stepCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMS)*time.Millisecond)
+			apiRun, rawResult, checks, execErr := fs.executeStep(stepCtx, run, &rs, resolved.Config, vars)
+			cancel()
+			result, assertions = rawResult, checks
+			if apiRun != nil {
+				apiRunID = &apiRun.ID
+			}
+			if execErr != nil {
+				code := "step_failed"
+				if errors.Is(execErr, errFlowAssertion) {
+					code = "assertion_failed"
+				}
+				if errors.Is(execErr, context.DeadlineExceeded) {
+					code = "timeout"
+				}
+				if apiRun != nil && apiRun.ErrorCode == "timeout" {
+					code = "timeout"
+				}
+				fail(code, execErr)
+			}
+			// Even a failed assertion/partial extraction may leave a created
+			// resource; capture every available output for explicit cleanup.
+			if apiRun != nil && apiRun.ResponseStatus != nil || definition.Type == "sql" && rawResult != nil {
+				visible, extractErr := captureFlowOutputs(resolved, apiRun, rawResult, vars, outputs, snapshot.Variables)
+				if extractErr != nil && outcome.status == "succeeded" {
+					fail("extractor_failed", extractErr)
+				}
+				if apiRun != nil {
+					result = FlowHTTPResult{ExtractedVariables: visible}
+				} else {
+					evidence := flowSQLEvidence(rawResult, visible)
+					evidence["extracted_variables"] = visible
+					result = evidence
+				}
+				for _, variable := range visible {
+					fs.emit("flow_run.variable_extracted", run.ID, rs.ID, map[string]any{"name": variable.Name, "step_id": definition.ID})
+				}
+			}
+			if ctx.Err() != nil {
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					fail("timeout", ctx.Err())
+				} else {
+					outcome.status, outcome.code, outcome.message = "cancelled", "cancelled", "run cancelled"
+				}
+			}
+			// Keep existing post-request pause behavior.
+			if outcome.status == "succeeded" && apiRun != nil && apiRun.ResponseStatus != nil && fs.rules != nil {
+				if rule := fs.rules.CheckAfter(map[string]any{"status": *apiRun.ResponseStatus}); rule != nil {
+					resumed, pauseErr := fs.pauseAndWait(ctx, run.ID, &rs, rule)
+					if pauseErr != nil || resumed.Action == "stop" {
+						outcome.status, outcome.code, outcome.message = "cancelled", "cancelled", "run stopped"
+					}
+				}
+			}
+		}
+	}
+	result = redactFlowEvidence(result, outputs)
+	// Assertions can mention a secret through a qualified output reference.
+	for i := range assertions {
+		assertions[i].Expected = redactFlowEvidence(assertions[i].Expected, outputs)
+		assertions[i].Actual = redactFlowEvidence(assertions[i].Actual, outputs)
+	}
+	if err := fs.repo.setFlowRunStepResult(rs.ID, result, assertions); err != nil {
+		fail("persistence_failed", err)
+	}
+	finished := time.Now().UTC()
+	if err := fs.repo.setFlowRunStepStatus(rs.ID, outcome.status, apiRunID, outcome.code, outcome.message, nil, &finished); err != nil {
+		fail("persistence_failed", err)
+	}
+	fs.emit("flow_run.step_finished", run.ID, rs.ID, map[string]any{"status": outcome.status, "api_run_id": apiRunID, "result": result, "assertions": assertions, "error_code": outcome.code, "error_message": outcome.message, "phase": definition.Config.Phase})
+	return outcome
 }
 
 // buildVariables merges variables low→high: environment, flow defaults, run
@@ -394,24 +466,6 @@ func (fs *flowService) buildVariables(run *FlowRun, snapshot flowSnapshot, input
 		set(k, v)
 	}
 	return vars
-}
-
-// applyExtractors pulls values from the API run into the run-scoped variables.
-// A required extractor whose value is missing fails the step.
-func (fs *flowService) applyExtractors(extractors []FlowExtractor, run *APIRun, vars *core.Variables) (map[string]string, error) {
-	out := map[string]string{}
-	for _, e := range extractors {
-		value, ok := extractValue(e, run)
-		if !ok {
-			if e.Required {
-				return out, fmt.Errorf("required value %q not found", e.Name)
-			}
-			continue
-		}
-		vars.Global[e.Name] = &core.Variable{Name: e.Name, Value: value, Scope: "run", Source: "extractor"}
-		out[e.Name] = value
-	}
-	return out, nil
 }
 
 func extractValue(e FlowExtractor, run *APIRun) (string, bool) {

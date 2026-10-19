@@ -94,6 +94,15 @@ func (r *repository) validateFlowAggregate(f *Flow) error {
 		if step.Type != "http" && (strings.TrimSpace(step.Request.URL) != "" || step.Request.Body != "" || len(step.Request.Headers) > 0 || len(step.Request.QueryParams) > 0 || step.Request.AuthConfig != nil) {
 			return fmt.Errorf("step %q carries an HTTP request payload for a different step type", step.Name)
 		}
+		if step.Config.Phase != "" && step.Config.Phase != "finally" {
+			return fmt.Errorf("invalid step phase %q", step.Config.Phase)
+		}
+		if step.Config.FailurePolicy != "" && step.Config.FailurePolicy != "stop" && step.Config.FailurePolicy != "continue" {
+			return fmt.Errorf("invalid failure policy %q", step.Config.FailurePolicy)
+		}
+		if step.Config.SkipIfMissingOutputs && step.Config.Phase != "finally" {
+			return fmt.Errorf("skip_if_missing_outputs only applies to finally steps")
+		}
 		if step.Config.TimeoutMS != 0 && (step.Config.TimeoutMS < 1000 || step.Config.TimeoutMS > 300000) {
 			return fmt.Errorf("step timeout_ms must be between 1000 and 300000")
 		}
@@ -103,8 +112,11 @@ func (r *repository) validateFlowAggregate(f *Flow) error {
 		if step.Config.ExpectedRows != nil && (*step.Config.ExpectedRows < 0 || step.Type != "sql" || step.SQL == nil || step.SQL.Mode != "query") {
 			return fmt.Errorf("expected_rows requires a SQL query and a nonnegative count")
 		}
-		if step.Type != "http" && (len(step.Config.Extractors) > 0 || step.SourceAPIRequestID != nil) {
-			return fmt.Errorf("extractors and source_api_request_id only apply to HTTP steps")
+		if step.Type != "http" && step.SourceAPIRequestID != nil {
+			return fmt.Errorf("source_api_request_id only applies to HTTP steps")
+		}
+		if step.Type == "service" && (len(step.Config.Extractors) > 0 || len(step.Config.Assertions) > 0) {
+			return fmt.Errorf("service steps do not support assertions or extractors")
 		}
 		if step.Enabled && step.Type == "http" {
 			method := strings.ToUpper(strings.TrimSpace(step.Request.Method))
@@ -128,11 +140,13 @@ func (r *repository) validateFlowAggregate(f *Flow) error {
 		if err := validateExtractors(step.Config.Extractors); err != nil {
 			return err
 		}
-		if len(step.Config.Assertions) > 0 && step.Type != "http" {
-			return fmt.Errorf("response assertions only apply to HTTP steps")
+		for _, extractor := range step.Config.Extractors {
+			if !validFlowSource(step.Type, step.SQL, extractor.Source) {
+				return fmt.Errorf("invalid output source %q for %s", extractor.Source, step.Type)
+			}
 		}
 		for _, assertion := range step.Config.Assertions {
-			if assertion.Source != "body" && assertion.Source != "header" && assertion.Source != "status" {
+			if !validFlowSource(step.Type, step.SQL, assertion.Source) {
 				return fmt.Errorf("invalid assertion source %q", assertion.Source)
 			}
 			if assertion.Source == "header" && strings.TrimSpace(assertion.Path) == "" {
@@ -164,7 +178,7 @@ func validateExtractors(extractors []FlowExtractor) error {
 		}
 		seen[e.Name] = true
 		switch e.Source {
-		case "body", "header", "status":
+		case "body", "header", "status", "rows", "row_count", "rows_affected":
 		default:
 			return fmt.Errorf("extractor %q has invalid source", e.Name)
 		}
@@ -208,6 +222,9 @@ func (r *repository) assertRequestInProject(requestID, projectID string) error {
 
 func normalizeFlowSteps(f *Flow) {
 	sort.SliceStable(f.Steps, func(i, j int) bool {
+		if (f.Steps[i].Config.Phase == "finally") != (f.Steps[j].Config.Phase == "finally") {
+			return f.Steps[j].Config.Phase == "finally"
+		}
 		return f.Steps[i].Position < f.Steps[j].Position
 	})
 	for i := range f.Steps {
@@ -446,6 +463,9 @@ func (r *repository) updateFlow(in *Flow, expectedVersion int64) (*Flow, error) 
 		return nil, fmt.Errorf("%w: %v", errValidation, err)
 	}
 	normalizeFlowSteps(in)
+	if err := validateFlowReferences(in.Steps); err != nil {
+		return nil, fmt.Errorf("%w: %v", errValidation, err)
+	}
 
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -567,10 +587,15 @@ func (r *repository) duplicateFlow(id string) (*Flow, error) {
 		marshalJSON(source.Settings), marshalJSON(source.Variables), 1, now, now); err != nil {
 		return nil, err
 	}
+	ids := map[string]string{}
 	for _, step := range source.Steps {
+		ids[step.ID] = uuid.NewString()
+	}
+	for _, original := range source.Steps {
+		step := remapFlowReferences(original, ids)
 		if _, err := tx.Exec(`INSERT INTO flow_steps
 			(id, flow_id, position, type, name, enabled, source_api_request_id, request_data, config, created_at, updated_at, sql_data, service_data)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), newID, step.Position, step.Type, step.Name,
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, ids[step.ID], newID, step.Position, step.Type, step.Name,
 			boolToInt(step.Enabled), step.SourceAPIRequestID, marshalJSON(step.Request), marshalJSON(step.Config), now, now, marshalJSON(step.SQL), marshalJSON(step.Service)); err != nil {
 			return nil, err
 		}

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 
 test('API testing groups input variants, preserves case drafts during polling, and runs selected saved cases', async () => {
-  const require = createRequire(new URL('../../../apps/desktop/package.json', import.meta.url));
+  const require = createRequire(import.meta.url);
   const { JSDOM } = require('jsdom');
   const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/tests' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, location: dom.window.location, history: dom.window.history, Option: dom.window.Option });

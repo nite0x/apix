@@ -1,4 +1,4 @@
-import { activeStatus, blankStep, display, endpoint, requestURL, statusNames, uniqueName, validateDefinition } from './flow-model.js';
+import { availableOutputs, copyFlowSteps, failurePolicy, isFinally, orderedSteps, outputReference, sourceChoices, activeStatus, blankStep, display, endpoint, requestURL, statusNames, uniqueName, validateDefinition } from './flow-model.js';
 import { openRequestDetail } from './request-detail.js';
 
 const root = document.getElementById('flow-workspace');
@@ -13,6 +13,10 @@ function input(value, label, change, options = {}) {
   field.value = value ?? ''; field.setAttribute('aria-label', label); if (!options.multiline) field.type = options.type || 'text';
   field.placeholder = options.placeholder || ''; if (options.rows) field.rows = options.rows;
   if (options.max) field.maxLength = options.max;
+  if (/请求地址|请求正文|SQL 参数|期望值|查询参数值|请求头值/.test(label)) {
+    field.dataset.outputTarget = '';
+    field.addEventListener('focus', () => { state.outputTarget = field; });
+  }
   field.addEventListener('input', () => change(field.value, field)); return field;
 }
 function field(label, control, hint) { const wrap = el('label', 'fw-field'); wrap.append(el('span', 'fw-label', label), control); if (hint) wrap.append(el('small', 'fw-hint', hint)); return wrap; }
@@ -49,7 +53,7 @@ async function saveFlow() {
       while (state.dirty) {
         const issue = validateDefinition(state.flow); if (issue) { setError(issue); return false; }
         const version = state.revision;
-        state.flow.steps.forEach((step, index) => { step.position = index; });
+        state.flow.steps = orderedSteps(state.flow.steps); state.flow.steps.forEach((step, index) => { step.position = index; });
         const saved = await api(`/flows/${encodeURIComponent(state.flow.id)}`, { method: 'PUT', body: structuredClone(state.flow) });
         if (state.revision === version) { state.flow.edit_version = saved.edit_version; state.flow.updated_at = saved.updated_at; state.dirty = false; }
         else state.flow.edit_version = saved.edit_version;
@@ -142,11 +146,11 @@ async function saveCopy() {
   const validation = validateDefinition(state.flow); if (validation) { setError(validation); return; }
   try {
     const copy = await api('/flows', { method: 'POST', body: { name: `${state.flow.name.slice(0, 114)} · 副本` } });
-    const saved = await api(`/flows/${encodeURIComponent(copy.id)}`, { method: 'PUT', body: { ...structuredClone(state.flow), id: copy.id, edit_version: copy.edit_version, name: copy.name, steps: state.flow.steps.map(step => ({ ...structuredClone(step), id: crypto.randomUUID() })) } });
+    const saved = await api(`/flows/${encodeURIComponent(copy.id)}`, { method: 'PUT', body: { ...structuredClone(state.flow), id: copy.id, edit_version: copy.edit_version, name: copy.name, steps: copyFlowSteps(state.flow.steps) } });
     state.dirty = false; state.flows.unshift({ ...saved, step_count: saved.steps.length }); await openFlow(saved.id);
   } catch (error) { setError(`另存失败：${errorText(error)}`); }
 }
-function addStep(type) { const step = blankStep(type); state.flow.steps.push(step); state.open.add(step.id); state.tabs.set(step.id, 'request'); changed(true); root.querySelector(`[data-step="${step.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+function addStep(type, phase = '') { const step = blankStep(type); if (phase) step.config.phase = phase; state.flow.steps.push(step); state.open.add(step.id); state.tabs.set(step.id, 'request'); changed(true); root.querySelector(`[data-step="${step.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
 function renderWorkspace() {
   const fragment = document.createDocumentFragment(); const error = el('div', 'fw-message', state.error); error.dataset.flowMessage = ''; error.hidden = !state.error; error.setAttribute('role', 'alert'); fragment.append(error);
   if (!state.flow) { renderLibrary(fragment); root.replaceChildren(fragment); return; }
@@ -182,34 +186,80 @@ function renderLibrary(fragment) {
   fragment.append(grid);
 }
 function renderSteps(canvas) {
-  const flow = state.flow; const start = el('div', 'fw-boundary'); start.append(el('span', 'fw-boundary-dot'), el('strong', '', '流程输入'), button(`${flow.variables.length} 个共享变量 ↗`, 'fw-text-button', () => { state.rail = 'variables'; renderRail(); })); canvas.append(start);
-  const track = el('div', 'fw-track');
-  flow.steps.forEach((step, index) => {
-    const card = el('article', `fw-step${step.enabled ? '' : ' disabled'}`); card.dataset.step = step.id;
-    const head = el('div', 'fw-step-heading'); const toggle = button('', 'fw-step-toggle', () => { if (state.open.has(step.id)) state.open.delete(step.id); else state.open.add(step.id); renderWorkspace(); }); toggle.setAttribute('aria-expanded', String(state.open.has(step.id)));
-    const summary = el('div', 'fw-step-summary'); const upper = el('div', 'fw-step-summary-top'); upper.append(el('span', `fw-type ${step.type}`, step.type === 'http' ? step.request.method : step.type.toUpperCase()), el('strong', '', step.name || '未命名步骤'));
-    const detail = el('span', 'fw-step-endpoint', endpoint(step)); summary.append(upper, detail);
-    toggle.append(el('span', 'fw-step-index', String(index + 1).padStart(2, '0')), summary, el('span', 'fw-chevron', state.open.has(step.id) ? '−' : '+'));
-    const ops = el('div', 'fw-step-ops');
-    ops.append(check('启用', step.enabled, value => { step.enabled = value; changed(true); }));
-    const up = button('↑', 'fw-icon-button', () => { [flow.steps[index - 1], flow.steps[index]] = [flow.steps[index], flow.steps[index - 1]]; changed(true); }, `上移步骤 ${index + 1}`); up.disabled = index === 0;
-    const down = button('↓', 'fw-icon-button', () => { [flow.steps[index + 1], flow.steps[index]] = [flow.steps[index], flow.steps[index + 1]]; changed(true); }, `下移步骤 ${index + 1}`); down.disabled = index === flow.steps.length - 1;
-    ops.append(up, down, button('⧉', 'fw-icon-button', () => { const copy = structuredClone(step); copy.id = crypto.randomUUID(); copy.name = `${step.name} · 副本`; flow.steps.splice(index + 1, 0, copy); changed(true); }, `复制步骤 ${index + 1}`), button('×', 'fw-icon-button', () => { flow.steps.splice(index, 1); changed(true); }, `删除步骤 ${index + 1}`)); head.append(toggle, ops); card.append(head);
-    if (state.open.has(step.id)) {
-      const body = el('div', 'fw-step-body'); body.append(field('步骤名称', input(step.name, `步骤 ${index + 1} 名称`, value => { step.name = value; upper.querySelector('strong').textContent = value || '未命名步骤'; changed(); })));
-      const tabs = el('div', 'fw-card-tabs'); const content = el('div'); const selected = state.tabs.get(step.id) || 'request';
-      const choices = [['request', step.type === 'http' ? '请求配置' : step.type === 'sql' ? 'SQL 配置' : '服务配置'], ['assertions', `断言 ${(step.config.assertions || []).length + (step.config.expected_status != null || step.config.expected_rows != null ? 1 : 0)}`], ['extractors', `响应提取 ${(step.config.extractors || []).length}`]];
-      tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', `步骤 ${index + 1} 配置`);
-      for (const [id, label] of choices) { if (id === 'extractors' && step.type !== 'http' || id === 'assertions' && step.type === 'service') continue; const tab = button(label, selected === id ? 'active' : '', () => { state.tabs.set(step.id, id); renderWorkspace(); }); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(selected === id)); tabs.append(tab); }
-      body.append(tabs, content);
-      if (selected === 'assertions') renderAssertions(content, step); else if (selected === 'extractors') renderExtractors(content, step); else renderRequest(content, step, detail);
-      const policy = el('div', 'fw-step-policy'); policy.append(check('此步骤失败后继续', step.config.continue_on_error, value => { step.config.continue_on_error = value; changed(); })); body.append(policy); card.append(body);
-    } else { const meta = el('div', 'fw-step-meta'); meta.append(el('span', '', `${(step.config.assertions || []).length + (step.config.expected_status != null || step.config.expected_rows != null ? 1 : 0)} 项断言`), el('span', '', `${(step.config.extractors || []).length} 个输出变量`), el('span', '', step.config.continue_on_error ? '失败后继续' : '遵循流程失败策略')); card.append(meta); }
-    track.append(card);
-  });
-  const add = el('div', 'fw-add-step'); add.append(el('span', '', '＋ 添加一个步骤'), button('HTTP 请求', 'button small', () => addStep('http')), button('SQL 查询', 'button small', () => addStep('sql')), button('服务准备', 'button small', () => addStep('service'))); track.append(add); canvas.append(track);
+  const flow = state.flow; flow.steps = orderedSteps(flow.steps); flow.steps.forEach((step, index) => { step.position = index; }); const start = el('div', 'fw-boundary'); start.append(el('span', 'fw-boundary-dot'), el('strong', '', '流程输入'), button(`${flow.variables.length} 个共享变量 ↗`, 'fw-text-button', () => { state.rail = 'variables'; renderRail(); })); canvas.append(start);
+  for (const phase of ['', 'finally']) {
+    const group = el('section', 'fw-phase' + (phase ? ' fw-finally' : '')); group.setAttribute('aria-label', phase ? '收尾步骤' : '执行步骤');
+    group.append(el('h3', 'fw-phase-title', phase ? '收尾步骤' : '执行步骤'));
+    if (phase) group.append(el('p', 'fw-hint', '成功、失败或取消后都尝试执行；一项失败仍继续其他收尾。收尾区总时限 30 秒，之后释放本次启动的服务。'));
+    const track = el('div', 'fw-track');
+    const groupSteps = flow.steps.filter(step => isFinally(step) === Boolean(phase));
+    groupSteps.forEach((step, groupIndex) => {
+      const index = flow.steps.indexOf(step);
+      const card = el('article', `fw-step${step.enabled ? '' : ' disabled'}`); card.dataset.step = step.id;
+      const head = el('div', 'fw-step-heading'); const toggle = button('', 'fw-step-toggle', () => { if (state.open.has(step.id)) state.open.delete(step.id); else state.open.add(step.id); renderWorkspace(); }); toggle.setAttribute('aria-expanded', String(state.open.has(step.id)));
+      const summary = el('div', 'fw-step-summary'); const upper = el('div', 'fw-step-summary-top'); upper.append(el('span', `fw-type ${step.type}`, step.type === 'http' ? step.request.method : step.type.toUpperCase()), el('strong', '', step.name || '未命名步骤'));
+      const detail = el('span', 'fw-step-endpoint', endpoint(step)); summary.append(upper, detail);
+      toggle.append(el('span', 'fw-step-index', String(index + 1).padStart(2, '0')), summary, el('span', 'fw-chevron', state.open.has(step.id) ? '−' : '+'));
+      const ops = el('div', 'fw-step-ops');
+      ops.append(check('启用', step.enabled, value => { step.enabled = value; changed(true); }));
+      const up = button('↑', 'fw-icon-button', () => { const other = flow.steps.indexOf(groupSteps[groupIndex - 1]); [flow.steps[other], flow.steps[index]] = [flow.steps[index], flow.steps[other]]; changed(true); }, `上移步骤 ${index + 1}`); up.disabled = groupIndex === 0;
+      const down = button('↓', 'fw-icon-button', () => { const other = flow.steps.indexOf(groupSteps[groupIndex + 1]); [flow.steps[other], flow.steps[index]] = [flow.steps[index], flow.steps[other]]; changed(true); }, `下移步骤 ${index + 1}`); down.disabled = groupIndex === groupSteps.length - 1;
+      ops.append(up, down, button('⧉', 'fw-icon-button', () => { const copy = structuredClone(step); copy.id = crypto.randomUUID(); copy.name = `${step.name} · 副本`; flow.steps.splice(index + 1, 0, copy); changed(true); }, `复制步骤 ${index + 1}`), button('×', 'fw-icon-button', () => { flow.steps.splice(index, 1); changed(true); }, `删除步骤 ${index + 1}`)); ops.append(button(phase ? '移至执行' : '移至收尾', 'fw-text-button', () => {
+        if (phase) { delete step.config.phase; delete step.config.skip_if_missing_outputs; }
+        else step.config.phase = 'finally';
+        changed(true);
+      }, '切换步骤 ' + (index + 1) + ' 阶段'));
+      head.append(toggle, ops); card.append(head);
+      if (state.open.has(step.id)) {
+        const body = el('div', 'fw-step-body'); body.append(field('步骤名称', input(step.name, `步骤 ${index + 1} 名称`, value => { step.name = value; upper.querySelector('strong').textContent = value || '未命名步骤'; changed(); })));
+        const tabs = el('div', 'fw-card-tabs'); const content = el('div'); const selected = state.tabs.get(step.id) || 'request';
+        const choices = [['request', step.type === 'http' ? '请求配置' : step.type === 'sql' ? 'SQL 配置' : '服务配置'], ['assertions', `断言 ${(step.config.assertions || []).length + (step.config.expected_status != null || step.config.expected_rows != null ? 1 : 0)}`], ['extractors', `响应提取 ${(step.config.extractors || []).length}`]];
+        tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', `步骤 ${index + 1} 配置`);
+        for (const [id, label] of choices) { if (step.type === 'service' && (id === 'extractors' || id === 'assertions')) continue; const tab = button(label, selected === id ? 'active' : '', () => { state.tabs.set(step.id, id); renderWorkspace(); }); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(selected === id)); tabs.append(tab); }
+        body.append(tabs, outputPicker(step), content);
+        if (selected === 'assertions') renderAssertions(content, step); else if (selected === 'extractors') renderExtractors(content, step); else renderRequest(content, step, detail);
+        const policy = el('div', 'fw-step-policy');
+        if (phase) {
+          policy.append(el('p', 'fw-hint', '收尾失败会单独记录，并继续其他收尾步骤。'), check('引用的步骤输出不存在时跳过', step.config.skip_if_missing_outputs || false, value => { step.config.skip_if_missing_outputs = value; changed(); }));
+        } else {
+          policy.append(field('失败时', select(failurePolicy(step), '步骤 ' + (index + 1) + ' 失败策略', [['inherit', '遵循流程设置'], ['stop', '停止后续步骤'], ['continue', '继续后续步骤']], value => {
+            if (value === 'inherit') delete step.config.failure_policy; else step.config.failure_policy = value;
+            step.config.continue_on_error = false; changed();
+          }), '继续执行会保留失败结论；显式收尾始终执行。'));
+        }
+        body.append(policy); card.append(body);
+      } else { const meta = el('div', 'fw-step-meta'); meta.append(el('span', '', `${(step.config.assertions || []).length + (step.config.expected_status != null || step.config.expected_rows != null ? 1 : 0)} 项断言`), el('span', '', `${(step.config.extractors || []).length} 个输出变量`), el('span', '', phase ? '始终尝试收尾' : failurePolicy(step) === 'continue' ? '失败后继续' : failurePolicy(step) === 'stop' ? '失败后停止' : '遵循流程失败策略')); card.append(meta); }
+      track.append(card);
+    });
+    const add = el('div', 'fw-add-step'); add.append(el('span', '', phase ? '＋ 添加收尾步骤' : '＋ 添加一个步骤'));
+    for (const [type, label] of [['http', 'HTTP 请求'], ['sql', 'SQL 查询'], ['service', '服务准备']]) add.append(button(label, 'button small', () => addStep(type, phase), '添加' + (phase ? '收尾 ' : '执行 ') + label));
+    track.append(add); group.append(track); canvas.append(group);
+  }
   const end = el('div', 'fw-boundary end'); end.append(el('span', 'fw-boundary-dot'), el('span', '', '流程结束'), el('span', 'fw-hint', '汇总断言结果 · 保存运行记录')); canvas.append(end);
 }
+function outputPicker(step) {
+  const area = el('div', 'fw-output-picker');
+  const choices = availableOutputs(state.flow.steps, step);
+  const control = select('', '插入步骤输出 ' + step.id, [['', '插入步骤输出…'], ...choices], reference => {
+    if (!reference) return;
+    const target = state.outputTarget;
+    const card = target?.closest('[data-step]');
+    if (!target || !root.contains(target) || card?.dataset.step !== step.id) {
+      setError('先点击此步骤的请求地址、正文、参数或期望值，再选择需要插入的输出。');
+      control.value = ''; return;
+    }
+    const start = target.selectionStart ?? target.value.length;
+    const end = target.selectionEnd ?? start;
+    target.value = target.value.slice(0, start) + reference + target.value.slice(end);
+    target.dispatchEvent(new window.Event('input', { bubbles: true }));
+    target.focus(); target.setSelectionRange(start + reference.length, start + reference.length);
+    control.value = '';
+  });
+  control.disabled = !choices.length;
+  area.append(control, el('small', 'fw-hint', choices.length ? '先将光标放在输入位置，再选择前面步骤的输出。' : '前面的步骤配置输出后，可在这里插入引用。'));
+  return area;
+}
+
 function keyValueEditor(container, title, pairs, onChange) {
   const area = section(title); pairs.forEach((pair, index) => {
     const row = el('div', 'fw-kv-row'); row.append(check('启用', pair.enabled, value => { pair.enabled = value; changed(); }), input(pair.name, `${title}名称 ${index + 1}`, value => { pair.name = value; changed(); }, { placeholder: '名称' }), input(pair.value, `${title}值 ${index + 1}`, value => { pair.value = value; changed(); }, { placeholder: '值，支持 {{变量}}' }), button('×', 'fw-icon-button', () => { pairs.splice(index, 1); changed(true); }, `删除${title} ${index + 1}`)); area.append(row);
@@ -226,7 +276,7 @@ function renderRequest(container, step, summary) {
     const sql = step.sql;
     const databaseType = state.databases.find(item => item.id === sql.connection_id)?.type || 'mysql';
     const positional = databaseType === 'postgresql' || databaseType === 'hologres';
-    container.append(field('数据库连接', select(sql.connection_id, '数据库连接', [['', '请选择已配置的连接'], ...state.databases.map(item => [item.id, `${item.name} · ${item.type || 'mysql'}`])], value => { sql.connection_id = value; changed(true); })), field('操作类型', select(sql.mode, 'SQL 操作类型', [['query', '查询'], ['exec', '执行语句']], value => { sql.mode = value; if (value !== 'query') delete step.config.expected_rows; changed(true); })), field('SQL 语句', input(sql.sql, 'SQL 语句', value => { sql.sql = value; summary.textContent = value; changed(); }, { multiline: true, rows: 5, placeholder: positional ? 'SELECT * FROM orders WHERE id = $1' : 'SELECT * FROM orders WHERE id = ?' })));
+    container.append(field('数据库连接', select(sql.connection_id, '数据库连接', [['', '请选择已配置的连接'], ...state.databases.map(item => [item.id, `${item.name} · ${item.type || 'mysql'}`])], value => { sql.connection_id = value; changed(true); })), field('操作类型', select(sql.mode, 'SQL 操作类型', [['query', '查询'], ['exec', '执行语句']], value => { sql.mode = value; delete step.config.expected_rows; step.config.assertions = []; step.config.extractors = []; changed(true); })), field('SQL 语句', input(sql.sql, 'SQL 语句', value => { sql.sql = value; summary.textContent = value; changed(); }, { multiline: true, rows: 5, placeholder: positional ? 'SELECT * FROM orders WHERE id = $1' : 'SELECT * FROM orders WHERE id = ?' })));
     container.append(el('p', 'fw-hint', positional ? 'PostgreSQL / Hologres 使用 $1、$2 等占位符，参数按顺序绑定。' : 'MySQL 使用 ? 占位符，参数按顺序绑定。'));
     const params = input(JSON.stringify(sql.params || []), 'SQL 参数', (value, control) => { try { const values = JSON.parse(value); if (!Array.isArray(values)) throw new Error(); sql.params = values; control.setCustomValidity(''); changed(); } catch { control.setCustomValidity('参数必须是 JSON 数组'); setError('SQL 参数必须是 JSON 数组，尚未保存此输入。'); } }, { placeholder: '["{{order_id}}"]' }); container.append(field('绑定参数', params, '使用 JSON 数组；变量作为完整参数传入，例如 ["{{order_id}}"]。'));
     if (!state.databases.length) container.append(el('p', 'fw-hint', '先在“数据库”页面配置连接，然后刷新此流程。'));
@@ -234,7 +284,7 @@ function renderRequest(container, step, summary) {
     container.append(field('本地服务', select(step.service.service_id, '本地服务', [['', '请选择已配置的服务'], ...state.services.map(item => [item.id, item.name])], value => { step.service.service_id = value; changed(); })), field('服务操作', select(step.service.action, '服务操作', [['start', '启动或复用服务'], ['stop', '停止本流程启动的服务']], value => { step.service.action = value; changed(true); })), el('p', 'fw-hint', '优先复用健康服务；流程结束后，Runtime 会清理本次流程启动的服务。'));
   }
 }
-const sources = [['body', '响应体'], ['header', '响应头'], ['status', '状态码']];
+
 const operators = [['equals', '等于'], ['not_equals', '不等于'], ['contains', '包含'], ['exists', '存在']];
 function renderAssertions(container, step) {
   const config = step.config; const area = section('定义通过的条件', '全部断言通过，才算这个步骤通过。响应字段按文本比较，缺失字段始终判为失败。');
@@ -245,26 +295,26 @@ function renderAssertions(container, step) {
       const value = input(config[property], step.type === 'sql' ? '期望行数' : '期望状态码', (value, control) => { const number = Number(value); const min = step.type === 'sql' ? 0 : 100; const max = step.type === 'sql' ? Number.MAX_SAFE_INTEGER : 599; if (!value || !Number.isInteger(number) || number < min || number > max) { control.setCustomValidity('请输入有效范围内的整数'); setError(step.type === 'sql' ? '期望行数需要非负整数。' : 'HTTP 状态码范围为 100–599。'); return; } control.setCustomValidity(''); config[property] = number; changed(); }, { type: 'number' }); area.append(value);
     }
   }
-  if (step.type === 'http') {
+  if (step.type === 'http' || step.type === 'sql') {
     (config.assertions || []).forEach((assertion, index) => {
       const row = el('div', 'fw-rule'); row.append(el('span', 'fw-rule-index', `CHECK ${index + 1}`));
-      const grid = el('div', 'fw-rule-grid'); grid.append(field('来源', select(assertion.source, `断言 ${index + 1} 来源`, sources, value => { assertion.source = value; assertion.path = ''; changed(true); })));
-      if (assertion.source !== 'status') grid.append(field(assertion.source === 'header' ? '响应头名称' : '字段路径', input(assertion.path, `断言 ${index + 1} 路径`, value => { assertion.path = value; changed(); }, { placeholder: assertion.source === 'header' ? 'Content-Type' : 'data.id · 留空检查整个响应' })));
+      const grid = el('div', 'fw-rule-grid'); grid.append(field('来源', select(assertion.source, `断言 ${index + 1} 来源`, sourceChoices(step), value => { assertion.source = value; assertion.path = ''; changed(true); })));
+      if (['body', 'header', 'rows'].includes(assertion.source)) grid.append(field(assertion.source === 'header' ? '响应头名称' : '字段路径', input(assertion.path, `断言 ${index + 1} 路径`, value => { assertion.path = value; changed(); }, { placeholder: assertion.source === 'rows' ? '0.name · 第 1 行的 name 字段' : assertion.source === 'header' ? 'Content-Type' : 'data.id · 留空检查整个响应' })));
       grid.append(field('条件', select(assertion.operator, `断言 ${index + 1} 条件`, operators, value => { assertion.operator = value; changed(true); })));
       if (assertion.operator !== 'exists') grid.append(field('期望值', input(assertion.expected, `断言 ${index + 1} 期望值`, value => { assertion.expected = value; changed(); }, { placeholder: '按文本比较' })));
       row.append(grid, button('移除断言', 'fw-text-button muted', () => { config.assertions.splice(index, 1); changed(true); })); area.append(row);
-    }); area.append(button('＋ 添加响应断言', 'button small', () => { (config.assertions ||= []).push({ source: 'body', path: '', operator: 'exists', expected: '' }); changed(true); }));
+    }); area.append(button(step.type === 'sql' ? '＋ 添加字段断言' : '＋ 添加响应断言', 'button small', () => { (config.assertions ||= []).push({ source: sourceChoices(step)[0][0], path: '', operator: 'exists', expected: '' }); changed(true); }));
   }
   container.append(area);
 }
 function renderExtractors(container, step) {
-  const area = section('让结果成为下一步的输入', '将提取值写入本次运行的共享变量。字段路径示例：data.token、items.0.id；留空提取整个响应。');
+  const area = section('让结果成为下一步的输入', step.type === 'sql' ? '查询字段使用 0.name 等路径；输出可通过步骤引用使用，也兼容原有共享变量。' : '字段路径示例：data.token、items.0.id；输出可通过步骤引用使用，也兼容原有共享变量。');
   (step.config.extractors || []).forEach((extractor, index) => {
     const row = el('div', 'fw-rule'); row.append(el('span', 'fw-rule-index', `OUTPUT ${index + 1}`)); const grid = el('div', 'fw-rule-grid');
-    grid.append(field('保存为变量', input(extractor.name, `提取 ${index + 1} 变量名`, value => { extractor.name = value; changed(); renderRail(); }, { placeholder: '例如 token' })), field('提取来源', select(extractor.source, `提取 ${index + 1} 来源`, sources, value => { extractor.source = value; extractor.path = ''; changed(true); })));
-    if (extractor.source !== 'status') grid.append(field('字段路径 / 响应头', input(extractor.path, `提取 ${index + 1} 路径`, value => { extractor.path = value; changed(); }, { placeholder: extractor.source === 'header' ? 'X-Request-ID' : 'data.token' })));
+    grid.append(field('保存为变量', input(extractor.name, `提取 ${index + 1} 变量名`, value => { extractor.name = value; changed(); renderRail(); }, { placeholder: '例如 token' })), field('提取来源', select(extractor.source, `提取 ${index + 1} 来源`, sourceChoices(step), value => { extractor.source = value; extractor.path = ''; changed(true); })));
+    if (['body', 'header', 'rows'].includes(extractor.source)) grid.append(field('字段路径 / 响应头', input(extractor.path, `提取 ${index + 1} 路径`, value => { extractor.path = value; changed(); }, { placeholder: extractor.source === 'rows' ? '0.id' : extractor.source === 'header' ? 'X-Request-ID' : 'data.token' })));
     const options = el('div', 'fw-rule-options'); options.append(check('必须提取成功', extractor.required, value => { extractor.required = value; changed(); }), check('敏感值', extractor.secret, value => { extractor.secret = value; changed(); }), button('移除提取', 'fw-text-button muted', () => { step.config.extractors.splice(index, 1); changed(true); })); row.append(grid, options); area.append(row);
-  }); area.append(button('＋ 添加提取规则', 'button small', () => { const items = step.config.extractors ||= []; items.push({ name: uniqueName(items, 'value'), source: 'body', path: '', scope: 'run', required: true, secret: false }); changed(true); })); container.append(area);
+  }); area.append(button('＋ 添加提取规则', 'button small', () => { const items = step.config.extractors ||= []; items.push({ name: uniqueName(items, 'value'), source: sourceChoices(step)[0][0], path: '', scope: 'run', required: true, secret: false }); changed(true); })); container.append(area);
 }
 function renderRail() {
   const rail = root.querySelector('[data-flow-rail]'); if (!rail || !state.flow) return;
@@ -350,13 +400,16 @@ async function pollRun() {
 }
 function renderRun(canvas) {
   const run = state.run; const steps = run.steps || []; const assertions = steps.flatMap(step => step.assertions || []);
-  const summary = el('section', `fw-run-summary ${run.status}`); const heading = el('div', 'fw-run-summary-heading'); heading.append(el('span', `fw-status ${run.status}`, statusNames[run.status] || run.status), el('strong', '', run.status === 'succeeded' ? '每一步，都符合预期。' : run.status === 'failed' ? '发现了需要关注的结果。' : '正在验证你的流程。'));
+  const summary = el('section', `fw-run-summary ${run.status}`); const heading = el('div', 'fw-run-summary-heading'); heading.append(el('span', `fw-status ${run.status}`, statusNames[run.status] || run.status), el('strong', '', run.status === 'succeeded' ? assertions.length ? '已执行的断言全部通过。' : '操作已完成，未配置断言。' : run.status === 'failed' ? '发现了需要关注的结果。' : '正在验证你的流程。'));
   const actions = el('div', 'fw-run-actions'); actions.append(button('刷新结果', 'button small', () => { state.apiErrors.clear(); void pollRun(); })); if (activeStatus(run.status)) actions.append(button('停止运行', 'button small danger', async () => { try { await api(`/flow-runs/${encodeURIComponent(run.id)}/cancel`, { method: 'POST' }); await pollRun(); } catch (error) { setError(errorText(error)); } })); heading.append(actions);
   const stats = el('div', 'fw-run-stats'); for (const [value, label] of [[`${steps.filter(step => !activeStatus(step.status) && step.status !== 'pending').length}/${run.total_steps}`, '步骤完成'], [`${assertions.filter(item => item.passed).length}/${assertions.length}`, '断言通过'], [run.finished_at && run.started_at ? `${Math.max(0, Date.parse(run.finished_at) - Date.parse(run.started_at))} ms` : '进行中', '总耗时']]) { const item = el('div'); item.append(el('strong', '', value), el('span', '', label)); stats.append(item); } summary.append(heading, stats); canvas.append(summary);
   if (run.error_message) canvas.append(el('div', 'fw-message', run.error_message)); if (run.cleanup_error) canvas.append(el('div', 'fw-message', `清理失败：${run.cleanup_error}`));
   if (Object.keys(run.variables || {}).length) { const inputs = el('details', 'fw-run-input-snapshot'); inputs.append(el('summary', '', '查看本次输入与流程默认值')); for (const [name, value] of Object.entries(run.variables)) { const pair = el('div', 'fw-output'); pair.append(el('code', '', name), el('span', '', value)); inputs.append(pair); } canvas.append(inputs); }
   const track = el('div', 'fw-track fw-run-track');
+  let lastPhase = null;
   for (const [index, step] of steps.entries()) {
+    const phase = step.phase || '';
+    if (phase !== lastPhase) { track.append(el('h3', 'fw-phase-title', phase === 'finally' ? '收尾步骤' : '执行步骤')); lastPhase = phase; }
     const card = el('article', `fw-step fw-run-step ${step.status}`); const open = state.open.has(step.id) || !state.tabs.has(step.id) && ['failed', 'paused'].includes(step.status);
     const head = button('', 'fw-result-toggle', () => { if (open) state.open.delete(step.id); else state.open.add(step.id); state.tabs.set(step.id, 'visited'); renderWorkspace(); }); head.setAttribute('aria-expanded', String(open));
     const label = el('div', 'fw-step-summary'); label.append(el('strong', '', step.name_snapshot), el('small', 'fw-step-endpoint', step.type === 'sql' ? 'SQL' : step.type === 'service' ? 'SERVICE' : `${step.request_snapshot.method} ${step.request_snapshot.url}`));
@@ -376,7 +429,7 @@ function renderStepResult(card, step) {
   }
   if (step.result?.extracted_variables?.length) {
     const outputs = section('输出变量 · 本次运行'); outputs.setAttribute('aria-label', '提取结果');
-    for (const variable of step.result.extracted_variables) { const pair = el('div', 'fw-output'); pair.append(el('code', '', variable.name), el('span', '', variable.secret ? '••••••' : variable.value)); outputs.append(pair); } body.append(outputs);
+    for (const variable of step.result.extracted_variables) { const pair = el('div', 'fw-output'); pair.append(el('code', '', step.flow_step_id ? outputReference(step.flow_step_id, variable.name) : variable.name), el('span', '', variable.secret ? '••••••' : variable.value)); outputs.append(pair); } body.append(outputs);
   }
   if (step.api_run_id) {
     const apiRun = state.apiRuns.get(step.api_run_id); const response = section('请求与响应');
@@ -386,7 +439,10 @@ function renderStepResult(card, step) {
       if (apiRun.response_truncated) response.append(el('p', 'fw-hint', '响应内容较大，展示已保存的前 256 KB。'));
     } else response.append(el('p', 'fw-hint', state.apiErrors.has(step.api_run_id) ? '请求记录暂不可用，点击上方“刷新结果”重试。' : '正在载入请求记录…'));
     body.append(response);
-  } else if (step.result && !('extracted_variables' in step.result)) body.append(code(step.result));
+  } else if (step.result) {
+    const { extracted_variables, ...operationResult } = step.result;
+    if (Object.keys(operationResult).length) body.append(code(operationResult));
+  }
   card.append(body);
 }
 window.addEventListener('beforeunload', event => { if (state.dirty || state.saving) { event.preventDefault(); event.returnValue = ''; } });

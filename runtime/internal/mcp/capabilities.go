@@ -168,7 +168,7 @@ func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Se
 		v, err := services.Logs(ctx, textArg(a, "service_id"), after)
 		return map[string]any{"items": v}, err
 	})
-	add("save_flow", "Create or update a durable test Flow. Omit id to create; updates require edit_version from get_flow. Steps execute sequentially; services started by the run are always cleaned up. enabled defaults true, stop_on_error defaults true.", object(map[string]any{"flow": flowSchema(sqlCommand)}, "flow"), true, func(ctx context.Context, a map[string]any) (any, error) {
+	add("save_flow", "Create or update a durable test Flow. Omit id to create; updates require edit_version from get_flow. Steps execute sequentially; config.phase=finally adds explicit cleanup after success, failure or cancellation. Reference named outputs as {{steps.STEP_ID.outputs.NAME}}. Services started by the run are always cleaned up. enabled defaults true, stop_on_error defaults true.", object(map[string]any{"flow": flowSchema(sqlCommand)}, "flow"), true, func(ctx context.Context, a map[string]any) (any, error) {
 		var f httpapi.Flow
 		f.Settings.StopOnError = true
 		if err := decode(a["flow"], &f); err != nil {
@@ -246,8 +246,9 @@ func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Se
 func flowSchema(sqlCommand map[string]any) map[string]any {
 	kv := object(map[string]any{"id": str(), "name": str(), "value": str(), "enabled": boolean()}, "name", "value")
 	request := object(map[string]any{"method": str(), "url": str(), "query_params": array(kv), "headers": array(kv), "body_type": str(), "body": str(), "auth_config": map[string]any{"type": "object"}}, "method", "url")
-	extractor := object(map[string]any{"name": str(), "source": enum("body", "header", "status"), "path": str(), "scope": enum("run"), "secret": boolean(), "required": boolean()}, "name", "source", "scope")
-	config := object(map[string]any{"timeout_ms": integer(), "continue_on_error": boolean(), "expected_status": integer(), "expected_rows": integer(), "extractors": array(extractor)})
+	extractor := object(map[string]any{"name": str(), "source": enum("body", "header", "status", "rows", "row_count", "rows_affected"), "path": str(), "scope": enum("run"), "secret": boolean(), "required": boolean()}, "name", "source", "scope")
+	assertion := object(map[string]any{"source": enum("body", "header", "status", "rows", "row_count", "rows_affected"), "path": str(), "operator": enum("equals", "not_equals", "contains", "exists"), "expected": str()}, "source", "operator")
+	config := object(map[string]any{"phase": enum("finally"), "failure_policy": enum("stop", "continue"), "skip_if_missing_outputs": boolean(), "assertions": array(assertion), "timeout_ms": integer(), "continue_on_error": boolean(), "expected_status": integer(), "expected_rows": integer(), "extractors": array(extractor)})
 	step := object(map[string]any{"id": str(), "position": integer(), "type": enum("http", "sql", "service"), "name": str(), "enabled": boolean(), "source_api_request_id": map[string]any{"type": []string{"string", "null"}}, "request": request, "sql": sqlCommand, "service": object(map[string]any{"service_id": str(), "action": enum("start", "stop")}, "service_id", "action"), "config": config}, "type", "name")
 	variable := object(map[string]any{"name": str(), "default_value": str(), "required": boolean(), "secret": boolean(), "description": str()}, "name")
 	return object(map[string]any{"id": str(), "project_id": str(), "name": str(), "description": str(), "edit_version": integer(), "environment_id": map[string]any{"type": []string{"string", "null"}}, "settings": object(map[string]any{"stop_on_error": boolean(), "request_timeout_ms": integer()}), "variables": array(variable), "steps": array(step)}, "name", "steps")

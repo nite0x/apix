@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
-import { blankStep, requestURL, uniqueName, validateDefinition } from './web/flow-model.js';
+import { availableOutputs, copyFlowSteps, failurePolicy, isFinally, orderedSteps, outputReference, sourceChoices, blankStep, requestURL, uniqueName, validateDefinition } from './web/flow-model.js';
 
 test('Flow definitions enforce variable names, extractor paths, and run prerequisites', () => {
   const flow = { name: '测试流程', variables: [], steps: [] };
@@ -31,7 +31,7 @@ test('run request display merges only enabled query parameters', () => {
 });
 
 test('new Runtime Flow page preserves edits after saving and retains drafts on conflict', async () => {
-  const require = createRequire(new URL('../../../apps/desktop/package.json', import.meta.url));
+  const require = createRequire(import.meta.url);
   const { JSDOM } = require('jsdom');
   const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/flows?id=flow-test' });
   dom.window.HTMLElement.prototype.scrollIntoView = () => {};
@@ -46,6 +46,7 @@ test('new Runtime Flow page preserves edits after saving and retains drafts on c
       if (conflict) return { status: 409, ok: false, json: async () => ({ error: 'flow version conflict' }) };
       Object.assign(saved, value, { edit_version: value.edit_version + 1 }); body = structuredClone(saved);
     } else if (url === '/api/flows/flow-test') body = structuredClone(saved);
+    else if (url === '/api/database/connections') body = [{ id: 'db-test', name: 'Test DB', type: 'mysql' }];
     else if (url === '/api/flows') body = [{ ...saved, step_count: saved.steps.length }];
     return { status: 200, ok: true, json: async () => body };
   };
@@ -67,9 +68,89 @@ test('new Runtime Flow page preserves edits after saving and retains drafts on c
   set('提取 1 变量名', 'service_name'); set('提取 1 路径', 'service');
   click('保存'); await tick();
   assert.equal(writes.at(-1).steps[0].config.extractors[0].path, 'service');
+  const firstID = writes.at(-1).steps[0].id;
+  document.querySelector('[aria-label="添加执行 SQL 查询"]').click();
+  const sqlCard = [...document.querySelectorAll('[data-step]')].at(-1);
+  sqlCard.querySelector('[aria-label="数据库连接"]').value = 'db-test';
+  sqlCard.querySelector('[aria-label="数据库连接"]').dispatchEvent(new window.Event('change', { bubbles: true }));
+  set('SQL 语句', 'SELECT id,name FROM users WHERE service=?');
+  set('SQL 参数', '[""]');
+  const parameter = document.querySelector('[aria-label="SQL 参数"]');
+  parameter.focus(); parameter.setSelectionRange(2, 2);
+  const picker = sqlCard.querySelector('select[aria-label^="插入步骤输出"]');
+  picker.value = outputReference(firstID, 'service_name');
+  picker.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.equal(parameter.value, JSON.stringify([outputReference(firstID, 'service_name')]));
+  const sqlID = sqlCard.dataset.step;
+  const inSQL = text => { const button = [...document.querySelector('[data-step="' + sqlID + '"]').querySelectorAll('button')].find(item => item.textContent === text); assert.ok(button, text); button.click(); };
+  inSQL('断言 0'); inSQL('＋ 添加字段断言');
+  set('断言 1 路径', '0.name');
+  const operator = document.querySelector('[data-step="' + sqlID + '"] [aria-label="断言 1 条件"]');
+  operator.value = 'equals'; operator.dispatchEvent(new window.Event('change', { bubbles: true }));
+  set('断言 1 期望值', 'Alice');
+  inSQL('响应提取 0'); inSQL('＋ 添加提取规则');
+  set('提取 1 路径', '0.id');
+  const failure = document.querySelector('[data-step="' + sqlID + '"] select[aria-label$="失败策略"]');
+  failure.value = 'stop'; failure.dispatchEvent(new window.Event('change', { bubbles: true }));
+  click('保存'); await tick();
+  assert.equal(writes.at(-1).steps[1].config.assertions[0].source, 'rows');
+  assert.equal(writes.at(-1).steps[1].config.extractors[0].source, 'rows');
+  assert.equal(writes.at(-1).steps[1].config.failure_policy, 'stop');
+  document.querySelector('[aria-label="添加收尾 HTTP 请求"]').click();
+  const cleanupCard = document.querySelector('[aria-label="收尾步骤"] [data-step]');
+  const cleanupURL = cleanupCard.querySelector('[aria-label="请求地址"]');
+  cleanupURL.value = 'http://localhost/cleanup';
+  cleanupURL.dispatchEvent(new window.Event('input', { bubbles: true }));
+  const guard = [...cleanupCard.querySelectorAll('label')].find(item => item.textContent.includes('引用的步骤输出不存在时跳过')).querySelector('input');
+  guard.checked = true; guard.dispatchEvent(new window.Event('change', { bubbles: true }));
+  click('保存'); await tick();
+  assert.equal(writes.at(-1).steps[2].config.phase, 'finally');
+  assert.equal(writes.at(-1).steps[2].config.skip_if_missing_outputs, true);
+  assert.equal(document.querySelectorAll('[aria-label="执行步骤"] [data-step]').length, 2);
+  assert.equal(document.querySelectorAll('[aria-label="收尾步骤"] [data-step]').length, 1);
   conflict = true; set('流程名称', '本地草稿'); click('保存'); await tick();
   assert.match(document.querySelector('[data-flow-message]').textContent, /另存副本/);
   assert.equal(document.querySelector('[aria-label="流程名称"]').value, '本地草稿');
   assert.equal(await module.leaveFlows(), false);
   module.deactivateFlows(); dom.window.close();
+});
+
+test('qualified output references survive rename and whole-flow copies, and reject broken dependencies', () => {
+  const producer = blankStep(); producer.id = 'producer'; producer.name = '创建用户'; producer.request.url = 'http://localhost/create';
+  producer.config.extractors = [{ name: 'id', source: 'body', path: 'id' }];
+  const consumer = blankStep('sql'); consumer.sql.connection_id = 'db'; consumer.sql.sql = 'SELECT * FROM users WHERE id=?';
+  consumer.sql.params = [outputReference(producer.id, 'id')];
+  const cleanup = blankStep(); cleanup.config.phase = 'finally'; cleanup.request.url = 'http://localhost/' + outputReference(producer.id, 'id');
+  const flow = { name: 'test', variables: [], steps: [producer, consumer, cleanup] };
+  assert.equal(validateDefinition(flow, true), '');
+  assert.deepEqual(availableOutputs(flow.steps, consumer), [[outputReference('producer', 'id'), '创建用户 → id']]);
+  producer.name = '重命名后';
+  assert.equal(validateDefinition(flow, true), '');
+  const copied = copyFlowSteps(flow.steps);
+  assert.notEqual(copied[0].id, producer.id);
+  assert.equal(copied[1].sql.params[0], outputReference(copied[0].id, 'id'));
+  assert.equal(copied[2].request.url, 'http://localhost/' + outputReference(copied[0].id, 'id'));
+  assert.equal(validateDefinition({ ...flow, steps: copied }, true), '');
+  producer.enabled = false;
+  assert.match(validateDefinition(flow), /禁用/);
+  producer.enabled = true;
+  assert.match(validateDefinition({ ...flow, steps: [consumer, producer, cleanup] }), /后面/);
+  assert.match(validateDefinition({ ...flow, steps: [consumer, cleanup] }), /删除/);
+  producer.config.extractors = [];
+  assert.match(validateDefinition(flow), /不存在/);
+});
+
+test('finally grouping and failure controls retain legacy defaults', () => {
+  const main = blankStep(); const cleanup = blankStep('sql'); cleanup.config.phase = 'finally';
+  assert.deepEqual(orderedSteps([cleanup, main]), [main, cleanup]);
+  assert.equal(isFinally(main), false);
+  assert.equal(isFinally(cleanup), true);
+  assert.equal(failurePolicy(main), 'inherit');
+  main.config.continue_on_error = true;
+  assert.equal(failurePolicy(main), 'continue');
+  main.config.failure_policy = 'stop';
+  assert.equal(failurePolicy(main), 'stop');
+  assert.deepEqual(sourceChoices(cleanup), [['rows', '查询字段'], ['row_count', '查询行数']]);
+  cleanup.sql.mode = 'exec';
+  assert.deepEqual(sourceChoices(cleanup), [['rows_affected', '影响行数']]);
 });

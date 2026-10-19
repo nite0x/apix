@@ -12,7 +12,7 @@ import (
 type Executor struct {
 	sessions     *SessionManager
 	rules        *RuleEngine
-	hub          *Hub
+	events       *Events
 	store        Store
 	execute      func(context.Context, string, map[string]any, *Variables) (any, error)
 	extract      func(string, any) map[string]*Variable
@@ -24,7 +24,7 @@ type Executor struct {
 func NewExecutor(
 	sessions *SessionManager,
 	rules *RuleEngine,
-	hub *Hub,
+	events *Events,
 	store Store,
 	execute func(context.Context, string, map[string]any, *Variables) (any, error),
 	extract func(string, any) map[string]*Variable,
@@ -32,7 +32,7 @@ func NewExecutor(
 	return &Executor{
 		sessions:   sessions,
 		rules:      rules,
-		hub:        hub,
+		events:     events,
 		store:      store,
 		execute:    execute,
 		extract:    extract,
@@ -59,7 +59,7 @@ func (e *Executor) Execute(
 	session, existed := e.sessions.Get(sessionID)
 	if !existed {
 		session = e.sessions.GetOrCreate(sessionID, task, "mcp")
-		e.hub.Push(session.ID, Event{
+		e.events.Publish(session.ID, Event{
 			Type:    EventSessionStart,
 			Payload: session,
 		})
@@ -80,7 +80,7 @@ func (e *Executor) Execute(
 	session.Steps = append(session.Steps, step)
 
 	// 3. Push step:start
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:    EventStepStart,
 		StepID:  step.ID,
 		Payload: step,
@@ -113,7 +113,7 @@ func (e *Executor) Execute(
 	// the authoritative run record without maintaining a second history model.
 	input["session_id"] = session.ID
 	input["step_id"] = step.ID
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:    EventStepStart,
 		StepID:  step.ID,
 		Payload: step,
@@ -153,7 +153,7 @@ func (e *Executor) Execute(
 		} else {
 			session.Variables.Session[name] = v
 		}
-		e.hub.Push(session.ID, Event{
+		e.events.Publish(session.ID, Event{
 			Type:    EventVarExtracted,
 			Payload: map[string]any{"name": name, "variable": v},
 		})
@@ -164,7 +164,7 @@ func (e *Executor) Execute(
 	if step.Output == nil {
 		step.Output = output
 	}
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:    EventStepDone,
 		StepID:  step.ID,
 		Payload: step,
@@ -209,7 +209,7 @@ func (e *Executor) pauseAndWait(ctx context.Context, session *Session, step *Ste
 	step.RuleID = ruleID
 	session.Status = SessionPaused
 
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:   EventStepPaused,
 		StepID: step.ID,
 		Payload: map[string]any{
@@ -254,7 +254,7 @@ func (e *Executor) failStep(session *Session, step *Step, errMsg string) error {
 	step.Status = StepError
 	step.Error = errMsg
 	session.Status = SessionError
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:    EventStepError,
 		StepID:  step.ID,
 		Payload: step,
@@ -266,7 +266,7 @@ func (e *Executor) failStep(session *Session, step *Step, errMsg string) error {
 func (e *Executor) skipStep(session *Session, step *Step) error {
 	step.Status = StepSkipped
 	session.Status = SessionRunning
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:   EventStepSkipped,
 		StepID: step.ID,
 	})
@@ -275,7 +275,7 @@ func (e *Executor) skipStep(session *Session, step *Step) error {
 
 func (e *Executor) stopSession(session *Session) error {
 	session.Status = SessionStopped
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type: EventSessionStopped,
 	})
 	return fmt.Errorf("session stopped by user")
@@ -299,7 +299,7 @@ func (e *Executor) CompleteSession(id string, failed bool) {
 		status, event = SessionError, EventSessionError
 	}
 	e.sessions.UpdateStatus(id, status)
-	e.hub.Push(id, Event{Type: event})
+	e.events.Publish(id, Event{Type: event})
 }
 
 func (e *Executor) GetSession(id string) (*Session, bool) {

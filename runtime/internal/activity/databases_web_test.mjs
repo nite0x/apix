@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 
 test('SQL history opens safe details on demand, keeps the inspector open during refresh, filters and recovers from fetch errors', async () => {
-  const require = createRequire(new URL('../../../apps/desktop/package.json', import.meta.url));
+  const require = createRequire(import.meta.url);
   const { JSDOM } = require('jsdom');
   const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/databases' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document });
@@ -60,7 +60,7 @@ test('SQL history opens safe details on demand, keeps the inspector open during 
 });
 
 test('database editor selects PostgreSQL/Hologres defaults and changes an existing driver without replacing its password', async () => {
-  const require = createRequire(new URL('../../../apps/desktop/package.json', import.meta.url));
+  const require = createRequire(import.meta.url);
   const { JSDOM } = require('jsdom');
   const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/databases' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document });
@@ -109,7 +109,7 @@ test('database editor selects PostgreSQL/Hologres defaults and changes an existi
 });
 
 test('query results load on demand, render values safely, handle empty and legacy results, and retry failures', async () => {
-  const require = createRequire(new URL('../../../apps/desktop/package.json', import.meta.url));
+  const require = createRequire(import.meta.url);
   const { JSDOM } = require('jsdom');
   const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/databases' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document });

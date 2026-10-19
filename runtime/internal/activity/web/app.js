@@ -1,14 +1,15 @@
 'use strict';
-import { openRequestDetail } from './request-detail.js';
+import { refreshAITools } from './ai-tools.js';
 import { openServiceDetail } from './service-detail.js';
 import { refreshDatabases, refreshSQLHistory, closeDatabaseDialogs } from './databases.js';
 import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flows.js';
 import { activateTesting, deactivateTesting, refreshTesting } from './testing.js';
-import { loadManualRequest } from './manual-request.js';
 import { closeServiceEditor } from './service-editor.js';
+import { refreshLibrary } from './request-library.js';
+import { refreshRequestHistory } from './request-history.js';
 (() => {
   const $ = id => document.getElementById(id);
-  const state = { services: [], requests: [], logs: [], eventCursor: null, serviceCursor: null, totalLogs: 0, paused: false, busy: false, online: false, timer: null, requestKey: '', serviceKey: '', logVersion: 0 };
+  const state = { services: [], requests: [], logs: [], eventCursor: null, serviceCursor: null, totalLogs: 0, paused: false, busy: false, timer: null, serviceKey: '' };
   const serviceActions = new Map();
   const serviceFeedback = new Map();
   const sidebarPreference = 'apix.sidebar.collapsed';
@@ -43,9 +44,10 @@ import { closeServiceEditor } from './service-editor.js';
     }
   });
   const pages = {
+    '/ai-tools': { id: 'ai-tools', title: 'AI 工具', eyebrow: 'CONNECT YOUR AI', description: '一键将 Apix 接入常用 AI 工具，让 AI 直接调试接口、查询数据库和管理服务。' },
     '/': { id: 'home', title: '主页', eyebrow: 'RUNTIME OVERVIEW', description: '本地运行概况，从这里进入服务、接口和日志。' },
     '/services': { id: 'services', title: '服务', eyebrow: 'LOCAL SERVICES', description: '新增本地服务配置，手动启动或停止服务，查看状态和运行日志。' },
-    '/requests': { id: 'requests', title: '接口', eyebrow: 'API REQUESTS', description: '手动发送 HTTP 请求，查看响应，或从最近 50 条执行记录中填入请求再次调试。' },
+    '/requests': { id: 'requests', title: '接口', eyebrow: 'API REQUESTS', description: '调试 HTTP 请求、导入 cURL、管理接口库与执行历史。' },
     '/databases': { id: 'databases', title: '数据库', eyebrow: 'DATABASE CONNECTIONS', description: '手动执行 SQL、查看结果，管理 MySQL、PostgreSQL 和 Hologres 连接。' },
     '/flows': { id: 'flows', title: '测试流程', eyebrow: 'FLOW STUDIO', description: '让每一步都有依据。编排请求，传递数据，验证你的完整业务流程。' },
     '/tests': { id: 'tests', title: '接口测试', eyebrow: 'API TESTING', description: '按测试批次追踪每一次验证，用不同入参检查接口，并保存可重复运行的用例。' },
@@ -65,6 +67,8 @@ import { closeServiceEditor } from './service-editor.js';
     document.title = `Apix · ${page.title}`;
     $('page-title').textContent = page.title; $('page-eyebrow').textContent = page.eyebrow; $('page-description').textContent = page.description;
     applyLogSource();
+    if (page.id === 'requests') { refreshLibrary(); refreshRequestHistory(); }
+    if (page.id === 'ai-tools') refreshAITools();
     if (page.id === 'logs') renderLogs();
     if (page.id === 'databases') { refreshDatabases(); refreshSQLHistory(); }
     if (page.id === 'flows') activateFlows(); else deactivateFlows();
@@ -82,7 +86,7 @@ import { closeServiceEditor } from './service-editor.js';
   function node(tag, className, text) { const el = document.createElement(tag); if (className) el.className = className; if (text !== undefined) el.textContent = String(text); return el; }
   function clock(value, ms = false) { const date = new Date(value); if (!Number.isFinite(date.getTime())) return '—'; return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, ...(ms ? { fractionalSecondDigits: 3 } : {}) }); }
   function empty(message, hint) { const el = node('div', 'empty', message); if (hint) el.append(node('small', '', hint)); return el; }
-  function setOnline(online) { state.online = online; $('connection').textContent = online ? '实时同步中' : '连接中断，正在重试'; $('connection-dot').className = `dot ${online ? '' : 'offline'}`; $('log-dot').className = `dot ${online ? '' : 'offline'}`; }
+  function setOnline(online) { $('connection').textContent = online ? '实时同步中' : '连接中断，正在重试'; $('connection-dot').className = `dot ${online ? '' : 'offline'}`; $('log-dot').className = `dot ${online ? '' : 'offline'}`; }
   function renderServices() {
     $('running-count').textContent = state.services.filter(s => s.status === 'running').length;
     $('services-note').textContent = `共 ${state.services.length} 个已配置`;
@@ -131,23 +135,6 @@ import { closeServiceEditor } from './service-editor.js';
       serviceFeedback.set(service.id, { message: `${action === 'start' ? '启动' : '停止'}失败：${message}`, error: true });
     } finally { serviceActions.delete(service.id); renderServices(); refresh(); }
   }
-  function renderRequests(force = false) {
-    $('requests-count').textContent = state.requests.length;
-    const query = $('request-search').value.trim().toLowerCase(); const key = JSON.stringify(state.requests) + query; if (!force && key === state.requestKey) return; state.requestKey = key;
-    const fragment = document.createDocumentFragment(); const items = state.requests.filter(r => `${r.method} ${r.url}`.toLowerCase().includes(query));
-    for (const item of items) {
-      const row = node('tr', 'request-row'); const request = node('td'); const cell = node('div', 'request-cell'); const method = node('span', `method ${String(item.method).toLowerCase()}`, item.method); const url = node('button', 'request-url request-link', item.url); url.type = 'button'; url.title = `${item.url} · 点击查看详情`; url.setAttribute('aria-label', `查看 ${item.method} ${item.url} 的请求详情`); url.setAttribute('aria-haspopup', 'dialog'); url.setAttribute('aria-controls', 'request-detail');
-      url.addEventListener('click', event => { event.stopPropagation(); openRequestDetail(item.id, url); }); row.addEventListener('click', () => openRequestDetail(item.id, url));
-      const reuse = node('button', 'text-button', '填入编辑器'); reuse.type = 'button'; reuse.setAttribute('aria-label', `填入 ${item.method} ${item.url}`); reuse.addEventListener('click', event => { event.stopPropagation(); loadManualRequest(item.id); });
-      cell.append(method, url, reuse); request.append(cell);
-      const pending = item.status === 'running'; const failed = ['failed', 'timed_out', 'cancelled'].includes(item.status) || item.response_status >= 400;
-      const statusText = item.response_status ?? ({ running: '执行中', timed_out: '超时', failed: '失败', cancelled: '已取消' }[item.status] || '—');
-      const status = node('td', pending ? 'response-pending' : failed ? 'response-error' : 'response-ok', statusText); status.title = item.error_code || (item.response_status ? `HTTP ${item.response_status}` : item.status);
-      const duration = node('td', '', pending ? '—' : `${item.duration_ms} ms`); const at = node('td', '', clock(item.started_at)); at.title = `${new Date(item.started_at).toLocaleString('zh-CN')} · ${item.trigger === 'ai' ? 'AI 调用' : item.trigger === 'manual' ? '手动执行' : item.trigger}`; row.append(request, status, duration, at); fragment.append(row);
-    }
-    if (!items.length) { const row = node('tr'); const td = node('td', 'empty', query ? '没有匹配的接口记录' : '还没有执行过接口'); td.colSpan = 4; if (!query) td.append(node('small', '', '在上方发送请求，或通过 MCP 调用接口，记录会自动出现在这里。')); row.append(td); fragment.append(row); }
-    $('requests').replaceChildren(fragment);
-  }
   function addLogs(data) {
     if (data.reset_events) state.logs = state.logs.filter(l => l.source !== 'runtime');
     if (data.reset_services) state.logs = state.logs.filter(l => l.source === 'runtime');
@@ -182,7 +169,7 @@ import { closeServiceEditor } from './service-editor.js';
       const query = new URLSearchParams(); if (state.eventCursor !== null) query.set('event_after', state.eventCursor); if (state.serviceCursor !== null) query.set('service_after', state.serviceCursor);
       const response = await fetch(`/api/activity?${query}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`); const data = await response.json();
       state.services = data.services; state.requests = data.requests; state.eventCursor = data.event_cursor; state.serviceCursor = data.service_cursor;
-      renderServices(); applyLogSource(); renderRequests(); addLogs(data); setOnline(true); $('error-banner').hidden = true; $('updated').textContent = `最近同步 ${clock(data.time)}`; if (data.more) delay = 100;
+      renderServices(); applyLogSource(); $('requests-count').textContent = state.requests.length; if (location.pathname === '/requests') refreshRequestHistory(); addLogs(data); setOnline(true); $('error-banner').hidden = true; $('updated').textContent = `最近同步 ${clock(data.time)}`; if (data.more) delay = 100;
       if (location.pathname === '/databases') refreshSQLHistory();
     } catch (error) { setOnline(false); delay = 3000; $('error-banner').textContent = '暂时无法连接 Apix。正在自动重试，已加载的记录会保留。'; $('error-banner').hidden = false; }
     finally { state.busy = false; $('refresh').disabled = false; state.timer = setTimeout(refresh, delay); }
@@ -193,7 +180,7 @@ import { closeServiceEditor } from './service-editor.js';
     event.preventDefault(); navigate(link.pathname + link.search);
   });
   window.addEventListener('popstate', () => showPage(true));
-  $('refresh').addEventListener('click', () => { refresh(); if (location.pathname === '/databases') { refreshDatabases(); refreshSQLHistory(); } if (location.pathname === '/flows') refreshFlows(); if (location.pathname === '/tests') refreshTesting(); }); $('request-search').addEventListener('input', () => renderRequests(true));
+  $('refresh').addEventListener('click', () => { refresh(); if (location.pathname === '/ai-tools') refreshAITools(); if (location.pathname === '/databases') { refreshDatabases(); refreshSQLHistory(); } if (location.pathname === '/flows') refreshFlows(); if (location.pathname === '/tests') refreshTesting(); if (location.pathname === '/requests') { refreshLibrary(); refreshRequestHistory(); } });
   $('log-source').addEventListener('change', () => {
     const query = new URLSearchParams(location.search);
     if ($('log-source').value === 'all') query.delete('source'); else query.set('source', $('log-source').value);
@@ -202,6 +189,7 @@ import { closeServiceEditor } from './service-editor.js';
   $('autoscroll').addEventListener('change', () => { if (!state.paused) renderLogs(); });
   $('pause').addEventListener('click', () => { state.paused = !state.paused; $('pause').setAttribute('aria-pressed', String(state.paused)); $('pause').textContent = state.paused ? '继续显示' : '暂停显示'; $('log-live').textContent = state.paused ? 'PAUSED' : 'LIVE'; $('log-live').classList.toggle('paused', state.paused); $('log-status').textContent = state.paused ? '日志显示已暂停，后台继续接收' : '每秒自动更新'; if (!state.paused) renderLogs(); });
   document.addEventListener('manual-request-completed', refresh);
+  document.addEventListener('request-history-changed', refresh);
   document.addEventListener('service-configuration-changed', refresh);
   window.addEventListener('online', refresh); showPage(); refresh();
 })();

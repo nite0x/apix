@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,18 @@ import (
 )
 
 func TestDatabaseDriverSettingsAndMigration(t *testing.T) {
-	s, metadata := testService(t)
+	// Use a durable store so Unix encryption keys survive service recreation.
+	metadata, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "migration.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata.SetMaxOpenConns(1)
+	s, err := New(metadata)
+	if err != nil {
+		_ = metadata.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close(); _ = metadata.Close() })
 	ctx := context.Background()
 	password := " secret:@/?#中文'\\ "
 	for _, kind := range []string{"mysql", "postgresql", "hologres"} {

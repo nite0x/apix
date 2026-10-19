@@ -1,28 +1,91 @@
 {
   "flow": {
     "name": "MySQL service smoke test",
-    "settings": { "stop_on_error": true, "request_timeout_ms": 10000 },
+    "settings": {
+      "stop_on_error": true,
+      "request_timeout_ms": 10000
+    },
     "steps": [
       {
-        "type": "service", "name": "Start demo API", "enabled": true,
-        "service": { "service_id": "demo-service", "action": "start" }
-      },
-      {
-        "type": "http", "name": "Create user", "enabled": true,
-        "request": { "method": "POST", "url": "http://127.0.0.1:18767/users", "body_type": "json", "body": "{\"name\":\"MVP user\"}" },
-        "config": {
-          "expected_status": 201,
-          "extractors": [{ "name": "user_id", "source": "body", "path": "id", "scope": "run", "required": true }]
+        "type": "service",
+        "name": "Start demo API",
+        "enabled": true,
+        "service": {
+          "service_id": "demo-service",
+          "action": "start"
         }
       },
       {
-        "type": "sql", "name": "Verify database write", "enabled": true,
-        "sql": { "connection_id": "mysql", "mode": "query", "sql": "SELECT id, name FROM apix_demo_users WHERE id = ?", "params": ["{{user_id}}"] },
-        "config": { "expected_rows": 1 }
+        "type": "http",
+        "name": "Create user",
+        "enabled": true,
+        "request": {
+          "method": "POST",
+          "url": "http://127.0.0.1:18767/users",
+          "body_type": "json",
+          "body": "{\"name\":\"Example user\"}"
+        },
+        "config": {
+          "expected_status": 201,
+          "extractors": [
+            {
+              "name": "user_id",
+              "source": "body",
+              "path": "id",
+              "scope": "run",
+              "required": true
+            }
+          ]
+        },
+        "id": "create-user"
       },
       {
-        "type": "sql", "name": "Delete this test record", "enabled": true,
-        "sql": { "connection_id": "mysql", "mode": "exec", "sql": "DELETE FROM apix_demo_users WHERE id = ?", "params": ["{{user_id}}"] }
+        "type": "sql",
+        "name": "Verify database write",
+        "enabled": true,
+        "sql": {
+          "connection_id": "mysql",
+          "mode": "query",
+          "sql": "SELECT id, name FROM apix_demo_users WHERE id = ?",
+          "params": [
+            "{{steps.create-user.outputs.user_id}}"
+          ]
+        },
+        "config": {
+          "expected_rows": 1,
+          "assertions": [
+            {
+              "source": "rows",
+              "path": "0.name",
+              "operator": "equals",
+              "expected": "Example user"
+            }
+          ]
+        }
+      },
+      {
+        "type": "sql",
+        "name": "Delete this test record",
+        "enabled": true,
+        "sql": {
+          "connection_id": "mysql",
+          "mode": "exec",
+          "sql": "DELETE FROM apix_demo_users WHERE id = ?",
+          "params": [
+            "{{steps.create-user.outputs.user_id}}"
+          ]
+        },
+        "config": {
+          "phase": "finally",
+          "skip_if_missing_outputs": true,
+          "assertions": [
+            {
+              "source": "rows_affected",
+              "operator": "equals",
+              "expected": "1"
+            }
+          ]
+        }
       }
     ]
   }

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 
 async function setup(path) {
-  const require = createRequire(new URL('../../../apps/desktop/package.json', import.meta.url));
+  const require = createRequire(import.meta.url);
   const { JSDOM } = require('jsdom');
   const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: `http://localhost/${path}` });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, Event: dom.window.Event });

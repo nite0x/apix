@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -42,7 +44,7 @@ func postJSON(t *testing.T, router http.Handler, path, body string) *httptest.Re
 }
 
 // Importing a cURL command must yield a reviewable Working Copy draft — never a
-// saved API. The draft carries the parsed request so the desktop editor can
+// saved API. The draft carries the parsed request so the workspace editor can
 // show and edit it before an explicit save.
 func TestImportCurlCreatesReviewableDraftWithoutSaving(t *testing.T) {
 	service, router := newTestRouter(t)
@@ -151,5 +153,61 @@ func TestImportThenSavePromotesDraftIntoCatalog(t *testing.T) {
 	}
 	if len(requests) != 1 || requests[0].Name != "List items" || requests[0].Request.URL != "https://api.example.com/items" {
 		t.Fatalf("expected one saved request, got %#v", requests)
+	}
+}
+
+func TestImportPreservesNonJSONBodyTypes(t *testing.T) {
+	for _, tc := range []struct{ name, content, bodyType string }{
+		{"form", "curl -X POST https://example.test -H 'Content-Type: application/x-www-form-urlencoded' --data 'a=1&b=2'", "urlencoded"},
+		{"text", "curl -X POST https://example.test -H 'Content-Type: text/plain' --data 'hello'", "raw"},
+		{"inferred-json", "curl -X POST https://example.test --data '{\"ok\":true}'", "json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, router := newTestRouter(t)
+			payload, _ := json.Marshal(map[string]string{"content": tc.content})
+			response := postJSON(t, router, "/import/curl", string(payload))
+			if response.Code != http.StatusCreated {
+				t.Fatalf("import failed: %d %s", response.Code, response.Body.String())
+			}
+			var copy APIWorkingCopy
+			if err := json.Unmarshal(response.Body.Bytes(), &copy); err != nil {
+				t.Fatal(err)
+			}
+			if copy.Request.BodyType != tc.bodyType {
+				t.Fatalf("body type=%s want=%s", copy.Request.BodyType, tc.bodyType)
+			}
+		})
+	}
+}
+
+func TestRunSummariesOmitPayloadsAndRedactURL(t *testing.T) {
+	service, router := newTestRouter(t)
+	run := &APIRun{ID: "summary-run", ProjectID: "default", TriggerType: "manual", Status: "succeeded",
+		StartedAt: time.Now().UTC(), RequestSnapshot: RequestData{Method: "POST",
+			URL: "http://user:private@example.test/check?token=private&name=visible", Body: "request-payload",
+			Headers: []KeyValue{{Name: "Authorization", Value: "private", Enabled: true}}},
+		ResponseBody: strings.Repeat("response-payload", 1000)}
+	if err := service.repo.insertRun(run); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.repo.finishRun(run); err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/runs?summary=true&limit=200", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("summary: %d %s", recorder.Code, recorder.Body.String())
+	}
+	for _, forbidden := range []string{"request-payload", "response-payload", "Authorization", "private"} {
+		if strings.Contains(recorder.Body.String(), forbidden) {
+			t.Fatalf("summary included payload or secret %s", forbidden)
+		}
+	}
+	var summaries []APIRun
+	if err := json.Unmarshal(recorder.Body.Bytes(), &summaries); err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 || !strings.Contains(summaries[0].RequestSnapshot.URL, "name=visible") {
+		t.Fatalf("unexpected summaries: %#v", summaries)
 	}
 }

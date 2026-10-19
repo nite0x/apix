@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/apix/apix/runtime/internal/activity"
+	"github.com/apix/apix/runtime/internal/aiinstall"
 	"github.com/apix/apix/runtime/internal/api"
 	"github.com/apix/apix/runtime/internal/core"
 	"github.com/apix/apix/runtime/internal/database"
@@ -62,11 +63,7 @@ func Run(_ []string) error {
 	}
 	defer serviceManager.Close()
 	// 2. Core modules
-	hub := core.NewHub()
-	hub.SetEventSink(func(event core.Event) {
-		if strings.HasPrefix(string(event.Type), "flow_run.") || strings.HasPrefix(string(event.Type), "test_case.") || strings.HasPrefix(string(event.Type), "test_batch.") {
-			return
-		}
+	events := core.NewEvents(func(event core.Event) {
 		// Session payloads include request bodies and variables; only log metadata.
 		history.Append(string(event.Type), event.SessionID, event.StepID, nil)
 	})
@@ -88,21 +85,20 @@ func Run(_ []string) error {
 			log.Printf("flow shutdown: %v", err)
 		}
 	}()
-	httpService.SetHub(hub)
 	httpService.SetRuleEngine(rules)
-	executor := core.NewExecutor(sessions, rules, hub, db, httpService.Execute, httpService.ExtractVars)
+	executor := core.NewExecutor(sessions, rules, events, db, httpService.Execute, httpService.ExtractVars)
 
 	// 3. MCP server
 	mcp := mcpserver.NewServer(executor)
 
-	// 4. REST API, WebSocket, and Streamable HTTP MCP on localhost.
+	// 4. REST API and Streamable HTTP MCP on localhost.
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.LoggerWithWriter(os.Stderr), gin.RecoveryWithWriter(os.Stderr))
 	r.Use(recordOperations(history))
 	r.Use(func(c *gin.Context) {
 		// Streamable MCP has its own strict Origin guard below. Keep the
-		// legacy browser CORS policy away from /mcp.
+		// browser CORS policy away from /mcp.
 		if c.Request.URL.Path == "/mcp" {
 			c.Next()
 			return
@@ -126,7 +122,6 @@ func Run(_ []string) error {
 	})
 
 	api.SetupRoutes(r, executor)
-	api.SetupWebSocket(r, hub)
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"service": "apix-runtime",
@@ -165,7 +160,7 @@ func Run(_ []string) error {
 	})
 
 	// 6. One independent Runtime owns both transports. AI clients connect to
-	// http://127.0.0.1:4317/mcp; desktop clients continue to use /api and /ws.
+	// http://127.0.0.1:4317/mcp; the workspace uses the REST API and journal polling.
 	address := os.Getenv("APIX_ADDR")
 	if address == "" {
 		address = "127.0.0.1:4317"
@@ -181,6 +176,7 @@ func Run(_ []string) error {
 	if err != nil {
 		return err
 	}
+	aiinstall.New("http://" + listener.Addr().String() + "/mcp").Routes(r)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	server := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
@@ -215,11 +211,6 @@ func valueOr(value, fallback string) string {
 	return value
 }
 func allowedBrowserOrigin(origin string) bool {
-	for _, value := range []string{"http://127.0.0.1:1420", "http://localhost:1420", "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"} {
-		if origin == value {
-			return true
-		}
-	}
 	for _, value := range strings.Split(os.Getenv("APIX_ALLOWED_ORIGINS"), ",") {
 		if origin == strings.TrimSpace(value) {
 			return true

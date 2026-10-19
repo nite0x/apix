@@ -13,12 +13,11 @@ Thanks for helping improve Apix.
 Run the checks that match your change before opening a pull request:
 
 ```bash
-pnpm typecheck
-pnpm build:web
+pnpm check
+pnpm test
 ```
 
-If your change touches the desktop shell, sidecar packaging, or runtime
-integration, also run:
+If your change affects embedded assets or release packaging, also run:
 
 ```bash
 pnpm build

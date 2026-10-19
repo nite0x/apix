@@ -175,3 +175,6 @@ body.sidebar-collapsed { --sidebar-width: 72px; }
   .sql-tools select { width:110px; padding:8px; font-size:11px; }
   .sql-panel .panel-foot { padding:12px 16px; flex-wrap:wrap; gap:6px; }
 }
+
+/* Keep workspace status visible while the content scrolls. */
+.workspace .topbar { position: sticky; top: 0; z-index: 18; }

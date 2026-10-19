@@ -639,3 +639,43 @@ func (r *repository) deleteRun(id string) error {
 	}
 	return nil
 }
+
+// listRunSummaries reads only list metadata; response payloads are loaded on demand.
+func (r *repository) listRunSummaries(projectID string, limit int) ([]APIRun, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 50
+	}
+	rows, err := r.db.Query(`SELECT id, request_snapshot, status, response_status,
+    COALESCE(duration_ms,0), started_at, is_pinned FROM api_runs WHERE project_id=?
+    ORDER BY started_at DESC,id DESC LIMIT ?`, projectID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []APIRun{}
+	for rows.Next() {
+		var item APIRun
+		var snapshot string
+		var status sql.NullInt64
+		var pinned int
+		if err := rows.Scan(&item.ID, &snapshot, &item.Status, &status, &item.DurationMS, &item.StartedAt, &pinned); err != nil {
+			return nil, err
+		}
+		var request struct {
+			Method string `json:"method"`
+			URL    string `json:"url"`
+		}
+		if err := json.Unmarshal([]byte(snapshot), &request); err != nil {
+			return nil, err
+		}
+		item.ProjectID = projectID
+		item.RequestSnapshot = RequestData{Method: request.Method, URL: redactRequestURL(request.URL)}
+		item.IsPinned = pinned != 0
+		if status.Valid {
+			value := int(status.Int64)
+			item.ResponseStatus = &value
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}

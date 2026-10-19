@@ -4,11 +4,12 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 
 test('manual requests validate drafts, execute once, render persisted failures, and safely reuse history', async () => {
-  const require = createRequire(new URL('../../../apps/desktop/package.json', import.meta.url));
+  const require = createRequire(import.meta.url);
   const { JSDOM } = require('jsdom');
   const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/requests' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, Event: dom.window.Event, Option: dom.window.Option });
   const $ = id => document.getElementById(id);
+  dom.window.confirm = () => true;
   const writes = [];
   let release;
   let failure = false;
@@ -19,6 +20,7 @@ test('manual requests validate drafts, execute once, render persisted failures, 
     writes.push({ path, method: options.method, input });
     let body;
     let status = 200;
+    if (path === '/api/working-copies/draft-1/discard') return { status: 204, ok: true };
     if (path === '/api/working-copies') body = { ...input, id: 'draft-1', edit_version: 1 };
     else if (path === '/api/working-copies/draft-1') body = { ...input, edit_version: input.edit_version + 1 };
     else if (path === '/api/runs') {
@@ -95,7 +97,7 @@ test('manual requests validate drafts, execute once, render persisted failures, 
     submit(); await tick();
     assert.equal(writes.length, afterLoad);
     assert.match($('manual-feedback').textContent, /脱敏/);
-    $('manual-reset').click();
+    $('manual-reset').click(); await tick();
     assert.equal($('manual-url').value, '');
     assert.equal($('manual-response').hidden, true);
   } finally { dom.window.close(); }

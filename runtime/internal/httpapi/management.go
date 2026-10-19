@@ -7,7 +7,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// ManagementTools exposes the same v2 request model used by the desktop app.
+// ManagementTools exposes the same v2 request model used by the Web workspace.
 // There is no MCP-only API schema or legacy persistence path.
 func (s *HTTPService) ManagementTools() []ManagementToolDef {
 	return []ManagementToolDef{

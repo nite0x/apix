@@ -11,7 +11,11 @@ import (
 
 // SetCapabilities connects the same operations used by REST/MCP to Flow.
 func (s *HTTPService) SetCapabilities(db *database.Service, services *localservice.Service) {
-	s.flow.database = db
+	if db == nil {
+		s.flow.database = nil
+	} else {
+		s.flow.database = db
+	}
 	s.flow.services = services
 }
 func (s *HTTPService) SetEventSink(sink func(string, string, string, any)) { s.flow.eventSink = sink }

@@ -43,28 +43,9 @@ func (fs *flowService) executeStep(ctx context.Context, run *FlowRun, step *Flow
 			}
 		}
 		if apiRun != nil && apiRun.Status == "succeeded" {
-			for _, assertion := range config.Assertions {
-				actual, found := extractValue(FlowExtractor{Source: assertion.Source, Path: assertion.Path}, apiRun)
-				passed := false
-				switch assertion.Operator {
-				case "equals":
-					passed = found && actual == assertion.Expected
-				case "not_equals":
-					passed = found && actual != assertion.Expected
-				case "contains":
-					passed = found && strings.Contains(actual, assertion.Expected)
-				case "exists":
-					passed = found
-				}
-				var actualValue any
-				if found {
-					actualValue = actual
-				}
-				assertions = append(assertions, AssertionResult{Kind: assertion.Source, Path: assertion.Path, Operator: assertion.Operator, Expected: assertion.Expected, Actual: actualValue, Passed: passed})
-				if !passed {
-					err = errors.Join(err, fmt.Errorf("%w: %s %s %s", errFlowAssertion, assertion.Source, assertion.Path, assertion.Operator))
-				}
-			}
+			checks, checkErr := evaluateFlowAssertions(config.Assertions, apiRun, nil)
+			assertions = append(assertions, checks...)
+			err = errors.Join(err, checkErr)
 		}
 		// Full response remains in the existing API run; avoid duplicating it.
 		return apiRun, nil, assertions, err
@@ -95,6 +76,14 @@ func (fs *flowService) executeStep(ctx context.Context, run *FlowRun, step *Flow
 					err = fmt.Errorf("%w: expected SQL row count %d, actual %v", errFlowAssertion, *config.ExpectedRows, actual)
 				}
 			}
+		}
+		if result != nil && (err == nil || errors.Is(err, errFlowAssertion)) {
+			checks, checkErr := evaluateFlowAssertions(config.Assertions, nil, result)
+			assertions = append(assertions, checks...)
+			err = errors.Join(err, checkErr)
+		}
+		if result == nil {
+			return nil, nil, assertions, err
 		}
 		return nil, result, assertions, err
 	case "service":

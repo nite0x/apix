@@ -57,7 +57,7 @@ func setupMVP(t *testing.T) *mvpClient {
 	t.Cleanup(func() { _ = services.Close() })
 	sessions := core.NewSessionManager(db)
 	rules := core.NewRuleEngine(db)
-	hub := core.NewHub()
+	events := core.NewEvents(nil)
 	hs := httpapi.New()
 	if err := hs.MigrateSchema(db.DB()); err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func setupMVP(t *testing.T) *mvpClient {
 	hs.SetCapabilities(dbs, services)
 	hs.SetEventSink(history.Append)
 	hs.SetRuleEngine(rules)
-	hs.SetHub(hub)
+
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -73,7 +73,7 @@ func setupMVP(t *testing.T) *mvpClient {
 			t.Error(err)
 		}
 	})
-	executor := core.NewExecutor(sessions, rules, hub, db, hs.Execute, hs.ExtractVars)
+	executor := core.NewExecutor(sessions, rules, events, db, hs.Execute, hs.ExtractVars)
 	server := mcpserver.NewServer(executor)
 	server.RegisterHTTPTools(hs)
 	server.RegisterCapabilities(hs, dbs, services, history)

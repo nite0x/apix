@@ -10,10 +10,7 @@ const rootDir = resolve(__dirname, "..");
 const runtimeDir = resolve(rootDir, "runtime");
 const goEnv = { ...process.env };
 
-// Use the same durable database as the packaged desktop app. Previously the
-// development runtime used runtime/apix.db while the installed app used its
-// platform data directory, which made data appear to disappear when switching
-// between the two launch modes.
+// Keep the existing durable data directory so UI consolidation preserves local data.
 const defaultDataDir = process.platform === "darwin"
   ? join(homedir(), "Library", "Application Support", "dev.apix.desktop")
   : process.platform === "win32"

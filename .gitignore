@@ -1,9 +1,7 @@
 node_modules/
 dist/
-target/
 release/
-src-tauri/binaries/
-services/runtime/runtime
+/runtime/runtime
 
 .DS_Store
 .env

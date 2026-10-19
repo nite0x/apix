@@ -81,14 +81,6 @@ func (s *HTTPService) initRepositories() {
 	s.flow = newFlowService(s.repo, s.execution)
 }
 
-// SetHub wires the WebSocket hub so Flow runs can broadcast flow_run.* events.
-// Call after MigrateSchema.
-func (s *HTTPService) SetHub(hub *core.Hub) {
-	if s.flow != nil {
-		s.flow.setHub(hub)
-	}
-}
-
 // SetRuleEngine lets durable Flow runs honor the same Pause Rules as MCP runs.
 func (s *HTTPService) SetRuleEngine(rules *core.RuleEngine) {
 	if s.flow != nil {

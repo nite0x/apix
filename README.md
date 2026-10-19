@@ -2,188 +2,72 @@
 
 **Apix — Agentic Procedural Interface eXecution**
 
-Apix is a local-first desktop developer tool for MCP-assisted API debugging, workflow execution, and run console logs.
+Apix is a local API debugging and testing workspace. A Go process serves the Web UI, REST API, and MCP endpoint at `http://127.0.0.1:4317/`. The UI is embedded in the executable.
 
-## Status
+## Features
 
-The backend-only MVP supports MySQL, PostgreSQL and Hologres SQL execution, local service process
-management, and mixed HTTP/SQL/service test flows through MCP and REST.
-It runs without the desktop UI. See [the backend MVP guide](runtime/MVP.md)
-for configuration, tools, and a runnable MySQL-backed example.
+- Send HTTP requests and inspect persisted responses, errors, and execution history.
+- Organize saved interfaces into collections; import cURL or raw HTTP, review, debug, and save.
+- Search saved interfaces; pin, filter, delete, and reuse request history.
+- Manage database connections and execute MySQL, PostgreSQL, and Hologres SQL.
+- Manage local service definitions and inspect service output and runtime logs.
+- Run independent test batches and reusable cases through the [API testing workflow](docs/API_TESTING.md).
+- Existing Flow pages remain available. Flow and pause-rule product design is deferred; the UI consolidation does not extend it.
 
-For independent API checks with different inputs, use [API testing batches and reusable cases](docs/API_TESTING.md). The Runtime page at `/tests` groups each task's named attempts and assertion outcomes; Flows remain available for dependent business sequences.
+## Development
 
-Build the standalone runtime and example API with `pnpm build:runtime`.
-
-To send an HTTP request manually, open the Runtime's `/requests` page. Choose a
-method and URL, add query parameters, headers, or a JSON/text/form body, then send.
-Responses and execution history appear on the same page; historical requests can
-be loaded back into the editor. Replace any redacted fields before resending.
-
-The Runtime's `/databases` page also provides manual SQL execution with JSON
-binding parameters, result tables, affected row counts, and reusable history.
-Use `/services` to add a service's executable, arguments, working directory,
-health URL and startup timeout, then save or start it directly.
-
-Apix is an early public release. The current codebase includes the desktop
-shell, local runtime, WebSocket event stream, HTTP collection management, and
-manual request execution. Expect the product surface and internal contracts to
-evolve quickly while the core workflow settles.
-
-## Repository Layout
-
-```text
-apix/
-  apps/desktop         React + TypeScript + Vite UI
-  src-tauri            Tauri desktop shell and sidecar wiring
-  runtime              Go local runtime service, HTTP API, WebSocket logs, SQLite owner
-```
-
-## Prerequisites
-
-- Node.js 20+
-- pnpm 9+
-- Go 1.23+
-- Rust stable
-- Tauri system dependencies for your OS
-
-## Environment Management
-
-This repository is configured for reproducible local tooling with `mise` and
-`rustup`.
+Use Ubuntu WSL in `/home/nite/projects/apix` with Linux Node.js 22.20+, pnpm 9.15+, and Go 1.23+. Optional mise versions are declared in `.mise.toml`.
 
 ```bash
-brew install mise
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source "$HOME/.cargo/env"
-```
-
-Enable `mise` in zsh:
-
-```bash
-echo 'eval "$(mise activate zsh)"' >> ~/.zshrc
-eval "$(mise activate zsh)"
-```
-
-Install the project toolchain:
-
-```bash
-mise trust
-mise install
-```
-
-Rust is pinned by `rust-toolchain.toml`; Node, pnpm, Go, and Rust are declared in
-`.mise.toml`.
-
-## Install Dependencies
-
-```bash
-pnpm install
-```
-
-`pnpm-workspace.yaml` manages the frontend workspace packages under `apps/*`
-and `src-tauri`.
-
-## Start Development
-
-Start the full local development environment with one command:
-
-```bash
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-This starts the React/Vite dev server, the Go runtime service, and the Tauri
-desktop shell together. `concurrently` keeps all process logs in one terminal
-and stops the group when one process exits.
+`pnpm dev` and `pnpm dev:browser` start the Go runtime and open the workspace after a successful health check. They reuse an existing healthy runtime. For terminal-only startup, use `pnpm dev:backend`.
 
-For browser-first development without launching Tauri:
+Web assets live in `runtime/internal/activity/web` and are embedded at Go build time. Restart the runtime after editing them.
 
-```bash
-pnpm dev:browser
-```
+Development keeps the existing database at `~/.local/share/dev.apix.desktop/apix.db` and its adjacent credentials key. This data path is retained to preserve existing data. Set `APIX_DB_PATH` for an isolated database. Direct executable startup defaults to `apix.db` in the caller's directory.
 
-This starts the React/Vite frontend and Go runtime only, then opens
-`http://127.0.0.1:1420` in your default browser.
-
-## Start Modules Independently
-
-Run the React frontend only:
+## Checks
 
 ```bash
-pnpm dev:frontend
-```
-
-Run the Go runtime only:
-
-```bash
-pnpm dev:backend
-```
-
-Run the Tauri desktop shell only:
-
-```bash
-pnpm dev:tauri
-```
-
-Build the Go sidecar binary for the current platform:
-
-```bash
-pnpm build:sidecar
-```
-
-Legacy aliases are still available:
-
-```bash
-pnpm dev:web
-pnpm dev:runtime
-pnpm dev:desktop
-```
-
-`pnpm dev:tauri` expects the frontend and backend ports to be available. For
-desktop development, prefer `pnpm dev`. For UI and runtime work that does not
-need native shell behavior, prefer `pnpm dev:browser`.
-
-## Build
-
-```bash
+pnpm check
+pnpm test:web
+pnpm test:runtime
 pnpm build
 ```
 
-## Development Workflow
+`pnpm check` checks Web and tooling JavaScript syntax. Web tests use Node's test runner and jsdom. Go tests cover the backend.
 
-See [docs/development-workflow.md](docs/development-workflow.md) for the
-recommended branch naming, commit style, merge flow, and GitHub collaboration
-workflow.
+## Standalone build
 
-## Contributing
+```bash
+pnpm build
+pnpm build:windows
+```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup expectations, branch
-conventions, and pull request guidance.
+The host build writes `apix-runtime` and the optional demo API to `release/`. The Windows build uses Linux Go and Python 3 to create `release/Apix_<version>_windows-x64.zip`. Its `Install.ps1` installs two standalone programs and creates an Apix desktop shortcut. The launcher runs the background server without a console and opens the browser on port 4319. See [Windows installation](docs/WINDOWS.md).
+
+On Windows, `start.ps1` keeps data and logs in the release's `data` directory unless configured explicitly. The optional demo API is for smoke tests and is not started with the workspace.
+
+## Repository layout
+
+- `runtime/internal/activity/web`: the only UI source.
+- `runtime`: Go runtime, REST, MCP, SQLite, and service management.
+- `scripts`: development, standalone builds, and checks.
+- `docs`: [user guide](docs/user-guide.md), [development workflow](docs/development-workflow.md).
+
+## Endpoints
+
+- Workspace: `http://127.0.0.1:4317/`
+- Health: `GET /health`
+- MCP: `/mcp`
+- REST: `/api`
+- Execution events: `GET /api/events`
+
+See the [standalone runtime guide](runtime/GUIDE.md) for configuration and examples.
 
 ## License
 
-Apix is licensed under the GNU Affero General Public License v3.0 only.
-See [LICENSE](LICENSE).
-
-## Ports
-
-- React/Vite frontend: `http://127.0.0.1:1420`
-- Go runtime HTTP API: `http://127.0.0.1:4317`
-- Runtime health endpoint: `GET http://127.0.0.1:4317/health`
-- Runtime log stream: `GET ws://127.0.0.1:4317/ws/logs`
-
-## Runtime Contract
-
-The Go service owns local SQLite access and exposes local APIs for the desktop app.
-
-- HTTP base URL: `http://127.0.0.1:4317`
-- Health endpoint: `GET /health`
-- Log stream: `GET /ws/logs` WebSocket
-- Desktop app SQLite file: the platform app-local-data directory under `dev.apix.desktop/apix.db`
-- Standalone runtime SQLite file: `apix.db` relative to the caller, unless `APIX_DB_PATH` is set
-
-## Notes
-
-- Tauri is configured to package the Go service as a sidecar via `src-tauri/binaries/apix-runtime-*`.
-- Feature modules can be added under `apps/desktop/src`.
-- Monaco Editor and React Flow can be introduced later without changing the module boundaries.
+GNU Affero General Public License v3.0 only. See [LICENSE](LICENSE).

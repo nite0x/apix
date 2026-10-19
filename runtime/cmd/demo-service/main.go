@@ -1,4 +1,4 @@
-// demo-service is a small real MySQL-backed API for the backend MVP example.
+// demo-service is a small real MySQL-backed API for the standalone runtime example.
 package main
 
 import (

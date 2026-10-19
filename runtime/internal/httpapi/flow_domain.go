@@ -56,6 +56,11 @@ type FlowStep struct {
 }
 
 type FlowStepConfig struct {
+	// Empty phase and failure_policy preserve the legacy execution contract.
+	Phase                string `json:"phase,omitempty"`          // empty | finally
+	FailurePolicy        string `json:"failure_policy,omitempty"` // empty | stop | continue
+	SkipIfMissingOutputs bool   `json:"skip_if_missing_outputs,omitempty"`
+
 	Assertions      []FlowAssertion `json:"assertions,omitempty"`
 	ExpectedStatus  *int            `json:"expected_status,omitempty"`
 	ExpectedRows    *int            `json:"expected_rows,omitempty"`
@@ -64,7 +69,7 @@ type FlowStepConfig struct {
 	Extractors      []FlowExtractor `json:"extractors"`
 }
 
-// FlowAssertion compares a response value as text; body paths use dot notation.
+// FlowAssertion compares a response or SQL value as text; paths use dot notation.
 type FlowAssertion struct {
 	Source   string `json:"source"`
 	Path     string `json:"path,omitempty"`
@@ -146,6 +151,7 @@ type FlowRun struct {
 }
 
 type FlowRunStep struct {
+	Phase           string             `json:"phase,omitempty"`
 	Type            string             `json:"type"`
 	SQLSnapshot     *database.Command  `json:"sql_snapshot,omitempty"`
 	ServiceSnapshot *ServiceStepConfig `json:"service_snapshot,omitempty"`

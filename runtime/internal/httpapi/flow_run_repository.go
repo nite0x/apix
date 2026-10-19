@@ -15,6 +15,9 @@ import (
 // flow_run_step per enabled step, all in a single transaction. The returned run
 // is immutable with respect to later edits of the source Flow.
 func (r *repository) createFlowRun(flow *Flow, envID *string, trigger string, variablesSnapshot map[string]any) (*FlowRun, error) {
+	if err := validateFlowReferences(flow.Steps); err != nil {
+		return nil, fmt.Errorf("%w: %v", errValidation, err)
+	}
 	enabled := make([]FlowStep, 0, len(flow.Steps))
 	for _, step := range flow.Steps {
 		if step.Enabled {
@@ -86,6 +89,7 @@ func (r *repository) createFlowRun(flow *Flow, envID *string, trigger string, va
 	for i, step := range enabled {
 		stepID := step.ID
 		runStep := FlowRunStep{
+			Phase:           step.Config.Phase,
 			Type:            step.Type,
 			SQLSnapshot:     step.SQL,
 			ServiceSnapshot: step.Service,
@@ -147,6 +151,15 @@ func (r *repository) getFlowRun(id string) (*FlowRun, error) {
 	steps, err := r.listFlowRunSteps(id)
 	if err != nil {
 		return nil, err
+	}
+	var definition flowSnapshot
+	if err := json.Unmarshal([]byte(snapshot), &definition); err != nil {
+		return nil, err
+	}
+	for i := range steps {
+		if steps[i].Position >= 0 && steps[i].Position < len(definition.Steps) {
+			steps[i].Phase = definition.Steps[steps[i].Position].Config.Phase
+		}
 	}
 	run.Steps = steps
 	return run, nil
