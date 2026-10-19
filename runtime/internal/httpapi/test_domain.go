@@ -1,10 +1,39 @@
 package httpapi
 
-import "time"
+import (
+	"github.com/apix/apix/runtime/internal/commandrunner"
+	"github.com/apix/apix/runtime/internal/mcpclient"
+	"time"
+)
+
+type CommandTestData struct {
+	CommandRequest   *commandrunner.Request `json:"command_request,omitempty"`
+	ExpectedExitCode *int                   `json:"expected_exit_code,omitempty"`
+}
+type CommandRunData struct {
+	CommandRequestSnapshot *commandrunner.Request `json:"command_request_snapshot,omitempty"`
+	ExpectedExitCode       *int                   `json:"expected_exit_code,omitempty"`
+	CommandResult          any                    `json:"command_result,omitempty"`
+}
+
+type MCPTestData struct {
+	MCPRequest           *mcpclient.Request `json:"mcp_request,omitempty"`
+	ExpectedIsError      *bool              `json:"expected_is_error,omitempty"`
+	ValidateOutputSchema bool               `json:"validate_output_schema,omitempty"`
+}
+type MCPRunData struct {
+	MCPRequestSnapshot   *mcpclient.Request `json:"mcp_request_snapshot,omitempty"`
+	ExpectedIsError      *bool              `json:"expected_is_error,omitempty"`
+	ValidateOutputSchema bool               `json:"validate_output_schema,omitempty"`
+	MCPResult            any                `json:"mcp_result,omitempty"`
+}
 
 // TestCase is an independent input/expectation pair, not a Flow step. The
 // request is owned by the case so changing an API definition cannot change it.
 type TestCase struct {
+	Type string `json:"type"`
+	MCPTestData
+	CommandTestData
 	ID             string          `json:"id"`
 	ProjectID      string          `json:"project_id"`
 	APIRequestID   *string         `json:"api_request_id,omitempty"`
@@ -41,6 +70,9 @@ type TestBatch struct {
 }
 
 type TestCaseRun struct {
+	Type string `json:"type"`
+	MCPRunData
+	CommandRunData
 	ID                   string            `json:"id"`
 	BatchID              string            `json:"batch_id"`
 	CaseID               *string           `json:"case_id,omitempty"`

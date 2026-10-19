@@ -37,6 +37,8 @@ test('manual requests validate drafts, execute once, render persisted failures, 
   const submit = () => $('manual-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   const change = id => $(id).dispatchEvent(new window.Event('change', { bubbles: true }));
   try {
+    assert.equal($('request-execute-panel').hidden, false);
+    assert.equal($('request-manage-panel').hidden, true); assert.equal($('request-history-panel').hidden, true);
     $('manual-url').value = 'http://localhost/users?existing=1';
     $('manual-method').value = 'POST'; change('manual-method');
     $('manual-body-type').value = 'json'; change('manual-body-type');
@@ -55,13 +57,33 @@ test('manual requests validate drafts, execute once, render persisted failures, 
     assert.deepEqual(request.query_params.map(row => [row.name, row.value]), [['tag', 'one'], ['tag', 'two'], ['value', 'a=b']]);
     assert.equal(request.headers[1].value, 'http://localhost:8080');
     assert.equal(request.body, '{"name":"测试"}');
+    $('request-manage-tab').click(); $('request-history-tab').click();
+    assert.equal($('manual-fields').disabled, true); assert.equal($('request-history-panel').hidden, false);
     release(); await tick();
+    assert.equal($('request-history-panel').hidden, false);
+    $('request-execute-tab').click();
     assert.equal(completionCount, 1);
     assert.match($('manual-response').textContent, /HTTP 400/);
     assert.match($('manual-response').textContent, /invalid input/);
     assert.equal($('manual-response').hidden, false);
     assert.equal($('manual-fields').disabled, false);
     assert.equal($('manual-url').value, 'http://localhost/users?existing=1');
+    const responseNode = $('manual-response').firstElementChild;
+    const countBeforeSwitch = writes.length;
+    $('request-manage-tab').click(); $('request-history-tab').click(); $('request-execute-tab').click();
+    assert.equal($('manual-response').firstElementChild, responseNode);
+    assert.equal($('manual-body').value, '{"name":"测试"}');
+    assert.equal($('manual-query').value, 'tag=one\ntag=two\nvalue=a=b');
+    assert.equal($('manual-headers').value, 'Authorization: Bearer sample\nX-URL: http://localhost:8080');
+    assert.equal(writes.length, countBeforeSwitch);
+    $('request-execute-tab').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    assert.equal(document.activeElement, $('request-manage-tab'));
+    $('request-manage-tab').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    assert.equal(document.activeElement, $('request-history-tab'));
+    $('request-history-tab').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    assert.equal(document.activeElement, $('request-manage-tab'));
+    $('request-manage-tab').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    assert.equal(document.activeElement, $('request-execute-tab'));
 
     failure = true;
     $('manual-method').value = 'GET'; change('manual-method');
@@ -74,7 +96,9 @@ test('manual requests validate drafts, execute once, render persisted failures, 
     assert.match($('manual-response').textContent, /connection refused/);
     assert.equal(completionCount, 2);
 
+    $('request-history-tab').click();
     await module.loadManualRequest('history-1');
+    assert.equal($('request-execute-panel').hidden, false);
     assert.equal($('manual-body-field').hidden, false);
     assert.equal($('manual-headers').value, 'Authorization: ••••••');
     assert.equal($('manual-query').value, 'a=b=c');

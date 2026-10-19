@@ -216,12 +216,6 @@ func (fs *flowService) run(ctx context.Context, runID string, inputVars map[stri
 	stopped, cleaning := false, false
 	var cleanupErrors []error
 	var cleanupCtx context.Context
-	var cleanupCancel context.CancelFunc
-	defer func() {
-		if cleanupCancel != nil {
-			cleanupCancel()
-		}
-	}()
 
 	for _, rs := range run.Steps {
 		definition := snapshot.Steps[rs.Position]
@@ -229,7 +223,9 @@ func (fs *flowService) run(ctx context.Context, runID string, inputVars map[stri
 		if finally && !cleaning {
 			cleaning = true
 			// Cancellation stops the body; cleanup has an independent total budget.
+			var cleanupCancel context.CancelFunc
 			cleanupCtx, cleanupCancel = context.WithTimeout(context.Background(), 30*time.Second)
+			defer cleanupCancel()
 			_ = fs.repo.setFlowRunStatus(runID, "running")
 			fs.emit("flow_run.cleanup_started", runID, "", nil)
 		}

@@ -32,14 +32,16 @@ The request history shows the most recent 200 runs. Search by method or URL, fil
 
 - **数据库**: manage MySQL, PostgreSQL, and Hologres connections; execute SQL and inspect saved results.
 - **服务**: configure and manually start or stop local services; inspect service details and logs.
-- **接口测试**: group independent input variants into test batches and save reusable cases. See [API testing](API_TESTING.md).
+- **MCP 工具**: connect Streamable HTTP servers, discover and call tools, and save reusable tests. See [MCP testing](MCP_TESTING.md).
+- **命令行**: run one-shot programs or scripts, validate exit codes and output, and save cases. See [command testing](COMMAND_TESTING.md).
+- **测试**: manage **测试用例** (single-step and multi-step), organize **测试批次**, and inspect **执行记录**. See [API testing](API_TESTING.md).
 - **日志**: inspect runtime events and service output.
 
 Flow supports ordered execution cards and explicit cleanup. Ordinary MCP session UI and pause-rule management UI remain deferred.
 
 ## Card-based Flow tests
 
-Open **测试流程** in the Runtime Web workspace (`http://127.0.0.1:4317/flows`).
+Open **测试 → 测试用例**, then set **用例类型** to **业务流程** in the Runtime Web workspace (`http://127.0.0.1:4317/tests?tab=cases&type=flow`). Legacy `/flows?id=…&run=…` links still open the corresponding editor or result.
 Create a Flow, then arrange HTTP, SQL, or service cards in execution order. Expand a card to edit
 its request, name, assertions, response extractors, and failure policy. Flow
 changes save automatically; running first flushes the saved definition and

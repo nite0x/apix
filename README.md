@@ -11,6 +11,8 @@ Apix is a local API debugging and testing workspace. A Go process serves the Web
 - Search saved interfaces; pin, filter, delete, and reuse request history.
 - Manage database connections and execute MySQL, PostgreSQL, and Hologres SQL.
 - Manage local service definitions and inspect service output and runtime logs.
+- Discover and test external MCP tools over Streamable HTTP; save cases and inspect results with the [MCP testing workflow](docs/MCP_TESTING.md).
+- Execute command-line programs or scripts, assert exit codes and stdout/stderr, and reuse cases through [command testing](docs/COMMAND_TESTING.md).
 - Run independent test batches and reusable cases through the [API testing workflow](docs/API_TESTING.md).
 - Existing Flow pages remain available. Flow and pause-rule product design is deferred; the UI consolidation does not extend it.
 

@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 test('API testing groups input variants, preserves case drafts during polling, and runs selected saved cases', async () => {
   const require = createRequire(import.meta.url);
   const { JSDOM } = require('jsdom');
-  const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/tests' });
+  const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/tests?tab=records' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, location: dom.window.location, history: dom.window.history, Option: dom.window.Option });
   dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
@@ -38,12 +38,14 @@ test('API testing groups input variants, preserves case drafts during polling, a
   assert.equal(document.querySelectorAll('.test-endpoint').length, 1);
   assert.match(document.querySelector('.testing-summary').textContent, /通过 1.*失败 1/);
   assert.match(document.querySelector('#testing-workspace').textContent, /缺少邮箱/);
-  click('＋ 新建用例'); set('用例名称', '缺少用户名'); set('请求地址', 'http://localhost/users'); set('预期状态码', '400');
+  click('测试用例'); await tick();
+  click('＋ 新建用例');
+  document.querySelector('.testing-case-choice').click(); set('用例名称', '缺少用户名'); set('请求地址', 'http://localhost/users'); set('预期状态码', '400');
   await module.refreshTesting();
   assert.equal(document.querySelector('[aria-label="用例名称"]').value, '缺少用户名');
   document.querySelector('.testing-editor form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await tick();
   const write = writes.find(item => item.path === '/api/test-cases'); assert.ok(write); assert.equal(write.input.expected_status, 400);
-  click('已保存用例');
+  click('测试用例'); await tick();
   document.querySelector('.testing-pick').click();
   click('运行所选用例');
   document.querySelector('.testing-editor form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await tick();

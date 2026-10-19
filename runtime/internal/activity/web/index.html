@@ -4,8 +4,11 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Apix · 主页</title><link rel="icon" href="data:,">
   <link rel="stylesheet" href="/activity/assets/style.css">
+  <link rel="stylesheet" href="/activity/assets/services.css">
   <link rel="stylesheet" href="/activity/assets/flows.css">
   <link rel="stylesheet" href="/activity/assets/testing.css">
+  <link rel="stylesheet" href="/activity/assets/mcp-tools.css">
+  <link rel="stylesheet" href="/activity/assets/command-tools.css">
   <link rel="stylesheet" href="/activity/assets/manual-request.css">
   <link rel="stylesheet" href="/activity/assets/manual-tools.css">
   <link rel="stylesheet" href="/activity/assets/ai-tools.css">
@@ -20,8 +23,9 @@
       <a href="/services" data-route aria-label="服务" title="服务"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h4M12 17.5h4"/></svg><span class="nav-label">服务</span><span class="nav-tooltip" aria-hidden="true">服务</span></a>
       <a href="/requests" data-route aria-label="接口" title="接口"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h15m-4-4 4 4-4 4M20 16H5m4-4-4 4 4 4"/></svg><span class="nav-label">接口</span><span class="nav-tooltip" aria-hidden="true">接口</span></a>
       <a href="/databases" data-route aria-label="数据库" title="数据库"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/></svg><span class="nav-label">数据库</span><span class="nav-tooltip" aria-hidden="true">数据库</span></a>
-      <a href="/tests" data-route aria-label="接口测试" title="接口测试"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6m-5 0v6L4 19a1 1 0 0 0 1 2h14a1 1 0 0 0 1-2L14 9V3M8 14h8m-6 3 2 2 3-4"/></svg><span class="nav-label">接口测试</span><span class="nav-tooltip" aria-hidden="true">接口测试</span></a>
-      <a href="/flows" data-route aria-label="测试流程" title="测试流程"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="15" y="15" width="6" height="6" rx="1.5"/><path d="M6 9v9h9M9 6h9v9"/></svg><span class="nav-label">测试流程</span><span class="nav-tooltip" aria-hidden="true">测试流程</span></a>
+      <a href="/mcp-tools" data-route aria-label="MCP 工具" title="MCP 工具"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 4-6 8 6 8m8-16 6 8-6 8M14 3l-4 18"/></svg><span class="nav-label">MCP 工具</span><span class="nav-tooltip" aria-hidden="true">MCP 工具</span></a>
+      <a href="/commands" data-route aria-label="命令行" title="命令行"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></svg><span class="nav-label">命令行</span><span class="nav-tooltip" aria-hidden="true">命令行</span></a>
+      <a href="/tests" data-route aria-label="测试" title="测试"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6m-5 0v6L4 19a1 1 0 0 0 1 2h14a1 1 0 0 0 1-2L14 9V3M8 14h8m-6 3 2 2 3-4"/></svg><span class="nav-label">测试</span><span class="nav-tooltip" aria-hidden="true">测试</span></a>
       <a href="/logs" data-route aria-label="日志" title="日志"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg><span class="nav-label">日志</span><span class="nav-tooltip" aria-hidden="true">日志</span></a>
       <a href="/ai-tools" data-route aria-label="AI 工具" title="AI 工具"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="7" width="16" height="14" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M8 17h8M2 12h2m16 0h2"/></svg><span class="nav-label">AI 工具</span><span class="nav-tooltip" aria-hidden="true">AI 工具</span></a>
     </nav>
@@ -46,15 +50,20 @@
         <a class="home-card" href="/services" data-route><span class="home-icon" aria-hidden="true">◫</span><h2>服务</h2><p>查看本地服务状态，启动或停止已配置的服务。</p><span class="home-link">管理服务 →</span></a>
         <a class="home-card" href="/requests" data-route><span class="home-icon" aria-hidden="true">↗</span><h2>接口</h2><p>手动发送 HTTP 请求，查看响应与执行记录。</p><span class="home-link">执行接口 →</span></a>
         <a class="home-card" href="/databases" data-route><span class="home-icon" aria-hidden="true">▤</span><h2>数据库</h2><p>管理 MySQL、PostgreSQL 和 Hologres 连接，查看 SQL 执行记录。</p><span class="home-link">管理数据库 →</span></a>
-        <a class="home-card" href="/tests" data-route><span class="home-icon" aria-hidden="true">✓</span><h2>接口测试</h2><p>按批次查看 AI 测试，比较不同入参，保存用例重复验证。</p><span class="home-link">查看测试 →</span></a>
-        <a class="home-card" href="/flows" data-route><span class="home-icon" aria-hidden="true">⌘</span><h2>测试流程</h2><p>把请求串成可复用的测试，传递变量、校验结果。</p><span class="home-link">编排流程 →</span></a>
+        <a class="home-card" href="/tests" data-route><span class="home-icon" aria-hidden="true">✓</span><h2>测试</h2><p>管理单步和多步测试用例，组织测试批次，查看执行记录。</p><span class="home-link">查看测试 →</span></a>
         <a class="home-card" href="/logs" data-route><span class="home-icon" aria-hidden="true">≡</span><h2>日志</h2><p>实时查看运行事件及服务输出，按来源筛选日志。</p><span class="home-link">打开日志 →</span></a>
         <a class="home-card" href="/ai-tools" data-route><span class="home-icon" aria-hidden="true">✦</span><h2>AI 工具</h2><p>将 Apix 一键安装到 Codex、Claude Code、Cursor、TRAE 等工具。</p><span class="home-link">连接 AI 工具 →</span></a>
       </section>
     </div>
     <section data-page="services" class="panel services-panel page-panel" aria-labelledby="services-title" hidden><div class="panel-heading"><h2 id="services-title"><span class="section-icon">◫</span> 本地服务 <span class="subtle" id="service-total">—</span></h2><button id="service-add" class="button primary" type="button" aria-haspopup="dialog" aria-controls="service-editor">＋ 新增服务</button></div><div id="service-editor-feedback" class="database-notice" role="status" hidden></div><div id="services" class="service-list"><div class="empty">正在读取服务状态…</div></div><div class="panel-foot">填写启动配置，手动启停服务；自动复用健康地址上的已有实例</div></section>
     <div data-page="requests" class="manual-workspace" hidden>
-      <section class="panel manual-request" aria-labelledby="manual-title">
+      <div id="request-tabs" class="workspace-tabs" role="tablist" aria-label="接口工作区">
+        <button id="request-manage-tab" type="button" role="tab" aria-selected="false" aria-controls="request-manage-panel" tabindex="-1">接口管理</button>
+        <button id="request-execute-tab" type="button" role="tab" aria-selected="true" aria-controls="request-execute-panel">接口执行</button>
+        <button id="request-history-tab" type="button" role="tab" aria-selected="false" aria-controls="request-history-panel" tabindex="-1">执行记录</button>
+      </div>
+<section id="request-manage-panel" class="panel" role="tabpanel" aria-labelledby="request-manage-tab" tabindex="0" hidden><div class="panel-heading"><div><h2 id="library-title">接口库</h2><p>保存可重复使用的接口，与执行记录分开管理。</p></div><div class="request-actions"><button id="library-new" class="button primary" type="button">＋ 新增接口</button><button id="collection-create" class="button small" type="button">新建分组</button><button id="library-refresh" class="button small" type="button">刷新接口库</button></div></div><div class="request-library-tools"><label>分组<select id="library-collection"><option value="">全部分组</option></select></label><label class="library-search">搜索接口<input id="library-search" type="search" placeholder="名称、方法、URL 或分组"></label><button id="collection-rename" class="button small" type="button" disabled>重命名分组</button><button id="collection-archive" class="button small" type="button" disabled>归档分组</button></div><div id="library-feedback" class="detail-alert" role="status" hidden></div><details id="manual-import-panel" class="request-import"><summary>导入 cURL / 原始 HTTP</summary><label for="manual-import-text">粘贴请求内容</label><textarea id="manual-import-text" rows="5" spellcheck="false" placeholder="curl https://example.com/api"></textarea><button id="manual-import-submit" class="button small" type="button">解析到编辑器</button><p>解析后可以审阅、调试或保存，不会自动发送请求。</p></details><div id="request-library"><p class="empty">正在读取接口库…</p></div></section>
+      <section id="request-execute-panel" class="panel manual-request" role="tabpanel" aria-labelledby="request-execute-tab" tabindex="0">
         <div class="panel-heading"><div><h2 id="manual-title">手动执行接口</h2><p>直接调试，或命名保存到接口库，执行记录自动保留。</p></div><button id="manual-reset" type="button" class="button small">清空请求</button></div>
         <form id="manual-form">
           <fieldset id="manual-fields">
@@ -67,17 +76,17 @@
           </fieldset>
           <div id="manual-feedback" class="detail-alert" role="status" hidden></div>
         </form>
-<details id="manual-import-panel" class="request-import"><summary>导入 cURL / 原始 HTTP</summary><label for="manual-import-text">粘贴请求内容</label><textarea id="manual-import-text" rows="5" spellcheck="false" placeholder="curl https://example.com/api"></textarea><button id="manual-import-submit" class="button small" type="button">解析到编辑器</button><p>解析后可以审阅、调试或保存，不会自动发送请求。</p></details>
+
         <section id="manual-response" class="manual-response" aria-label="本次响应" aria-live="polite" hidden></section>
       </section>
-<section class="panel" aria-labelledby="library-title"><div class="panel-heading"><div><h2 id="library-title">接口库</h2><p>保存可重复使用的接口，与执行记录分开管理。</p></div><div class="request-actions"><button id="collection-create" class="button small" type="button">新建分组</button><button id="library-refresh" class="button small" type="button">刷新接口库</button></div></div><div class="request-library-tools"><label>分组<select id="library-collection"><option value="">全部分组</option></select></label><label class="library-search">搜索接口<input id="library-search" type="search" placeholder="名称、方法、URL 或分组"></label><button id="collection-rename" class="button small" type="button" disabled>重命名分组</button><button id="collection-archive" class="button small" type="button" disabled>归档分组</button></div><div id="library-feedback" class="detail-alert" role="status" hidden></div><div id="request-library"><p class="empty">正在读取接口库…</p></div></section>
-<section class="panel requests-panel page-panel" aria-labelledby="requests-title"><div class="panel-heading"><h2 id="requests-title">接口执行记录</h2><span class="subtle">最近 200 条</span><button id="history-refresh" class="button small" type="button">刷新历史</button></div><div class="request-library-tools"><label class="library-search">搜索记录<input id="request-search" type="search" placeholder="URL 或请求方法" aria-label="搜索接口记录"></label><label>执行状态<select id="history-status"><option value="">全部状态</option><option value="running">执行中</option><option value="succeeded">已完成</option><option value="failed">失败</option><option value="timed_out">超时</option><option value="cancelled">已取消</option></select></label><label class="history-pinned"><input id="history-pinned" type="checkbox">仅看固定</label></div><div id="history-feedback" class="detail-alert error" role="status" hidden></div><div class="request-scroll"><table><thead><tr><th>请求</th><th>响应</th><th>耗时</th><th>执行时间</th><th>管理</th></tr></thead><tbody id="requests"><tr><td colspan="5" class="empty">正在读取执行记录…</td></tr></tbody></table></div></section>
+<section id="request-history-panel" class="panel requests-panel page-panel" role="tabpanel" aria-labelledby="request-history-tab" tabindex="0" hidden><div class="panel-heading"><h2 id="requests-title">接口执行记录</h2><span class="subtle">最近 200 条</span><button id="history-refresh" class="button small" type="button">刷新历史</button></div><div class="request-library-tools"><label class="library-search">搜索记录<input id="request-search" type="search" placeholder="URL 或请求方法" aria-label="搜索接口记录"></label><label>执行状态<select id="history-status"><option value="">全部状态</option><option value="running">执行中</option><option value="succeeded">已完成</option><option value="failed">失败</option><option value="timed_out">超时</option><option value="cancelled">已取消</option></select></label><label class="history-pinned"><input id="history-pinned" type="checkbox">仅看固定</label></div><div id="history-feedback" class="detail-alert error" role="status" hidden></div><div class="request-scroll"><table><thead><tr><th>请求</th><th>响应</th><th>耗时</th><th>执行时间</th><th>管理</th></tr></thead><tbody id="requests"><tr><td colspan="5" class="empty">正在读取执行记录…</td></tr></tbody></table></div></section>
     </div>
     <section data-page="logs" class="panel logs-panel page-panel" aria-labelledby="logs-title" hidden><div class="panel-heading"><h2 id="logs-title"><span class="section-icon">≡</span> 实时日志 <span class="live-pill" id="log-live">LIVE</span></h2><div class="log-tools"><select id="log-source" aria-label="筛选日志来源"><option value="all">全部来源</option><option value="runtime">运行事件</option></select><label class="autoscroll"><input id="autoscroll" type="checkbox" checked>自动滚动</label><button id="pause" type="button" class="button small" aria-pressed="false">暂停显示</button></div></div><div id="log-output" class="log-output" tabindex="0" aria-label="实时日志内容"><div class="log-empty">等待活动日志…<span>通过 MCP 执行操作后，运行事件和服务输出会出现在这里。</span></div></div><div class="log-footer"><span><span class="dot" id="log-dot"></span> <span id="log-status">每秒自动更新</span></span><span>时间使用本地时区 · 最多保留最近 1,000 条显示记录</span></div></section>
     <div data-page="databases" class="database-workspace" hidden>
-      <div class="database-tabs" role="tablist" aria-label="数据库工作区">
-        <button id="sql-tab" type="button" role="tab" aria-selected="true" aria-controls="sql-panel">SQL 执行</button>
+      <div id="database-tabs" class="workspace-tabs" role="tablist" aria-label="数据库工作区">
         <button id="connections-tab" type="button" role="tab" aria-selected="false" aria-controls="connections-panel" tabindex="-1">连接管理</button>
+        <button id="sql-tab" type="button" role="tab" aria-selected="true" aria-controls="sql-panel">SQL 执行</button>
+        <button id="sql-history-tab" type="button" role="tab" aria-selected="false" aria-controls="sql-history-panel" tabindex="-1">执行记录</button>
       </div>
     <section id="connections-panel" class="panel database-panel" role="tabpanel" aria-labelledby="connections-tab" tabindex="0" hidden>
       <div class="panel-heading"><div class="database-section-heading"><h2 id="databases-title">数据库连接 <span id="database-total" class="subtle">—</span></h2><p>管理连接配置，测试数据库连通性。</p></div><button id="database-add" class="button primary" type="button" aria-haspopup="dialog" aria-controls="database-editor">＋ 新增连接</button></div>
@@ -96,22 +105,25 @@
         </fieldset>
         <div id="sql-run-feedback" class="detail-alert" role="status" hidden></div>
       </form>
-      <section id="sql-live-result" class="sql-live-result" aria-label="本次 SQL 执行结果" aria-live="polite" hidden></section>
+      <section id="sql-live-result" class="sql-live-result" aria-labelledby="sql-live-result-title"><h2 id="sql-live-result-title">本次执行结果</h2><div id="sql-live-result-content" aria-live="polite" aria-busy="false"><p class="detail-empty">执行 SQL 后，查询数据、影响行数或错误信息会显示在这里。</p></div></section>
+    </section>
+    <section id="sql-history-panel" class="panel sql-panel" role="tabpanel" aria-labelledby="sql-history-tab" tabindex="0" hidden>
       <div class="panel-heading"><div class="database-section-heading"><h2 id="sql-title">SQL 执行记录 <span id="sql-total" class="subtle">—</span></h2><p>查看执行状态、完整 SQL 与查询结果。</p></div><div class="sql-tools"><label class="search"><span aria-hidden="true">⌕</span><input id="sql-search" type="search" placeholder="搜索 SQL 或错误信息" aria-label="搜索 SQL 执行记录"></label><select id="sql-connection" aria-label="筛选 SQL 数据库连接"><option value="">全部连接</option></select></div></div>
       <div id="sql-feedback" class="database-notice error" role="alert" hidden></div>
       <div class="sql-scroll" tabindex="0" role="region" aria-label="SQL 执行记录表格"><table class="sql-table"><thead><tr><th scope="col">SQL 语句</th><th scope="col">数据库连接</th><th scope="col">状态</th><th scope="col">耗时</th><th scope="col">执行时间</th><th scope="col" class="sql-action-heading">操作</th></tr></thead><tbody id="sql-executions"><tr><td colspan="6" class="empty">正在读取 SQL 执行记录…</td></tr></tbody></table></div>
-      <div class="panel-foot"><span>最近 100 条记录 · 自动更新</span><span>点击 SQL 查看完整语句与参数</span></div>
+      <div class="panel-foot"><span>最近 100 条记录 · 自动更新</span><span>点击“查看结果”回看查询数据，点击 SQL 查看完整语句与参数</span></div>
     </section>
     </div>
-    <section data-page="flows" id="flow-workspace" aria-label="测试流程工作区" hidden><div class="empty">正在读取测试流程…</div></section>
-    <section data-page="tests" id="testing-workspace" aria-label="接口测试工作区" hidden><div class="empty">正在读取接口测试…</div></section>
+    <section data-page="mcp-tools" id="mcp-workspace" aria-label="MCP 工具测试工作区" hidden><div class="empty">正在读取 MCP 服务器…</div></section>
+    <section data-page="commands" id="command-workspace" aria-label="命令行与脚本测试工作区" hidden><div class="empty">正在读取命令行工作区…</div></section>
+    <section data-page="tests" id="testing-workspace" aria-label="测试工作区" hidden><div class="empty">正在读取测试…</div><div id="flow-workspace" aria-label="多步测试用例工作区" hidden></div></section>
     <section data-page="ai-tools" id="ai-tools-workspace" aria-label="AI 工具安装" hidden>
       <div class="panel ai-intro"><div class="panel-heading"><div><h2>把 Apix 连接到你的 AI</h2><p>通过 MCP 使用接口调试、数据库查询、服务管理等能力。安装后请保持 Apix 运行。</p><code id="ai-endpoint" class="ai-endpoint">正在读取 MCP 地址…</code></div><div class="ai-target-tools"><label class="ai-target-control" for="ai-target">配置安装环境<select id="ai-target"><option value="local">当前系统</option></select></label><button id="ai-reload" class="button" type="button">重新检测</button></div></div></div>
       <div id="ai-feedback" class="database-notice" role="status" aria-live="polite" hidden></div>
       <div id="ai-clients" class="ai-clients" aria-label="支持的 AI 工具"><div class="empty">正在读取安装配置…</div></div>
       <p class="ai-help">一键安装会合并用户级配置；修改已有文件前自动备份。已存在的不同配置会保留并提示检查。“已配置”表示配置文件就绪。连接测试验证所选环境到 Apix 的 MCP 握手和工具列表；应用内启用状态请在 AI 工具中确认。测试结果保留 5 分钟，可随时重新测试。TRAE 安装链接会打开浏览器所在系统的应用，不受上方安装环境影响。Claude 桌面聊天的连接器请在其应用中另行设置。</p>
     </section>
-    <footer class="page-footer"><span>Apix <span class="footer-divider">/</span> Runtime Monitor</span><span>服务启停 · 接口记录 · 数据库连接 · 测试流程 · 实时日志</span></footer>
+    <footer class="page-footer"><span>Apix <span class="footer-divider">/</span> Runtime Monitor</span><span>服务启停 · 接口记录 · 数据库连接 · 测试 · 实时日志</span></footer>
   </main>
   </div>
   <dialog id="service-editor" class="database-dialog service-editor" aria-labelledby="service-editor-title">
@@ -130,6 +142,14 @@
       <div class="database-dialog-actions"><button id="service-editor-cancel" class="button" type="button">取消</button><button id="service-save" class="button" type="submit">仅保存</button><button id="service-save-start" class="button primary" type="submit">保存并启动</button></div>
     </form>
   </dialog>
+  <dialog id="service-delete" class="database-dialog" aria-labelledby="service-delete-title" aria-describedby="service-delete-description">
+    <div class="detail-heading"><h2 id="service-delete-title">删除服务</h2></div>
+    <div class="database-form-body">
+      <p id="service-delete-description">确定删除“<strong id="service-delete-name"></strong>”的服务配置？历史日志会保留；复用的外部服务会继续运行。引用此服务的流程需重新配置服务。</p>
+      <div id="service-delete-error" class="detail-alert error" role="alert" hidden></div>
+    </div>
+    <div class="database-dialog-actions"><button id="service-delete-cancel" class="button" type="button" autofocus>取消</button><button id="service-delete-confirm" class="button danger" type="button">删除服务</button></div>
+  </dialog>
   <dialog id="request-detail" class="request-detail" aria-labelledby="detail-title">
     <div class="detail-heading"><div><div class="eyebrow">REQUEST INSPECTOR</div><h2 id="detail-title">接口执行详情</h2></div><div class="detail-tools"><button id="detail-refresh" class="button small" type="button">刷新详情</button><button id="detail-close" class="button small" type="button" aria-label="关闭请求详情" autofocus>关闭 ×</button></div></div>
     <div id="detail-content" class="detail-content" aria-live="polite"></div>
@@ -143,6 +163,10 @@
   <dialog id="sql-result" class="database-dialog sql-result-dialog" aria-labelledby="sql-result-title">
     <div class="detail-heading"><div><div class="eyebrow">SQL INSPECTOR</div><h2 id="sql-result-title">执行详情</h2></div><button id="sql-result-close" class="button small" type="button" aria-label="关闭执行详情" autofocus>关闭 ×</button></div>
     <div class="detail-content"><p id="sql-result-context" class="detail-note"></p><h3 class="sql-detail-label">SQL 语句</h3><pre id="sql-result-statement" class="detail-code"></pre><div id="sql-result-parameters"><h3 class="sql-detail-label">绑定参数</h3><pre id="sql-result-params" class="detail-code"></pre></div><div id="sql-result-content" aria-live="polite"></div></div>
+  </dialog>
+  <dialog id="sql-cell-detail" class="database-dialog sql-cell-dialog" aria-labelledby="sql-cell-title" aria-describedby="sql-cell-context">
+    <div class="detail-heading"><h2 id="sql-cell-title">字段详情</h2><button id="sql-cell-close" class="button small" type="button" aria-label="关闭字段详情" autofocus>关闭 ×</button></div>
+    <div class="detail-content"><p id="sql-cell-context" class="detail-note"></p><pre id="sql-cell-value" class="detail-code" tabindex="0" aria-label="字段完整内容"></pre></div>
   </dialog>
   <dialog id="database-editor" class="database-dialog" aria-labelledby="database-editor-title">
     <form id="database-form">

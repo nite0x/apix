@@ -60,16 +60,25 @@ func (s *HTTPService) RunTest(ctx context.Context, in RunTestInput, runner func(
 			return nil, invalidTest(err.Error())
 		}
 	}
-	r := TestCaseRun{ID: uuid.NewString(), BatchID: batch.ID, Name: item.Name, CaseVersion: item.EditVersion, RequestSnapshot: redactRequest(item.Request), ExpectedStatus: item.ExpectedStatus, AssertionDefinitions: item.Assertions, Assertions: []AssertionResult{}, Status: "running", StartedAt: time.Now().UTC()}
+	r := TestCaseRun{Type: item.Type, ID: uuid.NewString(), BatchID: batch.ID, Name: item.Name, CaseVersion: item.EditVersion, RequestSnapshot: redactRequest(item.Request), ExpectedStatus: item.ExpectedStatus, AssertionDefinitions: item.Assertions, Assertions: []AssertionResult{}, Status: "running", StartedAt: time.Now().UTC()}
 	r.AssertionDefinitions = append([]FlowAssertion{}, item.Assertions...)
 	for i, a := range r.AssertionDefinitions {
 		r.AssertionDefinitions[i].Expected = redactTestAssertionValue(a.Source, a.Path, a.Expected)
 	}
+	if item.Type == "mcp" {
+		r.MCPRequestSnapshot = redactedMCPRequest(item.MCPRequest, nil)
+		r.ExpectedIsError = item.ExpectedIsError
+		r.ValidateOutputSchema = item.ValidateOutputSchema
+	}
+	if item.Type == "command" {
+		r.CommandRequestSnapshot = redactedCommandRequest(item.CommandRequest, commandSecrets(*item.CommandRequest, in.Variables))
+		r.ExpectedExitCode = item.ExpectedExitCode
+	}
 	if in.CaseID != "" {
 		r.CaseID = &item.ID
 	}
-	result, err := s.db.Exec(`INSERT INTO test_case_runs(id,batch_id,case_id,case_version,name,request_snapshot,expected_status,assertion_definitions,assertions,status,started_at)
-	 SELECT ?,?,?,?,?,?,?,?,'[]','running',? FROM test_batches WHERE id=? AND status='running'`, r.ID, r.BatchID, r.CaseID, r.CaseVersion, r.Name, marshalJSON(r.RequestSnapshot), r.ExpectedStatus, marshalJSON(r.AssertionDefinitions), r.StartedAt, r.BatchID)
+	result, err := s.db.Exec(`INSERT INTO test_case_runs(id,batch_id,case_id,case_version,name,request_snapshot,expected_status,assertion_definitions,assertions,status,started_at,type,mcp_data,command_data)
+ SELECT ?,?,?,?,?,?,?,?,'[]','running',?,?,?,? FROM test_batches WHERE id=? AND status='running'`, r.ID, r.BatchID, r.CaseID, r.CaseVersion, r.Name, marshalJSON(r.RequestSnapshot), r.ExpectedStatus, marshalJSON(r.AssertionDefinitions), r.StartedAt, r.Type, marshalJSON(r.MCPRunData), marshalJSON(r.CommandRunData), r.BatchID)
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +90,12 @@ func (s *HTTPService) RunTest(ctx context.Context, in RunTestInput, runner func(
 		return nil, fmt.Errorf("%w: batch is closed", errConflict)
 	}
 	s.flow.emit("test_case.started", batch.ID, r.ID, map[string]any{"name": r.Name, "status": "running"})
+	if item.Type == "command" {
+		return s.runCommandTest(ctx, item, &r, in.Variables)
+	}
+	if item.Type == "mcp" {
+		return s.runMCPTest(ctx, item, &r, in.Variables)
+	}
 	input := map[string]any{"method": item.Request.Method, "url": item.Request.URL, "body": item.Request.Body, "test_request": item.Request, "test_variables": in.Variables, "session_id": batch.ID, "step_id": r.ID, "test_run_id": r.ID, "project_id": batch.ProjectID}
 	input["trigger_type"] = "test"
 	if runner == nil {

@@ -36,7 +36,13 @@ test('manual SQL executes typed parameters once, renders safe tables, reuses his
   const module = await import('./web/databases.js?manual-tools');
   const submit = () => $('sql-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   try {
+    assert.equal($('sql-panel').hidden, false);
+    assert.equal($('connections-panel').hidden, true); assert.equal($('sql-history-panel').hidden, true);
+    assert.equal($('sql-title').closest('[role="tabpanel"]').id, 'sql-history-panel');
+    assert.equal($('sql-live-result').closest('[role="tabpanel"]').id, 'sql-panel');
     assert.equal($('sql-execute').disabled, true);
+    assert.equal($('sql-live-result').hidden, false);
+    assert.match($('sql-live-result-content').textContent, /执行 SQL 后/);
     await module.refreshDatabases(); await module.refreshSQLHistory();
     $('sql-run-connection').value = 'db-1'; $('sql-run-connection').dispatchEvent(new window.Event('change'));
     assert.match($('sql-driver-hint').textContent, /\$1/);
@@ -45,19 +51,42 @@ test('manual SQL executes typed parameters once, renders safe tables, reuses his
     $('sql-params-input').value = '["测试",123,null,false]';
     submit(); submit(); await tick();
     assert.equal(writes.length, 1); assert.equal($('sql-fields').disabled, true);
+    assert.equal($('sql-live-result-content').getAttribute('aria-busy'), 'true');
+    assert.match($('sql-live-result-content').textContent, /正在执行/);
     assert.deepEqual(writes[0].params, ['测试', 123, null, false]); assert.equal(writes[0].timeout_ms, 30000);
+    $('connections-tab').click();
+    assert.equal(document.querySelector('.database-execute').disabled, true);
+    $('sql-history-tab').click();
+    assert.equal($('sql-fields').disabled, true); assert.equal(writes.length, 1);
     release(); await tick();
+    assert.equal($('sql-history-panel').hidden, false); // Finishing SQL must not move the active tab.
+    $('sql-tab').click();
+    assert.equal($('sql-statement-input').value, 'SELECT $1 AS value');
+    assert.equal($('sql-params-input').value, '["测试",123,null,false]');
     assert.equal($('sql-live-result').hidden, false); assert.equal($('sql-live-result').querySelector('img'), null);
+    assert.equal($('sql-live-result-content').getAttribute('aria-busy'), 'false');
+    assert.equal($('sql-live-result-title').textContent, '本次执行结果');
     assert.deepEqual([...$('sql-live-result').querySelectorAll('td')].map(cell => cell.textContent), ['<img src=x onerror=alert(1)>', 'NULL', '0', 'false']);
-    await module.refreshDatabases(); await module.refreshSQLHistory();
+    $('sql-live-result').querySelector('.sql-cell-preview').click();
+    assert.equal($('sql-cell-detail').open, true);
+    assert.equal($('sql-cell-value').textContent, '<img src=x onerror=alert(1)>');
+    assert.equal($('sql-cell-detail').querySelector('img'), null);
+    $('sql-cell-close').click();
+    const resultNode = $('sql-live-result-content').firstElementChild;
+    $('sql-history-tab').click(); $('sql-search').value = 'SELECT'; $('sql-search').dispatchEvent(new window.Event('input'));
+    $('connections-tab').click(); await module.refreshDatabases(); await module.refreshSQLHistory();
+    document.querySelector('.database-execute').click();
+    assert.equal($('sql-panel').hidden, false); assert.equal($('sql-live-result-content').firstElementChild, resultNode);
+    assert.equal($('sql-search').value, 'SELECT'); assert.equal(writes.length, 1);
     assert.equal($('sql-statement-input').value, 'SELECT $1 AS value'); assert.equal($('sql-run-connection').value, 'db-1');
-    document.querySelector('.sql-fill-button').click(); assert.equal($('sql-params-input').value, '[\n  "history"\n]');
+    $('sql-history-tab').click(); document.querySelector('.sql-fill-button').click(); assert.equal($('sql-panel').hidden, false); assert.equal(writes.length, 1); assert.equal($('sql-params-input').value, '[\n  "history"\n]');
     defer = false; $('sql-mode').value = 'exec'; $('sql-mode').dispatchEvent(new window.Event('change'));
     assert.equal($('sql-max-rows').disabled, true);
     submit(); await tick(); assert.equal(writes.at(-1).mode, 'exec'); assert.match($('sql-live-result').textContent, /影响 2 行/);
     fail = true; $('sql-statement-input').value = 'bad SQL'; submit(); await tick();
-    assert.match($('sql-run-feedback').textContent, /syntax error/); assert.equal($('sql-statement-input').value, 'bad SQL'); assert.equal($('sql-fields').disabled, false);
+    assert.match($('sql-live-result-content').textContent, /syntax error/); assert.equal($('sql-live-result-content').getAttribute('aria-busy'), 'false'); assert.equal($('sql-live-result-content').querySelector('table'), null); assert.equal($('sql-statement-input').value, 'bad SQL'); assert.equal($('sql-fields').disabled, false);
     $('sql-reset').click(); assert.equal($('sql-statement-input').value, ''); assert.equal($('sql-run-connection').value, 'db-1');
+    assert.equal($('sql-live-result').hidden, false); assert.match($('sql-live-result-content').textContent, /执行 SQL 后/);
   } finally { dom.window.close(); }
 });
 

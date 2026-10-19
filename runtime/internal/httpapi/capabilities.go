@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,7 +20,11 @@ func (s *HTTPService) SetCapabilities(db *database.Service, services *localservi
 	s.flow.services = services
 }
 func (s *HTTPService) SetEventSink(sink func(string, string, string, any)) { s.flow.eventSink = sink }
-func (s *HTTPService) Close(ctx context.Context) error                     { return s.flow.Shutdown(ctx) }
+func (s *HTTPService) Close(ctx context.Context) error {
+	s.commands.Stop()
+	flowErr := s.flow.Shutdown(ctx)
+	return errors.Join(flowErr, s.commands.Wait(ctx))
+}
 
 func (s *HTTPService) ListFlows(project string) ([]FlowSummary, error) {
 	return s.repo.listFlowSummaries(valueOr(project, defaultProjectID), false)

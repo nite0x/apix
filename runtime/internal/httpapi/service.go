@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/apix/apix/runtime/internal/commandrunner"
 	"github.com/apix/apix/runtime/internal/core"
+	"github.com/apix/apix/runtime/internal/mcpclient"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
 type HTTPService struct {
+	commands          *commandrunner.Runner
+	mcpClient         *mcpclient.Service
 	db                *sql.DB
 	repo              *repository
 	execution         *executionService
@@ -18,6 +22,8 @@ type HTTPService struct {
 	testRunner        func(context.Context, map[string]any) (any, error)
 	testBatchFinished func(*TestBatch)
 }
+
+func (s *HTTPService) SetMCPClient(client *mcpclient.Service) { s.mcpClient = client }
 
 func (s *HTTPService) SetTestBatchFinished(finish func(*TestBatch)) { s.testBatchFinished = finish }
 
@@ -30,18 +36,21 @@ func (s *HTTPService) SetTestRunner(runner func(context.Context, map[string]any)
 // The api_runs record remains the durable source of truth; this result gives
 // an AI the same immediate response without requiring a follow-up lookup.
 type SendRequestResult struct {
-	BatchID    string            `json:"batch_id,omitempty"`
-	TestRunID  string            `json:"test_run_id,omitempty"`
-	CaseID     *string           `json:"case_id,omitempty"`
-	TestStatus string            `json:"test_status,omitempty"`
-	TestError  string            `json:"test_error,omitempty"`
-	Assertions []AssertionResult `json:"assertions,omitempty"`
-	RunID      string            `json:"run_id"`
-	Status     *int              `json:"status,omitempty"`
-	Body       any               `json:"body"`
-	Headers    any               `json:"headers,omitempty"`
-	DurationMS int64             `json:"duration_ms"`
-	Truncated  bool              `json:"truncated"`
+	CommandResult any               `json:"command_result,omitempty"`
+	Type          string            `json:"type,omitempty"`
+	MCPResult     any               `json:"mcp_result,omitempty"`
+	BatchID       string            `json:"batch_id,omitempty"`
+	TestRunID     string            `json:"test_run_id,omitempty"`
+	CaseID        *string           `json:"case_id,omitempty"`
+	TestStatus    string            `json:"test_status,omitempty"`
+	TestError     string            `json:"test_error,omitempty"`
+	Assertions    []AssertionResult `json:"assertions,omitempty"`
+	RunID         string            `json:"run_id"`
+	Status        *int              `json:"status,omitempty"`
+	Body          any               `json:"body"`
+	Headers       any               `json:"headers,omitempty"`
+	DurationMS    int64             `json:"duration_ms"`
+	Truncated     bool              `json:"truncated"`
 }
 
 func (r SendRequestResult) RunReference() string { return r.RunID }
@@ -72,7 +81,7 @@ var sendRequestOutputSchema = json.RawMessage(`{
 }`)
 
 func New() *HTTPService {
-	return &HTTPService{}
+	return &HTTPService{commands: commandrunner.New()}
 }
 
 func (s *HTTPService) initRepositories() {

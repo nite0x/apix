@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const httpSchemaVersion = 5
+const httpSchemaVersion = 7
 
 // MigrateSchema installs the current HTTP domain schema.
 //
@@ -30,6 +30,9 @@ func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 		return err
 	}
 	if err == nil && version == httpSchemaVersion {
+		if err := migrateIndependentTests(db); err != nil {
+			return err
+		}
 		s.initRepositories()
 		return nil
 	}
@@ -37,6 +40,9 @@ func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 	// Existing v2 installs are upgraded in place without dropping data.
 	if err == nil && version == 2 {
 		if err := migrateV2toV3(db); err != nil {
+			return err
+		}
+		if err := migrateIndependentTests(db); err != nil {
 			return err
 		}
 		s.initRepositories()
@@ -49,11 +55,24 @@ func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 		if err := migrateV4toV5(db); err != nil {
 			return err
 		}
+		if err := migrateIndependentTests(db); err != nil {
+			return err
+		}
 		s.initRepositories()
 		return nil
 	}
 	if err == nil && version == 4 {
 		if err := migrateV4toV5(db); err != nil {
+			return err
+		}
+		if err := migrateIndependentTests(db); err != nil {
+			return err
+		}
+		s.initRepositories()
+		return nil
+	}
+	if err == nil && (version == 5 || version == 6) {
+		if err := migrateIndependentTests(db); err != nil {
 			return err
 		}
 		s.initRepositories()
@@ -65,6 +84,9 @@ func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 
 	// Fresh install or legacy (v1) schema: build the full model from scratch.
 	if err := rebuildHTTPSchema(db); err != nil {
+		return err
+	}
+	if err := migrateIndependentTests(db); err != nil {
 		return err
 	}
 	s.initRepositories()

@@ -36,6 +36,10 @@ func (s *Service) Routes(r gin.IRouter) {
 		v, e := s.PutDefinition(c.Request.Context(), d)
 		respond(c, v, e)
 	})
+	g.DELETE("/:id", func(c *gin.Context) {
+		err := s.DeleteDefinition(c.Request.Context(), c.Param("id"))
+		respond(c, gin.H{"deleted": err == nil}, err)
+	})
 	for _, action := range []string{"start", "stop"} {
 		action := action
 		g.POST("/:id/"+action, func(c *gin.Context) {

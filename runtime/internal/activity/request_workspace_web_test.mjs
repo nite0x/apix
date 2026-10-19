@@ -84,7 +84,10 @@ test('request workspace manages collections, imports, drafts, conflicts and hist
       assert.equal(groups[0].name, 'Renamed'); assert.equal(groups[0].description, 'keep-description');
     });
     await t.test('import is reviewable and saving preserves duplicate, disabled and authentication fields', async () => {
+      $('request-manage-tab').click();
+      assert.equal($('manual-import-panel').closest('[role=tabpanel]').id, 'request-manage-panel');
       input('manual-import-text', 'curl http://localhost/api'); $('manual-import-submit').click(); await tick();
+      assert.equal($('request-execute-panel').hidden, false);
       assert.equal(saved.size, 0); assert.equal(writes.some(item => item.path === '/api/runs'), false);
       assert.equal($('manual-body').value, '<text>'); assert.equal($('manual-body-type').value, 'raw');
       input('manual-name', 'Imported API'); $('manual-collection').value = groups[0].id;
@@ -96,18 +99,26 @@ test('request workspace manages collections, imports, drafts, conflicts and hist
       assert.match($('request-library').textContent, /Imported API/);
     });
     await t.test('conflicts retain local edits and can be recovered by saving a new interface', async () => {
-      const id = [...saved.keys()][0]; await manual.loadSavedRequest(id);
+      const id = [...saved.keys()][0]; $('request-manage-tab').click();
+      document.querySelector('[aria-label="编辑接口 Imported API"]').click(); await tick();
+      assert.equal($('request-execute-panel').hidden, false);
       input('manual-url', 'http://localhost/edited'); conflict = true; $('manual-save').click(); await tick();
       assert.equal($('manual-url').value, 'http://localhost/edited'); assert.match($('manual-feedback').textContent, /已保留/);
       assert.equal($('manual-reload').hidden, false);
-      confirm = false; await manual.loadSavedRequest(id); assert.equal($('manual-url').value, 'http://localhost/edited');
-      confirm = true; conflict = false; $('manual-save-new').click(); await tick();
+      $('request-manage-tab').click(); confirm = false; await manual.loadSavedRequest(id); assert.equal($('request-manage-panel').hidden, false); assert.equal($('manual-url').value, 'http://localhost/edited');
+      $('request-execute-tab').click(); confirm = true; conflict = false; $('manual-save-new').click(); await tick();
       assert.equal($('manual-collection').disabled, false); $('manual-collection').value = groups[0].id;
       input('manual-name', 'My recovery'); $('manual-save').click(); await tick();
       assert.equal(saved.size, 2); assert.equal(saved.get(id).request.url, request.url);
     });
     await t.test('history supports filters, pin errors, confirmation, and deletion without deleting saved APIs', async () => {
       await history.refreshRequestHistory();
+      $('request-history-tab').click();
+      const executionsBefore = writes.filter(item => item.path === '/api/runs').length;
+      document.querySelector('[aria-label="填入请求 run-1"]').click(); await tick();
+      assert.equal($('request-execute-panel').hidden, false); assert.equal($('manual-url').value, request.url);
+      assert.equal(writes.filter(item => item.path === '/api/runs').length, executionsBefore);
+      $('request-history-tab').click();
       failedPin = true; document.querySelector('[aria-label="固定请求 run-1"]').click(); await tick();
       assert.equal(runs[0].is_pinned, false); assert.match($('history-feedback').textContent, /pin rejected/);
       failedPin = false; document.querySelector('[aria-label="固定请求 run-1"]').click(); await tick();
@@ -117,6 +128,12 @@ test('request workspace manages collections, imports, drafts, conflicts and hist
       confirm = false; document.querySelector('[aria-label="删除请求 run-1"]').click(); await tick(); assert.equal(runs.length, 1);
       confirm = true; document.querySelector('[aria-label="删除请求 run-1"]').click(); await tick();
       assert.equal(runs.length, 0); assert.equal(saved.size, 2);
+    });
+    await t.test('new interface opens execution after confirming replacement of a dirty draft', async () => {
+      $('request-manage-tab').click(); confirm = false; $('library-new').click(); await tick();
+      assert.equal($('request-manage-panel').hidden, false); assert.equal($('manual-url').value, request.url);
+      confirm = true; $('library-new').click(); await tick();
+      assert.equal($('request-execute-panel').hidden, false); assert.equal($('manual-url').value, '');
     });
     await t.test('archiving hides saved interfaces and collections without altering execution data', async () => {
       input('library-search', 'Imported API'); assert.match($('request-library').textContent, /Imported API/); assert.doesNotMatch($('request-library').textContent, /My recovery/);

@@ -41,7 +41,7 @@ function render() {
       })));
     row.append(info, buttons); list.append(row);
   }
-  if (!filtered.length) list.append(element('p', requests.length ? '没有匹配的接口。' : '还没有保存接口。在上方调试或导入后，选择分组并保存。', 'empty'));
+  if (!filtered.length) list.append(element('p', requests.length ? '没有匹配的接口。' : '还没有保存接口。点击“新增接口”或导入请求，在执行页选择分组并保存。', 'empty'));
   $('request-library').replaceChildren(list);
 }
 async function mutate(operation) {

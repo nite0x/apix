@@ -112,6 +112,37 @@ func (s *Service) PutDefinition(ctx context.Context, d Definition) (*Definition,
 	_, err = s.db.ExecContext(ctx, `INSERT INTO local_service_definitions(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data`, d.ID, string(data))
 	return &d, err
 }
+
+// DeleteDefinition removes configuration while preserving historical logs.
+func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("service manager is closed")
+	}
+	if p := s.running[id]; p != nil && (p.instance.Status == "starting" || p.instance.Status == "running" || p.instance.Status == "stopping" || p.instance.Status == "cleanup_failed") {
+		return errors.New("stop service before deleting its definition")
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM local_service_definitions WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return sql.ErrNoRows
+	}
+	delete(s.running, id)
+	for owner, services := range s.borrowed {
+		delete(services, id)
+		if len(services) == 0 {
+			delete(s.borrowed, owner)
+		}
+	}
+	return nil
+}
 func (s *Service) ListDefinitions(ctx context.Context) ([]Definition, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT data FROM local_service_definitions ORDER BY id`)
 	if err != nil {
@@ -153,14 +184,16 @@ func (s *Service) Start(ctx context.Context, id, owner string) (*Instance, error
 		return nil, err
 	}
 	owner = ownerName(owner)
-	d, err := s.definition(ctx, id)
-	if err != nil {
-		return nil, err
-	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return nil, errors.New("service manager is closed")
+	}
+	// Read under the lifecycle lock so a deleted definition cannot launch a process.
+	d, err := s.definition(ctx, id)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
 	}
 	if p := s.running[id]; p != nil && (p.instance.Status == "starting" || p.instance.Status == "running" || p.instance.Status == "stopping" || p.instance.Status == "cleanup_failed") {
 		if p.instance.Status == "starting" {

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apix/apix/runtime/internal/commandrunner"
+	"github.com/apix/apix/runtime/internal/mcpclient"
 	"github.com/google/uuid"
 )
 
@@ -64,21 +66,61 @@ func validateTestCase(item *TestCase) error {
 	if item.Name == "" || len(item.Name) > 512 {
 		return invalidTest("case name is required (up to 512 bytes)")
 	}
-	normalizeRequest(&item.Request)
-	if item.Request.URL == "" {
-		return invalidTest("request.url is required")
+	if item.Type == "" {
+		item.Type = "http"
 	}
-	if !map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "HEAD": true, "OPTIONS": true}[item.Request.Method] {
-		return invalidTest("unsupported HTTP method")
+	if item.Type != "http" && item.Type != "mcp" && item.Type != "command" {
+		return invalidTest("type must be http, mcp or command")
 	}
-	if item.ExpectedStatus != nil && (*item.ExpectedStatus < 100 || *item.ExpectedStatus > 599) {
-		return invalidTest("expected_status must be between 100 and 599")
+	if item.Type == "command" {
+		if err := commandrunner.Validate(item.CommandRequest); err != nil {
+			return invalidTest(err.Error())
+		}
+		if item.ExpectedExitCode != nil && (*item.ExpectedExitCode < 0 || *item.ExpectedExitCode > 2147483647) {
+			return invalidTest("expected_exit_code must be between 0 and 2147483647")
+		}
+		if item.APIRequestID != nil || item.ExpectedStatus != nil || item.MCPRequest != nil || item.ExpectedIsError != nil || item.ValidateOutputSchema {
+			return invalidTest("command cases cannot contain HTTP or MCP settings")
+		}
+	} else if item.CommandRequest != nil || item.ExpectedExitCode != nil {
+		return invalidTest("command settings require type command")
+	}
+	if item.Type == "mcp" {
+		if err := mcpclient.ValidateRequest(item.MCPRequest); err != nil {
+			return invalidTest(err.Error())
+		}
+		if item.APIRequestID != nil || item.ExpectedStatus != nil {
+			return invalidTest("MCP cases cannot have HTTP request links or expected status")
+		}
+	} else if item.Type == "http" {
+		if item.MCPRequest != nil || item.ExpectedIsError != nil || item.ValidateOutputSchema {
+			return invalidTest("mcp_request requires type mcp")
+		}
+		normalizeRequest(&item.Request)
+		if item.Request.URL == "" {
+			return invalidTest("request.url is required")
+		}
+		if !map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "HEAD": true, "OPTIONS": true}[item.Request.Method] {
+			return invalidTest("unsupported HTTP method")
+		}
+		if item.ExpectedStatus != nil && (*item.ExpectedStatus < 100 || *item.ExpectedStatus > 599) {
+			return invalidTest("expected_status must be between 100 and 599")
+		}
 	}
 	if len(item.Assertions) > 100 {
 		return invalidTest("at most 100 assertions are allowed")
 	}
 	for _, a := range item.Assertions {
-		if a.Source != "status" && a.Source != "header" && a.Source != "body" {
+		if item.Type == "command" && a.Source != "exit_code" && a.Source != "stdout" && a.Source != "stderr" {
+			return invalidTest("command assertion source must be exit_code, stdout or stderr")
+		}
+		if item.Type == "command" && a.Source == "exit_code" && a.Path != "" {
+			return invalidTest("exit_code assertions do not accept a path")
+		}
+		if item.Type == "mcp" && a.Source != "structuredContent" && a.Source != "text" && a.Source != "isError" && a.Source != "result" {
+			return invalidTest("MCP assertion source must be structuredContent, text, isError or result")
+		}
+		if item.Type == "http" && a.Source != "status" && a.Source != "header" && a.Source != "body" {
 			return invalidTest("assertion source must be status, header or body")
 		}
 		if a.Source == "header" && strings.TrimSpace(a.Path) == "" {
@@ -106,11 +148,27 @@ func (s *HTTPService) SaveTestCase(item TestCase) (*TestCase, error) {
 			return nil, invalidTest(err.Error())
 		}
 	}
+	if item.Type == "mcp" {
+		if s.mcpClient == nil {
+			return nil, invalidTest("MCP testing is unavailable")
+		}
+		if _, err := s.mcpClient.Get(item.MCPRequest.ServerID); err != nil {
+			return nil, invalidTest("MCP server not found")
+		}
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 	now := time.Now().UTC()
 	if item.ID == "" {
 		item.ID, item.EditVersion, item.CreatedAt, item.UpdatedAt = uuid.NewString(), 1, now, now
-		_, err := s.db.Exec(`INSERT INTO test_cases(id,project_id,api_request_id,name,description,request_data,expected_status,assertions,edit_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, item.ID, item.ProjectID, item.APIRequestID, item.Name, item.Description, marshalJSON(item.Request), item.ExpectedStatus, marshalJSON(item.Assertions), 1, now, now)
+		_, err := tx.Exec(`INSERT INTO test_cases(id,project_id,api_request_id,name,description,request_data,expected_status,assertions,edit_version,created_at,updated_at,type,mcp_data,command_data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, item.ID, item.ProjectID, item.APIRequestID, item.Name, item.Description, marshalJSON(item.Request), item.ExpectedStatus, marshalJSON(item.Assertions), 1, now, now, item.Type, marshalJSON(item.MCPTestData), marshalJSON(item.CommandTestData))
 		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
 		return &item, nil
@@ -118,7 +176,7 @@ func (s *HTTPService) SaveTestCase(item TestCase) (*TestCase, error) {
 	if item.EditVersion < 1 {
 		return nil, invalidTest("edit_version is required when updating a case")
 	}
-	result, err := s.db.Exec(`UPDATE test_cases SET api_request_id=?,name=?,description=?,request_data=?,expected_status=?,assertions=?,edit_version=edit_version+1,updated_at=? WHERE id=? AND project_id=? AND edit_version=? AND archived=0`, item.APIRequestID, item.Name, item.Description, marshalJSON(item.Request), item.ExpectedStatus, marshalJSON(item.Assertions), now, item.ID, item.ProjectID, item.EditVersion)
+	result, err := tx.Exec(`UPDATE test_cases SET api_request_id=?,name=?,description=?,request_data=?,expected_status=?,assertions=?,edit_version=edit_version+1,updated_at=?,type=?,mcp_data=?,command_data=? WHERE id=? AND project_id=? AND edit_version=? AND archived=0`, item.APIRequestID, item.Name, item.Description, marshalJSON(item.Request), item.ExpectedStatus, marshalJSON(item.Assertions), now, item.Type, marshalJSON(item.MCPTestData), marshalJSON(item.CommandTestData), item.ID, item.ProjectID, item.EditVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -127,23 +185,33 @@ func (s *HTTPService) SaveTestCase(item TestCase) (*TestCase, error) {
 		return nil, err
 	}
 	if changed == 0 {
+		tx.Rollback()
 		if _, err := s.GetTestCase(item.ID); err != nil {
 			return nil, err
 		}
 		return nil, fmt.Errorf("%w: test case changed; reload before saving", errConflict)
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	return s.GetTestCase(item.ID)
 }
 
-const testCaseColumns = `id,project_id,api_request_id,name,description,request_data,expected_status,assertions,edit_version,created_at,updated_at`
+const testCaseColumns = `id,project_id,api_request_id,name,description,request_data,expected_status,assertions,edit_version,created_at,updated_at,type,mcp_data,command_data`
 
 func scanTestCase(row interface{ Scan(...any) error }) (*TestCase, error) {
 	var item TestCase
-	var request, assertions string
-	if err := row.Scan(&item.ID, &item.ProjectID, &item.APIRequestID, &item.Name, &item.Description, &request, &item.ExpectedStatus, &assertions, &item.EditVersion, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	var request, assertions, mcpData, commandData string
+	if err := row.Scan(&item.ID, &item.ProjectID, &item.APIRequestID, &item.Name, &item.Description, &request, &item.ExpectedStatus, &assertions, &item.EditVersion, &item.CreatedAt, &item.UpdatedAt, &item.Type, &mcpData, &commandData); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errNotFound
 		}
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(commandData), &item.CommandTestData); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(mcpData), &item.MCPTestData); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(request), &item.Request); err != nil {
@@ -226,7 +294,7 @@ func (s *HTTPService) GetTestBatch(id string) (*TestBatch, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`SELECT id,batch_id,case_id,case_version,name,request_snapshot,expected_status,assertion_definitions,assertions,api_run_id,status,error_message,started_at,finished_at FROM test_case_runs WHERE batch_id=? ORDER BY started_at,id`, id)
+	rows, err := s.db.Query(`SELECT id,batch_id,case_id,case_version,name,request_snapshot,expected_status,assertion_definitions,assertions,api_run_id,status,error_message,started_at,finished_at,type,mcp_data,command_data FROM test_case_runs WHERE batch_id=? ORDER BY started_at,id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -234,8 +302,14 @@ func (s *HTTPService) GetTestBatch(id string) (*TestBatch, error) {
 	b.Runs = []TestCaseRun{}
 	for rows.Next() {
 		var r TestCaseRun
-		var request, defs, results string
-		if err := rows.Scan(&r.ID, &r.BatchID, &r.CaseID, &r.CaseVersion, &r.Name, &request, &r.ExpectedStatus, &defs, &results, &r.APIRunID, &r.Status, &r.ErrorMessage, &r.StartedAt, &r.FinishedAt); err != nil {
+		var request, defs, results, mcpData, commandData string
+		if err := rows.Scan(&r.ID, &r.BatchID, &r.CaseID, &r.CaseVersion, &r.Name, &request, &r.ExpectedStatus, &defs, &results, &r.APIRunID, &r.Status, &r.ErrorMessage, &r.StartedAt, &r.FinishedAt, &r.Type, &mcpData, &commandData); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(commandData), &r.CommandRunData); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(mcpData), &r.MCPRunData); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(request), &r.RequestSnapshot); err != nil {
@@ -277,4 +351,46 @@ func (s *HTTPService) FinishTestBatch(id string) (*TestBatch, error) {
 		s.flow.emit("test_batch.finished", b.ID, "", map[string]any{"name": b.Name, "status": b.Status})
 	}
 	return b, nil
+}
+
+// migrateIndependentTests extends only independent tests; Flow schemas are unchanged.
+func migrateIndependentTests(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"test_cases", "test_case_runs"} {
+		rows, e := tx.Query("PRAGMA table_info(" + table + ")")
+		if e != nil {
+			return e
+		}
+		columns := map[string]bool{}
+		for rows.Next() {
+			var cid, notnull, pk int
+			var name, kind string
+			var def any
+			if e = rows.Scan(&cid, &name, &kind, &notnull, &def, &pk); e != nil {
+				rows.Close()
+				return e
+			}
+			columns[name] = true
+		}
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			return e
+		}
+		for _, column := range []struct{ name, definition string }{{"type", "TEXT NOT NULL DEFAULT 'http'"}, {"mcp_data", "TEXT NOT NULL DEFAULT '{}'"}, {"command_data", "TEXT NOT NULL DEFAULT '{}'"}} {
+			if !columns[column.name] {
+				if _, err = tx.Exec("ALTER TABLE " + table + " ADD COLUMN " + column.name + " " + column.definition); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if _, err = tx.Exec("UPDATE schema_metadata SET version=7,updated_at=datetime('now') WHERE name='http_domain'"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

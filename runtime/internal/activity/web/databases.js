@@ -1,3 +1,5 @@
+import { setupWorkspaceTabs } from './workspace-tabs.js';
+
 const $ = id => document.getElementById(id);
 const pending = new Set();
 const feedback = new Map();
@@ -19,24 +21,7 @@ let editorType = 'mysql';
 let sqlRunning = false;
 const driverLabels = { mysql: 'MySQL', postgresql: 'PostgreSQL', hologres: 'Hologres' };
 const driverPorts = { mysql: 3306, postgresql: 5432, hologres: 80 };
-const databaseTabs = [$('sql-tab'), $('connections-tab')];
-function selectDatabaseTab(tab) {
-  for (const control of databaseTabs) {
-    const selected = control === tab;
-    control.setAttribute('aria-selected', String(selected));
-    control.tabIndex = selected ? 0 : -1;
-    $(control.getAttribute('aria-controls')).hidden = !selected;
-  }
-}
-for (const tab of databaseTabs) {
-  tab.addEventListener('click', () => selectDatabaseTab(tab));
-  tab.addEventListener('keydown', event => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    const target = event.key === 'Home' ? databaseTabs[0] : event.key === 'End' ? databaseTabs.at(-1) : databaseTabs[(databaseTabs.indexOf(tab) + 1) % databaseTabs.length];
-    selectDatabaseTab(target); target.focus();
-  });
-}
+const selectDatabaseTab = setupWorkspaceTabs('database-tabs');
 
 function node(tag, className, text) {
   const element = document.createElement(tag);
@@ -127,7 +112,14 @@ function render() {
     });
     const settings = node('div', 'database-settings-actions'); settings.append(edit, remove);
     detailPanel.append(list, settings);
-    actions.append(test, details); row.append(icon, overview, actions); card.append(row, detailPanel);
+    const execute = node('button', 'button small database-execute', '执行 SQL'); execute.type = 'button';
+    execute.disabled = sqlRunning; execute.setAttribute('aria-label', `使用 ${connection.name} 执行 SQL`);
+    execute.addEventListener('click', () => {
+      if (sqlRunning) return;
+      $('sql-run-connection').value = connection.id; updateSQLHint();
+      selectDatabaseTab($('sql-tab')); $('sql-statement-input').focus();
+    });
+    actions.append(execute, test, details); row.append(icon, overview, actions); card.append(row, detailPanel);
     const result = feedback.get(connection.id);
     if (result) {
       const text = node('div', `service-feedback${result.error ? ' error' : ''}`, result.message);
@@ -211,11 +203,25 @@ function renderSQLResult(result, content = $('sql-result-content')) {
   for (const column of result.columns) { const th = node('th', '', column); th.scope = 'col'; headings.append(th); }
   head.append(headings);
   const body = node('tbody');
-  for (const row of result.rows) {
+  for (const [rowIndex, row] of result.rows.entries()) {
     const tr = node('tr');
     for (const column of result.columns) {
       const value = row[column];
-      const cell = node('td', value === null ? 'sql-null' : '', value === null ? 'NULL' : typeof value === 'object' ? JSON.stringify(value) : String(value ?? ''));
+      const text = value === null ? 'NULL' : typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');
+      const cell = node('td', value === null ? 'sql-null' : '');
+      if (value === null || text === '') cell.textContent = text;
+      else {
+        const preview = node('button', 'sql-cell-preview', text);
+        preview.type = 'button'; preview.title = '点击查看完整内容';
+        preview.setAttribute('aria-label', `查看第 ${rowIndex + 1} 行 ${column} 字段的完整内容`);
+        preview.setAttribute('aria-haspopup', 'dialog'); preview.setAttribute('aria-controls', 'sql-cell-detail');
+        preview.addEventListener('click', () => {
+          $('sql-cell-context').textContent = `第 ${rowIndex + 1} 行 · ${column}`;
+          $('sql-cell-value').textContent = text;
+          $('sql-cell-detail').showModal();
+        });
+        cell.append(preview);
+      }
       tr.append(cell);
     }
     body.append(tr);
@@ -254,8 +260,10 @@ async function openSQLResult(item) {
     $('sql-result-content').replaceChildren(alert, retry);
   }
 }
+$('sql-cell-close').addEventListener('click', () => $('sql-cell-detail').close());
+$('sql-cell-detail').addEventListener('close', () => { $('sql-cell-value').textContent = ''; $('sql-cell-context').textContent = ''; });
 $('sql-result-close').addEventListener('click', () => $('sql-result').close());
-$('sql-result').addEventListener('close', () => { resultRevision++; $('sql-result-content').replaceChildren(); });
+$('sql-result').addEventListener('close', () => { if ($('sql-cell-detail').open) $('sql-cell-detail').close(); resultRevision++; $('sql-result-content').replaceChildren(); });
 
 export async function refreshSQLHistory() {
   if (historyLoading) return;
@@ -392,6 +400,11 @@ function updateSQLHint() {
   $('sql-mode-hint').textContent = $('sql-mode').value === 'exec' ? '写入与结构变更会直接提交，执行后显示影响行数。' : '查询结果以表格展示，执行记录自动保存。';
   $('sql-max-rows').disabled = $('sql-mode').value === 'exec';
   $('sql-execute').disabled = !connection || sqlRunning;
+  document.querySelectorAll('.database-execute').forEach(button => { button.disabled = sqlRunning; });
+}
+
+function resetSQLResult() {
+  $('sql-live-result-content').replaceChildren(node('p', 'detail-empty', '执行 SQL 后，查询数据、影响行数或错误信息会显示在这里。'));
 }
 
 function fillSQL(item) {
@@ -402,7 +415,7 @@ function fillSQL(item) {
   $('sql-statement-input').value = item.sql;
   $('sql-params-input').value = item.params?.length ? JSON.stringify(item.params, null, 2) : '';
   $('sql-params-input').closest('details').open = Boolean(item.params?.length);
-  updateSQLHint(); $('sql-live-result').hidden = true;
+  updateSQLHint(); resetSQLResult();
   message('sql-run-feedback', $('sql-run-connection').value ? '已填入历史 SQL，可修改后执行。' : '已填入历史 SQL，原连接已不存在，请重新选择连接。');
   $('sql-statement-input').focus(); $('sql-form').scrollIntoView?.({ block: 'start', behavior: 'smooth' });
 }
@@ -413,7 +426,7 @@ $('sql-reset').addEventListener('click', () => {
   if (sqlRunning) return;
   const connectionID = $('sql-run-connection').value;
   $('sql-form').reset(); $('sql-run-connection').value = connectionID;
-  updateSQLHint(); message('sql-run-feedback', ''); $('sql-live-result').hidden = true; $('sql-statement-input').focus();
+  updateSQLHint(); message('sql-run-feedback', ''); resetSQLResult(); $('sql-statement-input').focus();
 });
 $('sql-form').addEventListener('submit', async event => {
   event.preventDefault(); if (sqlRunning) return;
@@ -426,21 +439,29 @@ $('sql-form').addEventListener('submit', async event => {
   if (!connections.some(item => item.id === connectionID) || !sql) { message('sql-run-feedback', '请选择有效连接并填写 SQL 语句。', true); return; }
   if (!Number.isInteger(timeout) || timeout < 1 || timeout > 300 || !Number.isInteger(maxRows) || maxRows < 1 || maxRows > 10000) { message('sql-run-feedback', '超时需为 1–300 秒，最多返回行数需为 1–10000 的整数。', true); return; }
   const mode = $('sql-mode').value;
-  sqlRunning = true; $('sql-fields').disabled = true; $('sql-reset').disabled = true; $('sql-execute').disabled = true;
-  $('sql-execute').textContent = '执行中…'; $('sql-form').setAttribute('aria-busy', 'true'); $('sql-live-result').hidden = true;
+  sqlRunning = true; updateSQLHint(); $('sql-fields').disabled = true; $('sql-reset').disabled = true; $('sql-execute').disabled = true;
+  $('sql-execute').textContent = '执行中…'; $('sql-form').setAttribute('aria-busy', 'true');
+  const content = $('sql-live-result-content');
+  content.setAttribute('aria-busy', 'true');
+  content.replaceChildren(node('p', 'detail-note', 'SQL 正在执行，请等待结果…'));
   renderHistory(); message('sql-run-feedback', 'SQL 正在执行，请等待结果…');
   try {
     const response = await fetch('/api/database/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connection_id: connectionID, sql, params, mode, timeout_ms: timeout * 1000, max_rows: maxRows }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    const content = $('sql-live-result');
     if (mode === 'query') renderSQLResult(result, content);
     else content.replaceChildren(node('p', 'detail-note', `执行成功 · 影响 ${result.rows_affected} 行 · ${result.duration_ms} ms`));
-    content.hidden = false; message('sql-run-feedback', 'SQL 执行完成，结果与执行记录已保存。');
-  } catch (error) { message('sql-run-feedback', `SQL 执行失败：${errorText(error)}`, true); }
+    message('sql-run-feedback', 'SQL 执行完成，可在下方查看本次结果，或从执行记录回看。');
+  } catch (error) {
+    const alert = node('p', 'detail-alert error', `SQL 执行失败：${errorText(error)}`);
+    alert.setAttribute('role', 'alert'); content.replaceChildren(alert);
+    message('sql-run-feedback', 'SQL 执行失败，请查看下方的错误信息。', true);
+  }
   finally {
     sqlRunning = false; $('sql-fields').disabled = false; $('sql-reset').disabled = false;
     $('sql-execute').textContent = '执行 SQL →'; $('sql-form').setAttribute('aria-busy', 'false'); updateSQLHint();
+    content.setAttribute('aria-busy', 'false');
+    if (!document.querySelector('[data-page="databases"]').hidden && !$('sql-panel').hidden) $('sql-live-result').scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
     await refreshSQLHistory(); renderHistory();
   }
 });

@@ -17,6 +17,7 @@ func writeTestError(c *gin.Context, err error) {
 }
 
 func (s *HTTPService) testRoutes(r gin.IRouter) {
+	s.commandRoutes(r)
 	b := r.Group("/test-batches")
 	b.GET("", func(c *gin.Context) {
 		items, err := s.ListTestBatches(c.Query("project_id"))

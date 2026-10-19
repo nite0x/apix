@@ -1,10 +1,12 @@
 'use strict';
+import { refreshCommands } from './command-tools.js';
+import { refreshMCP } from './mcp-tools.js';
 import { refreshAITools } from './ai-tools.js';
 import { openServiceDetail } from './service-detail.js';
 import { refreshDatabases, refreshSQLHistory, closeDatabaseDialogs } from './databases.js';
-import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flows.js';
+import { leaveFlows } from './flows.js';
 import { activateTesting, deactivateTesting, refreshTesting } from './testing.js';
-import { closeServiceEditor } from './service-editor.js';
+import { closeServiceEditor, openServiceEditor, openServiceDelete } from './service-editor.js';
 import { refreshLibrary } from './request-library.js';
 import { refreshRequestHistory } from './request-history.js';
 (() => {
@@ -46,14 +48,20 @@ import { refreshRequestHistory } from './request-history.js';
   const pages = {
     '/ai-tools': { id: 'ai-tools', title: 'AI 工具', eyebrow: 'CONNECT YOUR AI', description: '一键将 Apix 接入常用 AI 工具，让 AI 直接调试接口、查询数据库和管理服务。' },
     '/': { id: 'home', title: '主页', eyebrow: 'RUNTIME OVERVIEW', description: '本地运行概况，从这里进入服务、接口和日志。' },
-    '/services': { id: 'services', title: '服务', eyebrow: 'LOCAL SERVICES', description: '新增本地服务配置，手动启动或停止服务，查看状态和运行日志。' },
+    '/services': { id: 'services', title: '服务', eyebrow: 'LOCAL SERVICES', description: '新增、编辑或删除本地服务配置，手动启停服务，查看状态和运行日志。' },
     '/requests': { id: 'requests', title: '接口', eyebrow: 'API REQUESTS', description: '调试 HTTP 请求、导入 cURL、管理接口库与执行历史。' },
     '/databases': { id: 'databases', title: '数据库', eyebrow: 'DATABASE CONNECTIONS', description: '手动执行 SQL、查看结果，管理 MySQL、PostgreSQL 和 Hologres 连接。' },
-    '/flows': { id: 'flows', title: '测试流程', eyebrow: 'FLOW STUDIO', description: '让每一步都有依据。编排请求，传递数据，验证你的完整业务流程。' },
-    '/tests': { id: 'tests', title: '接口测试', eyebrow: 'API TESTING', description: '按测试批次追踪每一次验证，用不同入参检查接口，并保存可重复运行的用例。' },
+    '/commands': { id: 'commands', title: '命令行', eyebrow: 'COMMAND TESTING', description: '运行命令和脚本，验证退出码与输出，保存用例并追踪测试记录。' },
+    '/mcp-tools': { id: 'mcp-tools', title: 'MCP 工具', eyebrow: 'MCP TOOL TESTING', description: '连接 MCP 服务器，发现和调试工具，保存用例并验证调用结果。' },
+    '/tests': { id: 'tests', title: '测试', eyebrow: 'TESTING', description: '用例定义怎么测，批次组织本次测试，执行记录展示每次验证的结果。' },
     '/logs': { id: 'logs', title: '日志', eyebrow: 'LIVE LOGS', description: '运行事件与服务输出实时汇总，支持来源筛选和暂停显示。' },
   };
   function showPage(focus = false) {
+    if (location.pathname === '/flows') {
+      const query = new URLSearchParams(location.search);
+      query.set('tab', query.has('run') ? 'records' : 'cases'); query.set('type', 'flow');
+      history.replaceState(null, '', `/tests?${query}`);
+    }
     const page = pages[location.pathname] || pages['/'];
     if ($('request-detail').open) $('request-detail').close();
     if ($('service-detail').open) $('service-detail').close();
@@ -71,12 +79,13 @@ import { refreshRequestHistory } from './request-history.js';
     if (page.id === 'ai-tools') refreshAITools();
     if (page.id === 'logs') renderLogs();
     if (page.id === 'databases') { refreshDatabases(); refreshSQLHistory(); }
-    if (page.id === 'flows') activateFlows(); else deactivateFlows();
+    if (page.id === 'mcp-tools') refreshMCP();
+    if (page.id === 'commands') refreshCommands();
     if (page.id === 'tests') activateTesting(); else deactivateTesting();
     if (focus) { $('page-title').focus({ preventScroll: true }); window.scrollTo(0, 0); }
   }
   async function navigate(path) {
-    if (location.pathname === '/flows' && !(await leaveFlows())) return;
+    if (['/tests', '/flows'].includes(location.pathname) && !(await leaveFlows())) return;
     if (location.pathname + location.search !== path) history.pushState(null, '', path);
     showPage(true);
     if (narrowScreen.matches) setSidebarCollapsed(true, true);
@@ -112,7 +121,16 @@ import { refreshRequestHistory } from './request-history.js';
       control.setAttribute('aria-label', `${label} ${service.name}`); control.setAttribute('aria-busy', String(!!pending || transitioning));
       control.title = external ? '健康检查已发现正在运行的服务，可直接复用；请在原启动位置停止。' : managedByFlow ? '该服务由测试流程管理，请通过对应流程停止或清理。' : action === 'start' ? '优先复用已有服务，未发现时使用已保存的配置启动' : '停止这个手动启动的服务';
       control.addEventListener('click', () => changeService(service, action));
-      actions.append(details, logs, control); bottom.append(actions); card.append(top, url, bottom);
+      const locked = !!pending || (!external && ['running', 'starting', 'stopping', 'cleanup_failed'].includes(service.status));
+      const edit = node('button', 'button small', '编辑'); edit.type = 'button'; edit.disabled = locked;
+      edit.setAttribute('aria-label', `编辑服务 ${service.name}`); edit.setAttribute('aria-haspopup', 'dialog'); edit.setAttribute('aria-controls', 'service-editor');
+      edit.title = locked ? '请先停止服务并完成清理，再编辑配置' : '编辑服务启动配置';
+      edit.addEventListener('click', () => openServiceEditor(service.id, edit));
+      const remove = node('button', 'button small danger', '删除'); remove.type = 'button'; remove.disabled = locked;
+      remove.setAttribute('aria-label', `删除服务 ${service.name}`); remove.setAttribute('aria-haspopup', 'dialog'); remove.setAttribute('aria-controls', 'service-delete');
+      remove.title = locked ? '请先停止服务并完成清理，再删除配置' : '删除服务配置，保留历史日志';
+      remove.addEventListener('click', () => openServiceDelete(service, remove));
+      actions.append(details, logs, edit, remove, control); bottom.append(actions); card.append(top, url, bottom);
       const feedback = serviceFeedback.get(service.id); if (feedback) { const message = node('div', `service-feedback ${feedback.error ? 'error' : ''}`, feedback.message); message.setAttribute('role', feedback.error ? 'alert' : 'status'); card.append(message); }
       fragment.append(card);
     }
@@ -180,7 +198,7 @@ import { refreshRequestHistory } from './request-history.js';
     event.preventDefault(); navigate(link.pathname + link.search);
   });
   window.addEventListener('popstate', () => showPage(true));
-  $('refresh').addEventListener('click', () => { refresh(); if (location.pathname === '/ai-tools') refreshAITools(); if (location.pathname === '/databases') { refreshDatabases(); refreshSQLHistory(); } if (location.pathname === '/flows') refreshFlows(); if (location.pathname === '/tests') refreshTesting(); if (location.pathname === '/requests') { refreshLibrary(); refreshRequestHistory(); } });
+  $('refresh').addEventListener('click', () => { refresh(); if (location.pathname === '/ai-tools') refreshAITools(); if (location.pathname === '/databases') { refreshDatabases(); refreshSQLHistory(); } if (location.pathname === '/tests') refreshTesting(); if (location.pathname === '/mcp-tools') refreshMCP(); if (location.pathname === '/commands') refreshCommands(); if (location.pathname === '/requests') { refreshLibrary(); refreshRequestHistory(); } });
   $('log-source').addEventListener('change', () => {
     const query = new URLSearchParams(location.search);
     if ($('log-source').value === 'all') query.delete('source'); else query.set('source', $('log-source').value);
@@ -190,6 +208,10 @@ import { refreshRequestHistory } from './request-history.js';
   $('pause').addEventListener('click', () => { state.paused = !state.paused; $('pause').setAttribute('aria-pressed', String(state.paused)); $('pause').textContent = state.paused ? '继续显示' : '暂停显示'; $('log-live').textContent = state.paused ? 'PAUSED' : 'LIVE'; $('log-live').classList.toggle('paused', state.paused); $('log-status').textContent = state.paused ? '日志显示已暂停，后台继续接收' : '每秒自动更新'; if (!state.paused) renderLogs(); });
   document.addEventListener('manual-request-completed', refresh);
   document.addEventListener('request-history-changed', refresh);
-  document.addEventListener('service-configuration-changed', refresh);
+  document.addEventListener('service-configuration-changed', event => {
+    const id = event.detail?.deletedID;
+    if (id) { state.services = state.services.filter(service => service.id !== id); serviceFeedback.delete(id); renderServices(); }
+    refresh();
+  });
   window.addEventListener('online', refresh); showPage(); refresh();
 })();

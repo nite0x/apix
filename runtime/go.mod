@@ -7,11 +7,12 @@ toolchain go1.23.12
 require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-sql-driver/mysql v1.9.3
+	github.com/google/jsonschema-go v0.4.2
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/mark3labs/mcp-go v0.48.0
-	github.com/pelletier/go-toml/v2 v2.2.2
 	github.com/mattn/go-shellwords v1.0.12
+	github.com/pelletier/go-toml/v2 v2.2.2
 	golang.org/x/sys v0.32.0
 	modernc.org/sqlite v1.33.1
 )
@@ -29,7 +30,6 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.20.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
-	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

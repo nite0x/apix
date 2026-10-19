@@ -14,7 +14,9 @@
 .sql-params-editor{font-size:12px;color:#536371}
 .sql-params-editor summary{cursor:pointer;margin-bottom:10px}
 .sql-live-result{padding:20px;border-top:1px solid var(--line);background:#fcfdfd}
-.sql-live-result>.detail-note,.sql-live-result>.detail-alert{max-width:none;margin:0 0 12px}
+.sql-live-result h2{margin:0 0 14px;font-size:14px}
+#sql-live-result-content>.detail-note,#sql-live-result-content>.detail-alert{max-width:none;margin:0 0 12px}
+#sql-live-result-content>.detail-empty{margin:0;padding:20px;border:1px dashed var(--line);border-radius:6px;text-align:center}
 .sql-live-result .sql-result-scroll{max-height:400px}
 .sql-action{white-space:nowrap}
 .sql-action .text-button{display:block;margin:4px 0}

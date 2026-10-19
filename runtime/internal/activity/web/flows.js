@@ -2,8 +2,9 @@ import { availableOutputs, copyFlowSteps, failurePolicy, isFinally, orderedSteps
 import { openRequestDetail } from './request-detail.js';
 
 const root = document.getElementById('flow-workspace');
-const state = { flows: [], flow: null, run: null, history: [], databases: [], services: [], open: new Set(), tabs: new Map(), rail: 'variables', mode: 'edit', dirty: false, revision: 0, saving: null, saveTimer: null, pollTimer: null, visible: false, loading: false, starting: false, error: '', notice: '', apiRuns: new Map(), apiErrors: new Set(), pollBusy: false };
+const state = { flows: [], flow: null, run: null, history: [], recordFlow: '', recordHistory: [], databases: [], services: [], open: new Set(), tabs: new Map(), rail: 'variables', mode: 'edit', dirty: false, revision: 0, saving: null, saveTimer: null, pollTimer: null, visible: false, loading: false, starting: false, error: '', notice: '', apiRuns: new Map(), apiErrors: new Set(), pollBusy: false };
 let selection = 0;
+let recordSelection = 0;
 let dialog = null;
 
 function el(tag, cls, text) { const element = document.createElement(tag); if (cls) element.className = cls; if (text !== undefined) element.textContent = String(text); return element; }
@@ -26,7 +27,15 @@ function code(value) { return el('pre', 'fw-code', display(value)); }
 function blank(title, description) { const item = el('div', 'fw-empty'); item.append(el('span', 'fw-empty-icon', '⌘'), el('h3', '', title), el('p', '', description)); return item; }
 function section(title, description) { const item = el('section', 'fw-section'); item.append(el('h4', '', title)); if (description) item.append(el('p', 'fw-hint', description)); return item; }
 function setError(message) { state.error = message; const target = root.querySelector('[data-flow-message]'); if (target) { target.textContent = message; target.hidden = !message; } }
-function setLocation() { const query = new URLSearchParams(); if (state.flow) query.set('id', state.flow.id); if (state.run && state.mode === 'run') query.set('run', state.run.id); history.replaceState(null, '', `/flows${query.size ? `?${query}` : ''}`); }
+function recordsView() { return new URLSearchParams(location.search).get('tab') === 'records'; }
+function setLocation() {
+  if (!state.visible) return;
+  const query = new URLSearchParams({ tab: state.flow ? state.mode === 'run' ? 'records' : 'cases' : recordsView() ? 'records' : 'cases', type: 'flow' });
+  if (state.flow) query.set('id', state.flow.id);
+  if (state.run && state.mode === 'run') query.set('run', state.run.id);
+  history.replaceState(null, '', `/tests?${query}`);
+  window.dispatchEvent(new window.Event('testing-flow-location'));
+}
 async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, { cache: 'no-store', signal: AbortSignal.timeout(15000), ...options, ...(options.body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options.body) } : {}) });
   if (response.status === 204) return null;
@@ -75,7 +84,9 @@ export async function activateFlows() {
   const query = new URLSearchParams(location.search); const id = query.get('id'); const run = query.get('run');
   if (id && state.flow?.id !== id) { await openFlow(id, run); return; }
   if (id && run && state.run?.id !== run) { await openRun(run); return; }
+  if (id && run && state.run?.id === run) state.mode = 'run';
   if (!id && state.flow) { if (!(await leaveFlows())) { setLocation(); renderWorkspace(); return; } state.flow = null; state.run = null; }
+  if (id && !run && state.mode === 'run') { state.mode = 'edit'; renderWorkspace(); }
   await refreshFlows(); if (state.run && activeStatus(state.run.status)) schedulePoll();
 }
 export async function refreshFlows() {
@@ -83,12 +94,19 @@ export async function refreshFlows() {
   const token = selection;
   try {
     state.flows = await api('/flows') || [];
+    if (token !== selection) return;
+    if (!state.flow && recordsView()) {
+      if (!state.flows.some(flow => flow.id === state.recordFlow)) state.recordFlow = state.flows[0]?.id || '';
+      await refreshRecordHistory();
+      if (token !== selection) return;
+    }
     if (state.flow && state.mode === 'run' && state.run) { await pollRun(); }
     else if (!state.dirty && !state.saving && state.flow) {
       const id = state.flow.id, revision = state.revision;
       const current = await api(`/flows/${encodeURIComponent(id)}`);
       if (token === selection && state.flow?.id === id && revision === state.revision && !state.dirty) state.flow = current;
     }
+    if (state.error.startsWith('读取流程失败：')) state.error = '';
     if (state.visible) renderWorkspace();
   } catch (error) { state.error = `读取流程失败：${errorText(error)}`; if (state.visible) renderWorkspace(); }
   finally { state.loading = false; }
@@ -153,11 +171,11 @@ async function saveCopy() {
 function addStep(type, phase = '') { const step = blankStep(type); if (phase) step.config.phase = phase; state.flow.steps.push(step); state.open.add(step.id); state.tabs.set(step.id, 'request'); changed(true); root.querySelector(`[data-step="${step.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
 function renderWorkspace() {
   const fragment = document.createDocumentFragment(); const error = el('div', 'fw-message', state.error); error.dataset.flowMessage = ''; error.hidden = !state.error; error.setAttribute('role', 'alert'); fragment.append(error);
-  if (!state.flow) { renderLibrary(fragment); root.replaceChildren(fragment); return; }
+  if (!state.flow) { if (recordsView()) renderRecordLibrary(fragment); else renderLibrary(fragment); root.replaceChildren(fragment); return; }
   const flow = state.flow;
   const toolbar = el('div', 'fw-toolbar');
   const title = el('div', 'fw-title-group');
-  title.append(button('← 全部流程', 'fw-back', async () => { if (!(await leaveFlows())) return; state.flow = null; state.run = null; state.error = ''; setLocation(); await refreshFlows(); }), input(state.mode === 'run' ? state.run.flow_name_snapshot : flow.name, '流程名称', value => { flow.name = value; changed(); }, { max: 120 }));
+  title.append(button(state.mode === 'run' ? '← 执行记录' : '← 全部用例', 'fw-back', async () => { if (!(await leaveFlows())) return; state.flow = null; state.run = null; state.error = ''; setLocation(); await refreshFlows(); }), input(state.mode === 'run' ? state.run.flow_name_snapshot : flow.name, '流程名称', value => { flow.name = value; changed(); }, { max: 120 }));
   title.querySelector('input').readOnly = state.mode === 'run';
   const actions = el('div', 'fw-toolbar-actions'); const save = el('span', 'fw-save-state'); save.dataset.saveState = '';
   actions.append(save, button('另存副本', 'button small', saveCopy), button('保存', 'button small', () => void saveFlow()), button(state.starting ? '准备运行…' : '▶ 运行流程', 'button primary', runFlow)); actions.lastChild.disabled = state.starting;
@@ -170,20 +188,44 @@ function renderWorkspace() {
   const rail = el('aside', 'fw-rail'); rail.setAttribute('aria-label', '流程上下文'); rail.dataset.flowRail = ''; workspace.append(canvas, rail); fragment.append(workspace); root.replaceChildren(fragment); saveLabel(); renderRail();
 }
 function renderLibrary(fragment) {
-  const header = el('div', 'fw-library-heading'); header.append(el('div', '', `${state.flows.length} 个可复用流程`), button('＋ 新建流程', 'button primary', createFlow)); fragment.append(header);
+  const header = el('div', 'fw-library-heading'); header.append(el('div', '', `${state.flows.length} 个多步用例`), button('＋ 新建多步用例', 'button primary', createFlow)); fragment.append(header);
   const grid = el('div', 'fw-library');
   for (const flow of state.flows) {
     const card = button('', 'fw-library-card', () => void openFlow(flow.id));
     const top = el('div', 'fw-library-card-top'); top.append(el('span', 'fw-library-icon', '⌘'), el('span', 'fw-hint', `${flow.step_count} STEPS`));
     card.append(top, el('h3', '', flow.name), el('p', 'fw-hint', flow.description || '准备数据，执行请求，验证每一个预期。'));
-    const foot = el('div', 'fw-library-card-foot'); foot.append(el('span', '', new Date(flow.updated_at).toLocaleDateString('zh-CN')), el('span', '', '打开流程 ↗')); card.append(foot); grid.append(card);
+    const foot = el('div', 'fw-library-card-foot'); foot.append(el('span', '', new Date(flow.updated_at).toLocaleDateString('zh-CN')), el('span', '', '编辑用例 ↗')); card.append(foot); grid.append(card);
   }
   if (!state.flows.length) {
-    const empty = blank('把一次验证，变成一套流程', '添加步骤卡片，让前一步的结果成为下一步的输入。每次运行都会留下独立的测试记录。');
+    const empty = blank('把业务场景保存为多步用例', '添加步骤卡片，让前一步的结果成为下一步的输入。每次运行都会留下独立的测试记录。');
     const preview = el('div', 'fw-preview'); for (const [index, text] of ['准备数据', '发送请求', '校验结果'].entries()) { const item = el('span'); item.append(el('b', '', `0${index + 1}`), document.createTextNode(text)); preview.append(item); }
-    empty.append(preview, button('创建第一个流程', 'button primary', createFlow)); grid.append(empty);
+    empty.append(preview, button('创建第一个多步用例', 'button primary', createFlow)); grid.append(empty);
   }
   fragment.append(grid);
+}
+async function refreshRecordHistory() {
+  const token = ++recordSelection, id = state.recordFlow;
+  const runs = id ? await api(`/flows/${encodeURIComponent(id)}/runs?limit=100`) : [];
+  if (token === recordSelection && state.recordFlow === id) state.recordHistory = runs || [];
+}
+function renderRecordLibrary(fragment) {
+  const panel = el('section', 'panel');
+  const heading = el('div', 'panel-heading'); heading.append(el('h2', '', '多步用例执行记录'));
+  if (state.flows.length) heading.append(field('选择多步用例', select(state.recordFlow, '选择多步用例执行记录', state.flows.map(flow => [flow.id, flow.name]), value => {
+    state.recordFlow = value; state.recordHistory = []; renderWorkspace();
+    void refreshRecordHistory().then(() => { setError(''); if (state.visible && !state.flow && recordsView()) renderWorkspace(); }).catch(error => setError(`读取流程失败：${errorText(error)}`));
+  })));
+  panel.append(heading);
+  const list = el('div', 'testing-flow-records');
+  for (const run of state.recordHistory) {
+    const row = el('div', 'test-case-row'); const info = el('div', 'test-case-info');
+    info.append(el('strong', '', run.flow_name_snapshot), el('small', '', `${new Date(run.created_at).toLocaleString('zh-CN')} · v${run.flow_version} · ${run.total_steps} 个步骤 · #${run.id.slice(0, 8)}`));
+    const flowID = state.recordFlow;
+    row.append(info, el('span', `fw-status ${run.status}`, statusNames[run.status] || run.status), button('查看执行结果', 'button small', () => void openFlow(flowID, run.id)));
+    list.append(row);
+  }
+  if (!state.recordHistory.length) list.append(blank('还没有执行记录', state.flows.length ? '所选多步用例尚无运行记录，可在“测试用例”中打开并运行。' : '先在“测试用例”中创建并运行一个多步用例。'));
+  panel.append(list, el('p', 'testing-record-note', '展示所选多步用例最近 100 次运行。')); fragment.append(panel);
 }
 function renderSteps(canvas) {
   const flow = state.flow; flow.steps = orderedSteps(flow.steps); flow.steps.forEach((step, index) => { step.position = index; }); const start = el('div', 'fw-boundary'); start.append(el('span', 'fw-boundary-dot'), el('strong', '', '流程输入'), button(`${flow.variables.length} 个共享变量 ↗`, 'fw-text-button', () => { state.rail = 'variables'; renderRail(); })); canvas.append(start);

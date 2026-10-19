@@ -14,9 +14,16 @@
 .sql-result-dialog .detail-note{margin-bottom:12px;max-width:none}
 .sql-result-scroll{overflow:auto;max-height:55dvh;border:1px solid var(--line);border-radius:6px}
 .sql-result-table{width:100%;table-layout:auto;border-collapse:collapse}
-.sql-result-table th,.sql-result-table td{width:auto;min-width:100px;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;padding:10px 14px;font:12px/1.7 Consolas,'Microsoft YaHei',monospace}
+.sql-result-table th,.sql-result-table td{width:auto;min-width:100px;text-align:left;white-space:nowrap;padding:10px 14px;font:12px/1.7 Consolas,'Microsoft YaHei',monospace}
 .sql-result-table th{position:sticky;top:0;background:#f7f9fb;z-index:1}
-.sql-result-table td{max-width:420px;vertical-align:top}
+.sql-result-table td{vertical-align:middle}
+.sql-cell-preview{display:block;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer}
+.sql-cell-preview:hover{color:var(--green);text-decoration:underline}
+.sql-cell-dialog{width:min(800px,calc(100vw - 32px))}
+.sql-cell-dialog[open]{display:flex;flex-direction:column}
+.sql-cell-dialog .detail-content{overflow:auto}
+.sql-cell-dialog .detail-note{margin-bottom:12px;max-width:none}
+.sql-cell-dialog .detail-code{max-height:60dvh}
 .sql-result-table .sql-null{color:var(--muted);font-style:italic}
 
 /* Collapsible workspace navigation. */
@@ -82,11 +89,11 @@ body.sidebar-collapsed { --sidebar-width: 72px; }
 }
 .database-form-body select{width:100%;min-width:0;border:1px solid #dfe5ea;border-radius:6px;padding:10px 12px;font-size:13px;color:#405969;background:#fff}.database-ssl-field{display:grid;gap:10px}.database-ssl-field[hidden]{display:none}.database-form-body .database-hint{margin:0;color:#7b8794;font-size:11px}
 /* Database workspace: one focused task per tab. */
-.database-tabs { display:flex; gap:28px; border-bottom:1px solid #dfe5ea; margin-bottom:24px; }
-.database-tabs [role="tab"] { position:relative; border:0; background:transparent; padding:0 2px 14px; color:#73818e; font-size:13px; line-height:1.5; }
-.database-tabs [aria-selected="true"] { color:#137d64; font-weight:600; }
-.database-tabs [aria-selected="true"]::after { content:''; position:absolute; bottom:-1px; left:0; right:0; height:2px; border-radius:2px; background:var(--green); }
-.database-tabs [role="tab"]:hover { color:var(--green); }
+.workspace-tabs { display:flex; gap:28px; border-bottom:1px solid #dfe5ea; margin-bottom:24px; }
+.workspace-tabs [role="tab"] { position:relative; border:0; background:transparent; padding:0 2px 14px; color:#73818e; font-size:13px; line-height:1.5; }
+.workspace-tabs [aria-selected="true"] { color:#137d64; font-weight:600; }
+.workspace-tabs [aria-selected="true"]::after { content:''; position:absolute; bottom:-1px; left:0; right:0; height:2px; border-radius:2px; background:var(--green); }
+.workspace-tabs [role="tab"]:hover { color:var(--green); }
 .database-workspace .panel-heading { min-height:88px; padding:20px 24px; }
 .database-section-heading { min-width:0; }
 .database-section-heading h2 { font-size:14px; gap:10px; }
@@ -159,7 +166,7 @@ body.sidebar-collapsed { --sidebar-width: 72px; }
   .sql-table .sql-action { padding-left:8px; padding-right:16px; }
 }
 @media (max-width:600px) {
-  .database-tabs { margin-bottom:16px; gap:24px; }
+  .workspace-tabs { margin-bottom:16px; gap:24px; }
   .database-workspace .panel-heading { padding:18px 16px; gap:14px; }
   .database-section-heading p { font-size:11px; }
   .database-card { padding:18px 16px; }

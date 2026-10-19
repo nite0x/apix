@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	_ "modernc.org/sqlite"
 	"net"
@@ -371,5 +372,102 @@ func TestStopKillsBeforeWaitingForBusyStore(t *testing.T) {
 	}
 	if _, err := s.Stop(context.Background(), d.ID, "run"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEditAndDeleteDefinitionRoutes(t *testing.T) {
+	s, db := newTestService(t)
+	d := definitionFor(t, s, "serve")
+	ctx := context.Background()
+	router := gin.New()
+	s.Routes(router.Group("/api"))
+	remove := func() *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest("DELETE", "/api/services/"+d.ID, nil))
+		return response
+	}
+	if _, err := s.Start(ctx, d.ID, "manual"); err != nil {
+		t.Fatal(err)
+	}
+	d.Name = "Updated service"
+	if _, err := s.PutDefinition(ctx, *d); err == nil {
+		t.Fatal("edited a running service")
+	}
+	if response := remove(); response.Code != 400 {
+		t.Fatalf("deleted running service: %d %s", response.Code, response.Body.String())
+	}
+	if status, err := s.Status(ctx, d.ID); err != nil || status.Status != "running" {
+		t.Fatalf("delete affected running process: %+v %v", status, err)
+	}
+	if _, err := s.Stop(ctx, d.ID, "manual"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(d)
+	request := httptest.NewRequest("PUT", "/api/services", strings.NewReader(string(data)))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatalf("edit response: %d %s", response.Code, response.Body.String())
+	}
+	definitions, err := s.ListDefinitions(ctx)
+	if err != nil || len(definitions) != 1 || definitions[0].ID != d.ID || definitions[0].Name != d.Name {
+		t.Fatalf("edit did not update in place: %+v %v", definitions, err)
+	}
+	var before int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM local_service_logs WHERE service_id=?`, d.ID).Scan(&before); err != nil || before == 0 {
+		t.Fatalf("missing test logs: %d %v", before, err)
+	}
+	if response := remove(); response.Code != 200 {
+		t.Fatalf("delete response: %d %s", response.Code, response.Body.String())
+	}
+	if definitions, err := s.ListDefinitions(ctx); err != nil || len(definitions) != 0 {
+		t.Fatalf("deleted service still listed: %+v %v", definitions, err)
+	}
+	if _, err := s.Start(ctx, d.ID, "manual"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("deleted definition could start: %v", err)
+	}
+	var after int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM local_service_logs WHERE service_id=?`, d.ID).Scan(&after); err != nil || after != before {
+		t.Fatalf("delete removed historical logs: %d -> %d %v", before, after, err)
+	}
+	if response := remove(); response.Code != 404 {
+		t.Fatalf("missing delete response: %d", response.Code)
+	}
+}
+
+func TestDeleteDefinitionPreservesExternalService(t *testing.T) {
+	s, _ := newTestService(t)
+	d := definitionFor(t, s, "serve")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	defer server.Close()
+	d.HealthURL = server.URL
+	if _, err := s.PutDefinition(context.Background(), *d); err != nil {
+		t.Fatal(err)
+	}
+	if instance, err := s.Start(context.Background(), d.ID, "manual"); err != nil || instance.Owner != "external" {
+		t.Fatalf("external reuse: %+v %v", instance, err)
+	}
+	if err := s.DeleteDefinition(context.Background(), d.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !s.healthy(context.Background(), server.URL) {
+		t.Fatal("delete stopped external service")
+	}
+}
+
+func TestDeleteDefinitionRequiresCompletedCleanup(t *testing.T) {
+	for _, status := range []string{"starting", "running", "stopping", "cleanup_failed"} {
+		t.Run(status, func(t *testing.T) {
+			s, _ := newTestService(t)
+			d := definitionFor(t, s, "serve")
+			// Model in-flight lifecycle states without starting an external process.
+			s.running[d.ID] = &process{instance: Instance{Status: status}}
+			err := s.DeleteDefinition(context.Background(), d.ID)
+			delete(s.running, d.ID)
+			if err == nil {
+				t.Fatalf("deleted service with status %s", status)
+			}
+		})
 	}
 }

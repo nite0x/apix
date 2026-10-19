@@ -1,8 +1,11 @@
+import { setupWorkspaceTabs } from './workspace-tabs.js';
 import { openRequestDetail } from './request-detail.js';
 import { requestAPI } from './request-api.js';
 
 const $ = id => document.getElementById(id);
 const form = $('manual-form');
+const selectRequestTab = setupWorkspaceTabs('request-tabs');
+function showExecution() { selectRequestTab($('request-execute-tab')); }
 let busy = false;
 let revision = 0;
 let workingCopy = null;
@@ -97,16 +100,18 @@ form.addEventListener('input', () => { revision++; dirty = true; updateDraftStat
 form.addEventListener('change', () => { revision++; dirty = true; updateDraftState(); });
 $('manual-method').addEventListener('change', syncBody);
 $('manual-body-type').addEventListener('change', syncBody);
-$('manual-reset').addEventListener('click', async () => {
+async function newRequest() {
   if (busy || !replaceAllowed()) return;
   setBusy(true);
   try {
     await discardCopy();
     fillDraft({ method: 'GET', url: '', headers: [], query_params: [], body_type: 'none', body: '' });
-    feedback(); $('manual-url').focus();
-  } catch (error) { showOperationError(error); }
+    showExecution(); feedback(); $('manual-url').focus();
+  } catch (error) { showExecution(); showOperationError(error); }
   finally { setBusy(false); }
-});
+}
+$('manual-reset').addEventListener('click', newRequest);
+$('library-new').addEventListener('click', newRequest);
 
 form.addEventListener('submit', async event => {
   event.preventDefault();
@@ -135,6 +140,7 @@ form.addEventListener('submit', async event => {
 
 export async function loadManualRequest(id) {
   if (busy || !replaceAllowed()) return;
+  showExecution();
   const version = ++revision;
   let locked = false;
   feedback('正在读取历史请求…');
@@ -185,7 +191,7 @@ function updateDraftState() {
 function setBusy(value) {
   busy = value;
   $('manual-fields').disabled = value;
-  for (const id of ['manual-reset', 'manual-save', 'manual-save-new', 'manual-reload', 'manual-import-submit']) $(id).disabled = value;
+  for (const id of ['manual-reset', 'manual-save', 'manual-save-new', 'manual-reload', 'manual-import-submit', 'library-new']) $(id).disabled = value;
   form.setAttribute('aria-busy', String(value));
 }
 function replaceAllowed() {
@@ -231,6 +237,7 @@ function fillDraft(request, copy = null, metadata = {}) {
 }
 export async function loadSavedRequest(id) {
   if (busy || !replaceAllowed()) return;
+  showExecution();
   setBusy(true);
   try {
     const saved = await api(`/requests/${encodeURIComponent(id)}`, null, 'GET');
@@ -270,6 +277,7 @@ $('manual-save-new').addEventListener('click', async () => {
 $('manual-reload').addEventListener('click', () => { if (workingCopy?.api_request_id) void loadSavedRequest(workingCopy.api_request_id); });
 $('manual-import-submit').addEventListener('click', async () => {
   if (busy || !replaceAllowed()) return;
+  showExecution();
   const content = $('manual-import-text').value.trim();
   if (!content) { feedback('请先粘贴 cURL 或原始 HTTP 请求。', true); return; }
   setBusy(true);

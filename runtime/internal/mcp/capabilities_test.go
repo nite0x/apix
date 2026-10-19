@@ -21,6 +21,7 @@ import (
 	"github.com/apix/apix/runtime/internal/journal"
 	"github.com/apix/apix/runtime/internal/localservice"
 	mcpserver "github.com/apix/apix/runtime/internal/mcp"
+	testmcp "github.com/apix/apix/runtime/internal/mcpclient"
 	"github.com/apix/apix/runtime/internal/store"
 	"github.com/gin-gonic/gin"
 	"github.com/go-sql-driver/mysql"
@@ -32,6 +33,7 @@ type mvpClient struct {
 	client   *mcpclient.Client
 	context  context.Context
 	executor *core.Executor
+	registry *testmcp.Service
 }
 
 func setupMVP(t *testing.T) *mvpClient {
@@ -62,6 +64,11 @@ func setupMVP(t *testing.T) *mvpClient {
 	if err := hs.MigrateSchema(db.DB()); err != nil {
 		t.Fatal(err)
 	}
+	registry, err := testmcp.New(db.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs.SetMCPClient(registry)
 	hs.SetCapabilities(dbs, services)
 	hs.SetEventSink(history.Append)
 	hs.SetRuleEngine(rules)
@@ -77,6 +84,7 @@ func setupMVP(t *testing.T) *mvpClient {
 	server := mcpserver.NewServer(executor)
 	server.RegisterHTTPTools(hs)
 	server.RegisterCapabilities(hs, dbs, services, history)
+	server.RegisterMCPClientTools(registry, history)
 	router := gin.New()
 	router.Any("/mcp", gin.WrapH(server.HTTPHandler()))
 	hs.Routes(router.Group("/api"))
@@ -95,7 +103,7 @@ func setupMVP(t *testing.T) *mvpClient {
 	if _, err := client.Initialize(ctx, mcp.InitializeRequest{Params: mcp.InitializeParams{ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION, ClientInfo: mcp.Implementation{Name: "mvp-integration", Version: "1"}}}); err != nil {
 		t.Fatal(err)
 	}
-	return &mvpClient{client: client, context: ctx, executor: executor}
+	return &mvpClient{client: client, context: ctx, executor: executor, registry: registry}
 }
 
 func (c *mvpClient) call(t *testing.T, name string, args map[string]any, wantError bool) map[string]any {

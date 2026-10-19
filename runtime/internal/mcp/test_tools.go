@@ -14,11 +14,11 @@ func (s *Server) registerTestTools(http *httpapi.HTTPService, history *journal.S
 	batchID := object(map[string]any{"batch_id": str()}, "batch_id")
 	caseID := object(map[string]any{"case_id": str()}, "case_id")
 	project := object(map[string]any{"project_id": str()})
-	assertion := object(map[string]any{"source": enum("status", "header", "body"), "path": str(), "operator": enum("equals", "not_equals", "contains", "exists"), "expected": str()}, "source", "operator")
+	assertion := object(map[string]any{"source": enum("status", "header", "body", "structuredContent", "text", "isError", "result", "exit_code", "stdout", "stderr"), "path": str(), "operator": enum("equals", "not_equals", "contains", "exists"), "expected": str()}, "source", "operator")
 	pair := object(map[string]any{"id": str(), "name": str(), "value": str(), "enabled": boolean()}, "name", "value", "enabled")
 	request := object(map[string]any{"method": enum("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"), "url": str(), "headers": array(pair), "query_params": array(pair), "body_type": str(), "body": str(), "auth_config": map[string]any{"type": "object"}}, "method", "url")
-	definition := object(map[string]any{"id": str(), "project_id": str(), "api_request_id": str(), "name": str(), "description": str(), "request": request, "expected_status": integer(), "assertions": array(assertion), "edit_version": integer()}, "name", "request")
-	add("begin_test_batch", "Begin one explicit API testing task and return its batch id. Reuse batch_id for all related send_request or run_test_case calls, including different endpoints and input variants. Do not create a Flow for independent API tests. Finish only after all calls return.", object(map[string]any{"name": str(), "project_id": str()}, "name"), func(ctx context.Context, a map[string]any) (any, error) {
+	definition := object(map[string]any{"id": str(), "project_id": str(), "api_request_id": str(), "type": enum("http", "mcp", "command"), "command_request": object(map[string]any{"program": str(), "args": array(str()), "work_dir": str(), "env": map[string]any{"type": "object", "additionalProperties": str()}, "stdin": str(), "timeout_seconds": integer()}, "program"), "expected_exit_code": integer(), "mcp_request": object(map[string]any{"server_id": str(), "tool_name": str(), "arguments": map[string]any{"type": "object"}}, "server_id", "tool_name"), "expected_is_error": boolean(), "validate_output_schema": boolean(), "name": str(), "description": str(), "request": request, "expected_status": integer(), "assertions": array(assertion), "edit_version": integer()}, "name")
+	add("begin_test_batch", "Begin one explicit HTTP, MCP or command testing task and return its batch id. Reuse batch_id for all related send_request or run_test_case calls, including different endpoints and input variants. Do not create a Flow for independent API tests. Finish only after all calls return.", object(map[string]any{"name": str(), "project_id": str()}, "name"), func(ctx context.Context, a map[string]any) (any, error) {
 		return http.BeginTestBatch(textArg(a, "project_id"), textArg(a, "name"))
 	})
 	add("list_test_batches", "List the latest 100 test batches with pass/fail/error/unverified counts.", project, func(ctx context.Context, a map[string]any) (any, error) {
@@ -38,7 +38,7 @@ func (s *Server) registerTestTools(http *httpapi.HTTPService, history *journal.S
 		}
 		return http.SaveTestCase(item)
 	})
-	add("list_test_cases", "List up to 500 saved API test cases for reuse.", project, func(ctx context.Context, a map[string]any) (any, error) {
+	add("list_test_cases", "List up to 500 saved HTTP, MCP or command test cases for reuse.", project, func(ctx context.Context, a map[string]any) (any, error) {
 		items, err := http.ListTestCases(textArg(a, "project_id"))
 		return map[string]any{"items": items}, err
 	})
@@ -49,7 +49,7 @@ func (s *Server) registerTestTools(http *httpapi.HTTPService, history *journal.S
 		err := http.ArchiveTestCase(textArg(a, "case_id"))
 		return map[string]any{"archived": err == nil}, err
 	})
-	add("run_test_case", "Run a saved case in an explicit batch, or supply a temporary test_case instead of case_id. Each call creates an independent attempt; retries never overwrite history. Pass variables explicitly; cases do not inherit tokens or IDs from previous cases. Read test_status (passed, failed, error, unverified).", object(map[string]any{"batch_id": str(), "case_id": str(), "test_case": definition, "variables": map[string]any{"type": "object", "additionalProperties": str()}}, "batch_id"), func(ctx context.Context, a map[string]any) (any, error) {
+	add("run_test_case", "Run a saved case in an explicit batch, or supply a temporary test_case instead of case_id. Each call creates an independent attempt; retries never overwrite history. Pass variables explicitly; cases do not inherit tokens or IDs from previous cases. For command cases, program and args are separate; no implicit shell. Use bash/python3/node with a script path, or explicit interpreter stdin. Read test_status (passed, failed, error, unverified).", object(map[string]any{"batch_id": str(), "case_id": str(), "test_case": definition, "variables": map[string]any{"type": "object", "additionalProperties": str()}}, "batch_id"), func(ctx context.Context, a map[string]any) (any, error) {
 		var in httpapi.RunTestInput
 		if err := decode(a, &in); err != nil {
 			return nil, err

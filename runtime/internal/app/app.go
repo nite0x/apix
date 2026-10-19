@@ -24,6 +24,7 @@ import (
 	"github.com/apix/apix/runtime/internal/journal"
 	"github.com/apix/apix/runtime/internal/localservice"
 	mcpserver "github.com/apix/apix/runtime/internal/mcp"
+	"github.com/apix/apix/runtime/internal/mcpclient"
 	"github.com/apix/apix/runtime/internal/store"
 	"github.com/gin-gonic/gin"
 )
@@ -62,6 +63,10 @@ func Run(_ []string) error {
 		return err
 	}
 	defer serviceManager.Close()
+	mcpClient, err := mcpclient.New(db.DB())
+	if err != nil {
+		return err
+	}
 	// 2. Core modules
 	events := core.NewEvents(func(event core.Event) {
 		// Session payloads include request bodies and variables; only log metadata.
@@ -76,6 +81,7 @@ func Run(_ []string) error {
 	if err := httpService.RecoverInterruptedRuns(); err != nil {
 		return err
 	}
+	httpService.SetMCPClient(mcpClient)
 	httpService.SetCapabilities(databaseService, serviceManager)
 	httpService.SetEventSink(history.Append)
 	defer func() {
@@ -131,9 +137,11 @@ func Run(_ []string) error {
 
 	// 5. Register HTTP endpoints for both MCP and the frontend.
 	mcp.RegisterHTTPTools(httpService)
+	mcp.RegisterMCPClientTools(mcpClient, history)
 	mcp.RegisterCapabilities(httpService, databaseService, serviceManager, history)
 	r.Any("/mcp", allowMCPOrigin(), gin.WrapH(mcp.HTTPHandler()))
 	httpService.Routes(r.Group("/api"))
+	mcpClient.Routes(r.Group("/api"))
 	databaseService.Routes(r.Group("/api"))
 	serviceManager.Routes(r.Group("/api"))
 	activity.Routes(r, db.DB(), serviceManager, history)
