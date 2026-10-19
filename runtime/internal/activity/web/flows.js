@@ -33,7 +33,8 @@ function setLocation() {
   const query = new URLSearchParams({ tab: state.flow ? state.mode === 'run' ? 'records' : 'cases' : recordsView() ? 'records' : 'cases', type: 'flow' });
   if (state.flow) query.set('id', state.flow.id);
   if (state.run && state.mode === 'run') query.set('run', state.run.id);
-  history.replaceState(null, '', `/tests?${query}`);
+  const path = location.pathname === '/test-collections' ? '/test-collections' : '/tests';
+  history.replaceState(null, '', `${path}?${query}`);
   window.dispatchEvent(new window.Event('testing-flow-location'));
 }
 async function api(path, options = {}) {

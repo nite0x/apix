@@ -26,27 +26,30 @@ async function api(path, options = {}) {
 }
 function notice(error = '', message = '') { state.error = error; state.message = message; const node = root.querySelector('[data-testing-message]'); if (node) { node.textContent = error || message; node.hidden = !node.textContent; node.className = `detail-alert testing-message${error ? ' error' : ''}`; node.setAttribute('role', error ? 'alert' : 'status'); } }
 function isFlowView() { return state.type === 'flow' && state.tab !== 'batches'; }
+function isCollectionView() { return location.pathname === '/test-collections'; }
+function testingPath() { return location.pathname === '/test-collections' ? '/test-collections' : '/tests'; }
 function readRoute() {
+  if (isCollectionView()) { state.tab = 'records'; state.type = 'single'; return; }
   const query = new URLSearchParams(location.search);
-  state.tab = ['cases', 'batches', 'records'].includes(query.get('tab')) ? query.get('tab') : query.has('batch') ? 'records' : 'cases';
+  state.tab = ['cases', 'batches', 'records'].includes(query.get('tab')) ? query.get('tab') : query.has('batch') || location.pathname === '/test-collections' ? 'records' : 'cases';
   state.type = query.get('type') === 'flow' && state.tab !== 'batches' ? 'flow' : 'single';
 }
 function locationForBatch() {
-  if (!state.active || isFlowView() || location.pathname !== '/tests') return;
+  if (!state.active || isFlowView() || !['/tests', '/test-collections'].includes(location.pathname)) return;
   const query = new URLSearchParams({ tab: state.tab });
   if (state.batch && state.tab !== 'cases') query.set('batch', state.batch.id);
-  history.replaceState(null, '', `/tests?${query}`);
+  history.replaceState(null, '', `${testingPath()}?${query}`);
 }
 async function switchView(tab, type = state.type) {
   if (isFlowView() && !(await leaveFlows())) return;
   state.viewRevision++; state.selection++;
   state.tab = tab; state.type = tab === 'batches' ? 'single' : type;
   state.signature = '';
-  if (isFlowView()) history.pushState(null, '', `/tests?tab=${tab}&type=flow`);
+  if (isFlowView()) history.pushState(null, '', `${testingPath()}?tab=${tab}&type=flow`);
   else {
     const query = new URLSearchParams({ tab });
     if (state.batch && tab !== 'cases') query.set('batch', state.batch.id);
-    history.pushState(null, '', `/tests?${query}`);
+    history.pushState(null, '', `${testingPath()}?${query}`);
   }
   await showView();
 }
@@ -97,15 +100,22 @@ async function showView() {
 function blank(title, text) { const node = el('div', 'testing-empty'); node.append(el('h2', '', title), el('p', '', text)); return node; }
 function render() {
   mount();
+  const collection = isCollectionView();
+  root.setAttribute('aria-label', collection ? '测试集合' : '测试工作区');
+  root.querySelector('.testing-toolbar').hidden = collection;
   root.querySelectorAll('[data-test-tab]').forEach(node => { const selected = node.dataset.testTab === state.tab; node.setAttribute('aria-selected', String(selected)); node.tabIndex = selected ? 0 : -1; });
-  root.querySelector('#testing-view-panel').setAttribute('aria-labelledby', `testing-tab-${state.tab}`);
+  const viewPanel = root.querySelector('#testing-view-panel');
+  viewPanel.setAttribute('role', collection ? 'region' : 'tabpanel');
+  if (collection) { viewPanel.removeAttribute('aria-labelledby'); viewPanel.setAttribute('aria-label', '执行记录'); }
+  else { viewPanel.removeAttribute('aria-label'); viewPanel.setAttribute('aria-labelledby', `testing-tab-${state.tab}`); }
   const typeSelect = root.querySelector('[data-testing-type]');
   const typeLabel = state.tab === 'records' ? '记录类型' : '用例类型';
   root.querySelector('[data-testing-type-label]').textContent = typeLabel;
   typeSelect.setAttribute('aria-label', typeLabel); typeSelect.value = state.type; typeSelect.disabled = state.working;
   typeSelect.options[0].textContent = state.tab === 'records' ? '独立调用记录' : '独立调用';
   typeSelect.options[1].textContent = state.tab === 'records' ? '业务流程记录' : '业务流程';
-  root.querySelector('[data-testing-types]').hidden = state.tab === 'batches';
+  root.querySelector('[data-testing-types]').hidden = collection || state.tab === 'batches';
+  root.querySelector('[data-testing-hint]').hidden = collection;
   const typePanel = root.querySelector('#testing-type-panel');
   typePanel.setAttribute('aria-label', state.tab === 'batches' ? '测试批次' : typeSelect.selectedOptions[0].textContent);
   root.querySelector('[data-testing-hint]').textContent = state.tab === 'cases'
@@ -143,7 +153,11 @@ function renderBatches(records = false) {
     overview.append(el('p', '', '批次保存本次测试任务的进度与结果；用例的每次尝试都保留独立记录。'), button('查看执行记录 →', () => void switchView('records', 'single'), 'button primary'));
     detail.append(overview); layout.append(list, detail); return layout;
   }
-  actions.append(button('查看测试批次', () => void switchView('batches', 'single')));
+  if (isCollectionView()) {
+    const manage = el('a', 'button', '查看测试批次');
+    manage.href = `/tests?tab=batches&batch=${encodeURIComponent(batch.id)}`; manage.dataset.route = '';
+    actions.append(manage);
+  } else actions.append(button('查看测试批次', () => void switchView('batches', 'single')));
   if (state.paused) { const paused = el('div', 'detail-alert'); paused.append(el('strong', '', '测试正在等待暂停规则确认')); for (const [action, label] of [['continue', '继续请求'], ['skip', '跳过'], ['stop', '停止']]) paused.append(button(label, async event => { event.currentTarget.disabled = true; try { await api(`/steps/${state.paused.id}/resume`, { method: 'POST', body: { action } }); await refreshTesting(); } catch (error) { notice(error.message); event.currentTarget.disabled = false; } })); detail.append(paused); }
   const runs = (batch.runs || []).filter(run => state.filter === 'all' || run.status === state.filter);
   const groups = new Map();

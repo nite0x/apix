@@ -19,10 +19,12 @@ function render() {
       const item = node('button', text, 'text-button'); item.type = 'button'; item.setAttribute('aria-label', label);
       item.disabled = pending.has(run.id); item.addEventListener('click', handler); return item;
     };
-    info.append(node('span', run.request_snapshot.method, `method ${run.request_snapshot.method.toLowerCase()}`),
-      button(run.request_snapshot.url, `查看请求 ${run.id}`, event => openRequestDetail(run.id, event.currentTarget)),
-      button('填入编辑器', `填入请求 ${run.id}`, () => loadManualRequest(run.id)));
+    const url = button(run.request_snapshot.url, `查看请求 ${run.id}`, event => openRequestDetail(run.id, event.currentTarget));
+    url.classList.add('request-url'); url.title = run.request_snapshot.url;
+    info.append(node('span', run.request_snapshot.method, `method ${run.request_snapshot.method.toLowerCase()}`), url);
     request.append(info);
+    const reuse = node('td', null, 'history-reuse');
+    reuse.append(button('填入编辑器', `填入请求 ${run.id}`, () => loadManualRequest(run.id)));
     const actions = node('td', null, 'history-actions');
     actions.append(button(run.is_pinned ? '取消固定' : '固定', `固定请求 ${run.id}`, () => mutate(run, async () => {
       await requestAPI(`/runs/${encodeURIComponent(run.id)}/pin`, { pinned: !run.is_pinned }, 'POST');
@@ -33,10 +35,10 @@ function render() {
       runs = runs.filter(item => item.id !== run.id);
     })));
     row.append(request, node('td', run.response_status ?? run.status), node('td', `${run.duration_ms ?? 0} ms`),
-      node('td', new Date(run.started_at).toLocaleString('zh-CN', { hour12: false })), actions);
+      node('td', new Date(run.started_at).toLocaleString('zh-CN', { hour12: false })), reuse, actions);
     fragment.append(row);
   }
-  if (!rows.length) { const row = node('tr'), cell = node('td', runs.length ? '没有匹配的执行记录。' : '还没有执行记录。', 'empty'); cell.colSpan = 5; row.append(cell); fragment.append(row); }
+  if (!rows.length) { const row = node('tr'), cell = node('td', runs.length ? '没有匹配的执行记录。' : '还没有执行记录。', 'empty'); cell.colSpan = 6; row.append(cell); fragment.append(row); }
   $('requests').replaceChildren(fragment);
 }
 async function mutate(run, operation) {

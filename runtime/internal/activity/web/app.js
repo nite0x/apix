@@ -54,6 +54,7 @@ import { refreshRequestHistory } from './request-history.js';
     '/commands': { id: 'commands', title: '命令行', eyebrow: 'COMMAND TESTING', description: '运行命令和脚本，验证退出码与输出，保存用例并追踪测试记录。' },
     '/mcp-tools': { id: 'mcp-tools', title: 'MCP 工具', eyebrow: 'MCP TOOL TESTING', description: '连接 MCP 服务器，发现和调试工具，保存用例并验证调用结果。' },
     '/tests': { id: 'tests', title: '测试', eyebrow: 'TESTING', description: '用例定义怎么测，批次组织本次测试，执行记录展示每次验证的结果。' },
+    '/test-collections': { id: 'tests', title: '测试集合', eyebrow: 'TEST COLLECTIONS', description: '按批次查看测试集合，展开每次执行的输入、断言与结果。' },
     '/logs': { id: 'logs', title: '日志', eyebrow: 'LIVE LOGS', description: '运行事件与服务输出实时汇总，支持来源筛选和暂停显示。' },
   };
   function showPage(focus = false) {
@@ -69,10 +70,11 @@ import { refreshRequestHistory } from './request-history.js';
     closeServiceEditor();
     document.querySelectorAll('[data-page]').forEach(element => { element.hidden = element.dataset.page !== page.id; });
     document.querySelectorAll('.page-nav a').forEach(link => {
-      if (pages[link.pathname]?.id === page.id) link.setAttribute('aria-current', 'page');
+      if (pages[link.pathname] === page) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
     });
     document.title = `Apix · ${page.title}`;
+    document.querySelector('.page-heading').hidden = location.pathname === '/test-collections';
     $('page-title').textContent = page.title; $('page-eyebrow').textContent = page.eyebrow; $('page-description').textContent = page.description;
     applyLogSource();
     if (page.id === 'requests') { refreshLibrary(); refreshRequestHistory(); }
@@ -82,10 +84,10 @@ import { refreshRequestHistory } from './request-history.js';
     if (page.id === 'mcp-tools') refreshMCP();
     if (page.id === 'commands') refreshCommands();
     if (page.id === 'tests') activateTesting(); else deactivateTesting();
-    if (focus) { $('page-title').focus({ preventScroll: true }); window.scrollTo(0, 0); }
+    if (focus) { if (!document.querySelector('.page-heading').hidden) $('page-title').focus({ preventScroll: true }); window.scrollTo(0, 0); }
   }
   async function navigate(path) {
-    if (['/tests', '/flows'].includes(location.pathname) && !(await leaveFlows())) return;
+    if (['/tests', '/test-collections', '/flows'].includes(location.pathname) && !(await leaveFlows())) return;
     if (location.pathname + location.search !== path) history.pushState(null, '', path);
     showPage(true);
     if (narrowScreen.matches) setSidebarCollapsed(true, true);
@@ -198,7 +200,7 @@ import { refreshRequestHistory } from './request-history.js';
     event.preventDefault(); navigate(link.pathname + link.search);
   });
   window.addEventListener('popstate', () => showPage(true));
-  $('refresh').addEventListener('click', () => { refresh(); if (location.pathname === '/ai-tools') refreshAITools(); if (location.pathname === '/databases') { refreshDatabases(); refreshSQLHistory(); } if (location.pathname === '/tests') refreshTesting(); if (location.pathname === '/mcp-tools') refreshMCP(); if (location.pathname === '/commands') refreshCommands(); if (location.pathname === '/requests') { refreshLibrary(); refreshRequestHistory(); } });
+  $('refresh').addEventListener('click', () => { refresh(); if (location.pathname === '/ai-tools') refreshAITools(); if (location.pathname === '/databases') { refreshDatabases(); refreshSQLHistory(); } if (['/tests', '/test-collections'].includes(location.pathname)) refreshTesting(); if (location.pathname === '/mcp-tools') refreshMCP(); if (location.pathname === '/commands') refreshCommands(); if (location.pathname === '/requests') { refreshLibrary(); refreshRequestHistory(); } });
   $('log-source').addEventListener('change', () => {
     const query = new URLSearchParams(location.search);
     if ($('log-source').value === 'all') query.delete('source'); else query.set('source', $('log-source').value);
