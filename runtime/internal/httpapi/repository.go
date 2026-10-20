@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"strings"
 	"time"
 
@@ -128,6 +129,9 @@ func (r *repository) updateCollection(item *APICollection) error {
 }
 
 func (r *repository) archiveCollection(id string) error {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
 	result, err := r.db.Exec(`UPDATE api_collections SET status='archived', archived_at=?, updated_at=? WHERE id=? AND status='active'`, time.Now().UTC(), time.Now().UTC(), id)
 	if err != nil {
 		return err
@@ -245,6 +249,9 @@ func (r *repository) updateRequest(item *APIRequest) error {
 }
 
 func (r *repository) archiveRequest(id string) error {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
 	result, err := r.db.Exec(`UPDATE api_requests SET status='archived', archived_at=?, updated_at=? WHERE id=? AND status='active'`, time.Now().UTC(), time.Now().UTC(), id)
 	if err != nil {
 		return err
@@ -361,6 +368,9 @@ func (r *repository) updateWorkingCopy(item *APIWorkingCopy, expectedVersion int
 // optional: a nil pointer leaves the stored description untouched so callers
 // that do not manage descriptions (e.g. manual drafts) never clear them.
 func (r *repository) saveWorkingCopy(id, collectionID, name string, description *string) (*APIWorkingCopy, error) {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
 	copy, err := r.getWorkingCopy(id)
 	if err != nil {
 		return nil, err
@@ -634,13 +644,16 @@ func (r *repository) pinRun(id string, pinned bool) error {
 }
 
 func (r *repository) deleteRun(id string) error {
-	result, err := r.db.Exec(`DELETE FROM api_runs WHERE id=?`, id)
+	result, err := r.db.Exec(`DELETE FROM api_runs WHERE id=? AND status NOT IN ('running','queued','paused') AND is_pinned=0 AND NOT EXISTS(SELECT 1 FROM test_case_runs WHERE api_run_id=api_runs.id) AND NOT EXISTS(SELECT 1 FROM flow_run_steps WHERE api_run_id=api_runs.id)`, id)
 	if err != nil {
 		return err
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return errNotFound
+		if _, err := r.getRun(id); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w: 记录正在执行、已固定或被批次/流程详情引用，请按完整运行清理", lifecycle.ErrProtected)
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"time"
 
 	"github.com/apix/apix/runtime/internal/database"
@@ -99,8 +100,17 @@ func (s *HTTPService) StartFlow(id string, version int64, variables map[string]s
 }
 
 func (s *HTTPService) startFlow(id string, version int64, environment string, variables map[string]string, trigger string) (*FlowRun, error) {
+	gate := lifecycle.For(s.db)
+	gate.Lock()
+	defer gate.Unlock()
 	flow, err := s.repo.getFlow(id)
 	if err != nil {
+		return nil, err
+	}
+	if flow.ArchivedAt != nil {
+		return nil, fmt.Errorf("%w: 流程已归档，请先恢复", errConflict)
+	}
+	if err := s.repo.checkFlowDependencies(flow); err != nil {
 		return nil, err
 	}
 	if version != 0 && flow.EditVersion != version {

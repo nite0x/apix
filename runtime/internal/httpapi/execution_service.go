@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"io"
 	"net"
 	"net/http"
@@ -104,6 +105,9 @@ func (s *executionService) Run(ctx context.Context, command RunCommand, vars *co
 }
 
 func (s *executionService) resolveRequest(command RunCommand) (RequestData, *string, *string, error) {
+	gate := lifecycle.For(s.repo.db)
+	gate.Lock()
+	defer gate.Unlock()
 	set := 0
 	if command.APIRequestID != "" {
 		set++
@@ -130,6 +134,9 @@ func (s *executionService) resolveRequest(command RunCommand) (RequestData, *str
 	if command.APIRequestID != "" {
 		request, err := s.repo.getRequest(command.APIRequestID)
 		if err != nil {
+			return RequestData{}, nil, nil, err
+		}
+		if err := s.repo.assertRequestExecutable(request.ID); err != nil {
 			return RequestData{}, nil, nil, err
 		}
 		return request.Request, &request.ID, nil, nil

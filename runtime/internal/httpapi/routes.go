@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +15,19 @@ import (
 // Routes exposes the v2 HTTP domain. It intentionally does not register any
 // legacy /api/http routes.
 func (s *HTTPService) Routes(r gin.IRouter) {
+	r.GET("/lifecycle/:kind/:id/references", func(c *gin.Context) {
+		kind := c.Param("kind")
+		if kind != "service" && kind != "database" && kind != "mcp" && kind != "request" {
+			writeBadRequest(c, errors.New("unknown resource kind"))
+			return
+		}
+		items, err := lifecycle.References(s.db, kind, c.Param("id"))
+		if err != nil {
+			writeAPIError(c, err)
+			return
+		}
+		c.JSON(200, items)
+	})
 	s.collectionRoutes(r)
 	s.requestRoutes(r)
 	s.workingCopyRoutes(r)
@@ -348,6 +362,10 @@ func writeBadRequest(c *gin.Context, err error) {
 	c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 }
 func writeAPIError(c *gin.Context, err error) {
+	if errors.Is(err, lifecycle.ErrProtected) {
+		c.JSON(409, gin.H{"error": err.Error()})
+		return
+	}
 	if errors.Is(err, errNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

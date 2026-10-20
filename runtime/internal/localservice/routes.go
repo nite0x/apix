@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"github.com/apix/apix/runtime/internal/executionrecord"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
@@ -16,6 +17,9 @@ func (s *Service) Routes(r gin.IRouter) {
 			code := http.StatusBadRequest
 			if errors.Is(err, sql.ErrNoRows) {
 				code = http.StatusNotFound
+			}
+			if errors.Is(err, lifecycle.ErrProtected) {
+				code = 409
 			}
 			c.JSON(code, gin.H{"error": err.Error()})
 			return

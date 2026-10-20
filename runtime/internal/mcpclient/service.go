@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"net/http"
 	"net/url"
 	"sort"
@@ -168,6 +169,12 @@ func (s *Service) List() ([]Server, error) {
 	return out, nil
 }
 func (s *Service) Save(v Server) (*Server, error) {
+	gate := lifecycle.For(s.db)
+	gate.Lock()
+	defer gate.Unlock()
+	if err := lifecycle.Check(s.db, "mcp", v.ID, false); err != nil {
+		return nil, err
+	}
 	if err := validServer(&v); err != nil {
 		return nil, err
 	}
@@ -224,6 +231,12 @@ func (s *Service) Save(v Server) (*Server, error) {
 	return s.Get(v.ID)
 }
 func (s *Service) Archive(id string) error {
+	gate := lifecycle.For(s.db)
+	gate.Lock()
+	defer gate.Unlock()
+	if err := lifecycle.Check(s.db, "mcp", id, true); err != nil {
+		return err
+	}
 	r, err := s.db.Exec(`UPDATE mcp_servers SET archived=1,edit_version=edit_version+1 WHERE id=? AND archived=0`, id)
 	if err != nil {
 		return err
@@ -285,6 +298,8 @@ func list(ctx context.Context, cli *client.Client) ([]mcp.Tool, error) {
 	return nil, errors.New("工具分页超过限制")
 }
 func (s *Service) Discover(ctx context.Context, id string) (*Discovery, error) {
+	release := lifecycle.Lease(s.db, "mcp", id)
+	defer release()
 	v, err := s.load(id, true)
 	if err != nil {
 		return nil, err
@@ -304,6 +319,8 @@ func (s *Service) Discover(ctx context.Context, id string) (*Discovery, error) {
 	return &Discovery{ServerName: info.ServerInfo.Name, ProtocolVersion: info.ProtocolVersion, Tools: tools, DurationMS: time.Since(started).Milliseconds()}, nil
 }
 func (s *Service) Call(ctx context.Context, req Request) *Result {
+	release := lifecycle.Lease(s.db, "mcp", req.ServerID)
+	defer release()
 	started := time.Now()
 	out := &Result{}
 	defer func() { out.DurationMS = time.Since(started).Milliseconds() }()

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"net"
 	"strings"
 	"sync"
@@ -131,6 +132,12 @@ func (s *Service) PutConnection(ctx context.Context, item Connection) (*Connecti
 }
 
 func (s *Service) SaveConnection(ctx context.Context, input ConnectionInput) (*Connection, error) {
+	gate := lifecycle.For(s.store)
+	gate.Lock()
+	defer gate.Unlock()
+	if err := lifecycle.Check(s.store, "database", input.ID, false); err != nil {
+		return nil, err
+	}
 	item := input.Connection
 	item.Name = strings.TrimSpace(item.Name)
 	item.Host = strings.TrimSpace(item.Host)
@@ -234,6 +241,12 @@ func (s *Service) SaveConnection(ctx context.Context, input ConnectionInput) (*C
 
 // DeleteConnection removes only Apix metadata, never the remote database.
 func (s *Service) DeleteConnection(ctx context.Context, id string) error {
+	gate := lifecycle.For(s.store)
+	gate.Lock()
+	defer gate.Unlock()
+	if err := lifecycle.Check(s.store, "database", id, true); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tx, err := s.store.BeginTx(ctx, nil)
@@ -338,6 +351,8 @@ func (s *Service) TestConnection(ctx context.Context, id string) error {
 func (s *Service) SetExecutionRecorder(record executionrecord.Recorder) { s.record = record }
 
 func (s *Service) Execute(ctx context.Context, cmd Command) (result *Result, err error) {
+	release := lifecycle.Lease(s.store, "database", cmd.ConnectionID)
+	defer release()
 	if err := validate(&cmd); err != nil {
 		return nil, err
 	}

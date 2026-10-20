@@ -26,9 +26,6 @@ func (s *Service) log(id, stream, message string) {
 	}
 }
 func (s *Service) Logs(ctx context.Context, id string, after int64) ([]LogLine, error) {
-	if _, err := s.definition(ctx, id); err != nil {
-		return nil, err
-	}
 	rows, err := s.db.QueryContext(ctx, `SELECT sequence,time,stream,message FROM local_service_logs WHERE service_id=? AND sequence>? ORDER BY sequence LIMIT 2000`, id, after)
 	if err != nil {
 		return nil, err

@@ -53,6 +53,7 @@ import { refreshRequestHistory } from './request-history.js';
     '/databases': { id: 'databases', title: '数据库', eyebrow: 'DATABASE CONNECTIONS', description: '手动执行 SQL、查看结果，管理 MySQL、PostgreSQL 和 Hologres 连接。' },
     '/commands': { id: 'commands', title: '命令行', eyebrow: 'COMMAND TESTING', description: '运行命令和脚本，验证退出码与输出，保存用例并追踪测试记录。' },
     '/mcp-tools': { id: 'mcp-tools', title: 'MCP 工具', eyebrow: 'MCP TOOL TESTING', description: '连接 MCP 服务器，发现和调试工具，保存用例并验证调用结果。' },
+    '/tests': { id: 'tests', title: '已保存用例', eyebrow: 'SAVED TEST CASES', description: '管理、归档和重复运行 HTTP、MCP 与命令行用例。' },
     '/flows': { id: 'tests', title: '流程', eyebrow: 'FLOWS', description: '创建、编辑与运行测试流程。' },
     '/execution-records': { id: 'tests', title: '执行记录', eyebrow: 'EXECUTION RECORDS', description: '统一查看流程和集合测试的执行进度、输入、断言与结果。' },
     '/logs': { id: 'logs', title: '日志', eyebrow: 'LIVE LOGS', description: '运行事件与服务输出实时汇总，支持来源筛选和暂停显示。' },
@@ -65,7 +66,7 @@ import { refreshRequestHistory } from './request-history.js';
       query.delete('tab');
       if (collection) { query.delete('id'); query.delete('run'); query.delete('type'); }
       if (query.get('type') === 'single') query.delete('type');
-      const path = `${records ? '/execution-records' : '/flows'}${query.size ? '?' + query : ''}`;
+      const path = `${records ? '/execution-records' : location.pathname === '/tests' ? '/tests' : '/flows'}${query.size ? '?' + query : ''}`;
       if (location.pathname + location.search !== path) history.replaceState(null, '', path);
     }
     const page = pages[location.pathname] || pages['/'];

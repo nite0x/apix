@@ -2,6 +2,7 @@ package database
 
 import (
 	"errors"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"net/http"
 	"strconv"
 
@@ -91,6 +92,9 @@ func writeError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrExecutionNotFound) {
 		status = http.StatusNotFound
+	}
+	if errors.Is(err, lifecycle.ErrProtected) {
+		status = 409
 	}
 	c.JSON(status, gin.H{"error": err.Error()})
 }

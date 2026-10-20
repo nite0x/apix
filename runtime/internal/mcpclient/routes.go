@@ -2,6 +2,7 @@ package mcpclient
 
 import (
 	"errors"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"github.com/gin-gonic/gin"
 )
 
@@ -14,6 +15,9 @@ func (s *Service) Routes(r gin.IRouter) {
 				code = 404
 			}
 			if errors.Is(err, ErrConflict) {
+				code = 409
+			}
+			if errors.Is(err, lifecycle.ErrProtected) {
 				code = 409
 			}
 			c.JSON(code, gin.H{"error": err.Error()})

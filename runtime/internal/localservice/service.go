@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"io"
 	"net/http"
 	"net/url"
@@ -76,6 +77,12 @@ func New(db *sql.DB) (*Service, error) {
 }
 
 func (s *Service) PutDefinition(ctx context.Context, d Definition) (*Definition, error) {
+	gate := lifecycle.For(s.db)
+	gate.Lock()
+	defer gate.Unlock()
+	if err := lifecycle.Check(s.db, "service", d.ID, false); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(d.Name) == "" || strings.TrimSpace(d.Command) == "" {
 		return nil, errors.New("name and executable command are required")
 	}
@@ -117,6 +124,12 @@ func (s *Service) PutDefinition(ctx context.Context, d Definition) (*Definition,
 
 // DeleteDefinition removes configuration while preserving historical logs.
 func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
+	gate := lifecycle.For(s.db)
+	gate.Lock()
+	defer gate.Unlock()
+	if err := lifecycle.Check(s.db, "service", id, true); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -195,6 +208,8 @@ func (s *Service) recordAction(ctx context.Context, id, owner, action string, ex
 	return result, errors.Join(err, finish(result, err))
 }
 func (s *Service) Start(ctx context.Context, id, owner string) (*Instance, error) {
+	release := lifecycle.Lease(s.db, "service", id)
+	defer release()
 	return s.recordAction(ctx, id, owner, "start", s.start)
 }
 func (s *Service) start(ctx context.Context, id, owner string) (*Instance, error) {

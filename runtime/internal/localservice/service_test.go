@@ -471,3 +471,30 @@ func TestDeleteDefinitionRequiresCompletedCleanup(t *testing.T) {
 		})
 	}
 }
+
+func TestHistoricalLogsSurviveDefinitionRemoval(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	s, err := New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	d, err := s.PutDefinition(ctx, Definition{Name: "retained source", Command: "echo", WorkDir: t.TempDir(), HealthURL: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.log(d.ID, "stdout", "retained evidence")
+	if err := s.DeleteDefinition(ctx, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := s.Logs(ctx, d.ID, 0)
+	if err != nil || len(logs) != 1 || logs[0].Message != "retained evidence" {
+		t.Fatalf("historical logs lost: %v %v", logs, err)
+	}
+}

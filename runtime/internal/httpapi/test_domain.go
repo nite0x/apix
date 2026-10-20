@@ -31,7 +31,9 @@ type MCPRunData struct {
 // TestCase is an independent input/expectation pair, not a Flow step. The
 // request is owned by the case so changing an API definition cannot change it.
 type TestCase struct {
-	Type string `json:"type"`
+	Archived     bool   `json:"archived"`
+	SourceStatus string `json:"source_status,omitempty"`
+	Type         string `json:"type"`
 	MCPTestData
 	CommandTestData
 	ID             string          `json:"id"`

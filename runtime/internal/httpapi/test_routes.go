@@ -93,7 +93,7 @@ func (s *HTTPService) testRoutes(r gin.IRouter) {
 	})
 	t := r.Group("/test-cases")
 	t.GET("", func(c *gin.Context) {
-		items, err := s.ListTestCases(c.Query("project_id"))
+		items, err := s.listTestCases(c.Query("project_id"), c.Query("archived") == "true")
 		if err != nil {
 			writeTestError(c, err)
 			return
@@ -135,6 +135,30 @@ func (s *HTTPService) testRoutes(r gin.IRouter) {
 			return
 		}
 		c.JSON(200, item)
+	})
+	t.POST("/:id/restore", func(c *gin.Context) {
+		item, err := s.RestoreTestCase(c.Param("id"))
+		if err != nil {
+			writeTestError(c, err)
+			return
+		}
+		c.JSON(200, item)
+	})
+	t.POST("/:id/duplicate", func(c *gin.Context) {
+		item, err := s.GetTestCase(c.Param("id"))
+		if err != nil {
+			writeTestError(c, err)
+			return
+		}
+		item.ID = ""
+		item.Name += " · 副本"
+		item.Archived = false
+		saved, err := s.SaveTestCase(*item)
+		if err != nil {
+			writeTestError(c, err)
+			return
+		}
+		c.JSON(201, saved)
 	})
 	t.DELETE("/:id", func(c *gin.Context) {
 		if err := s.ArchiveTestCase(c.Param("id")); err != nil {

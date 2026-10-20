@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"strings"
 	"time"
 
@@ -140,6 +141,12 @@ func validateTestCase(item *TestCase) error {
 }
 
 func (s *HTTPService) SaveTestCase(item TestCase) (*TestCase, error) {
+	gate := lifecycle.For(s.db)
+	gate.Lock()
+	defer gate.Unlock()
+	if strings.Contains(marshalJSON(item), "••••") {
+		return nil, invalidTest("请补填脱敏快照中的凭据后保存")
+	}
 	if err := validateTestCase(&item); err != nil {
 		return nil, err
 	}
@@ -197,12 +204,12 @@ func (s *HTTPService) SaveTestCase(item TestCase) (*TestCase, error) {
 	return s.GetTestCase(item.ID)
 }
 
-const testCaseColumns = `id,project_id,api_request_id,name,description,request_data,expected_status,assertions,edit_version,created_at,updated_at,type,mcp_data,command_data`
+const testCaseColumns = `id,project_id,api_request_id,name,description,request_data,expected_status,assertions,edit_version,created_at,updated_at,type,mcp_data,command_data,archived`
 
 func scanTestCase(row interface{ Scan(...any) error }) (*TestCase, error) {
 	var item TestCase
 	var request, assertions, mcpData, commandData string
-	if err := row.Scan(&item.ID, &item.ProjectID, &item.APIRequestID, &item.Name, &item.Description, &request, &item.ExpectedStatus, &assertions, &item.EditVersion, &item.CreatedAt, &item.UpdatedAt, &item.Type, &mcpData, &commandData); err != nil {
+	if err := row.Scan(&item.ID, &item.ProjectID, &item.APIRequestID, &item.Name, &item.Description, &request, &item.ExpectedStatus, &assertions, &item.EditVersion, &item.CreatedAt, &item.UpdatedAt, &item.Type, &mcpData, &commandData, &item.Archived); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errNotFound
 		}
@@ -224,10 +231,13 @@ func scanTestCase(row interface{ Scan(...any) error }) (*TestCase, error) {
 }
 
 func (s *HTTPService) GetTestCase(id string) (*TestCase, error) {
-	return scanTestCase(s.db.QueryRow(`SELECT `+testCaseColumns+` FROM test_cases WHERE id=? AND archived=0`, id))
+	return scanTestCase(s.db.QueryRow(`SELECT `+testCaseColumns+` FROM test_cases WHERE id=?`, id))
 }
 func (s *HTTPService) ListTestCases(project string) ([]TestCase, error) {
-	rows, err := s.db.Query(`SELECT `+testCaseColumns+` FROM test_cases WHERE project_id=? AND archived=0 ORDER BY updated_at DESC,id LIMIT 500`, valueOr(project, defaultProjectID))
+	return s.listTestCases(project, false)
+}
+func (s *HTTPService) listTestCases(project string, archived bool) ([]TestCase, error) {
+	rows, err := s.db.Query(`SELECT `+testCaseColumns+` FROM test_cases WHERE project_id=? AND archived=? ORDER BY updated_at DESC,id`, valueOr(project, defaultProjectID), archived)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +253,9 @@ func (s *HTTPService) ListTestCases(project string) ([]TestCase, error) {
 	return items, rows.Err()
 }
 func (s *HTTPService) ArchiveTestCase(id string) error {
+	gate := lifecycle.For(s.db)
+	gate.Lock()
+	defer gate.Unlock()
 	_, err := s.db.Exec(`UPDATE test_cases SET archived=1,updated_at=? WHERE id=?`, time.Now().UTC(), id)
 	return err
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"strings"
 	"time"
 
@@ -29,6 +30,14 @@ func (s *HTTPService) RunTest(ctx context.Context, in RunTestInput, runner func(
 	if (in.CaseID == "") == (in.TestCase == nil) {
 		return nil, invalidTest("provide exactly one of case_id or test_case")
 	}
+	gate := lifecycle.For(s.db)
+	gate.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			gate.Unlock()
+		}
+	}()
 	var item *TestCase
 	var err error
 	if in.CaseID != "" {
@@ -42,10 +51,13 @@ func (s *HTTPService) RunTest(ctx context.Context, in RunTestInput, runner func(
 		copy.EditVersion = 0
 		item = &copy
 	}
+	if item.Archived {
+		return nil, fmt.Errorf("%w: 用例已归档，请先恢复", errConflict)
+	}
 	if err := validateTestCase(item); err != nil {
 		return nil, err
 	}
-	if strings.Contains(marshalJSON(item.Request), "••••") {
+	if strings.Contains(marshalJSON(item), "••••") {
 		return nil, invalidTest("replace redacted snapshot values before executing a test")
 	}
 	batch, err := scanTestBatch(s.db.QueryRow(`SELECT `+batchColumns+` FROM test_batches b WHERE b.id=?`, in.BatchID))
@@ -89,6 +101,8 @@ func (s *HTTPService) RunTest(ctx context.Context, in RunTestInput, runner func(
 	if n != 1 {
 		return nil, fmt.Errorf("%w: batch is closed", errConflict)
 	}
+	gate.Unlock()
+	locked = false
 	s.flow.emit("test_case.started", batch.ID, r.ID, map[string]any{"name": r.Name, "status": "running"})
 	if item.Type == "command" {
 		return s.runCommandTest(ctx, item, &r, in.Variables)

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"net/http"
 	"strconv"
 
@@ -245,10 +246,12 @@ func writeFlowConflict(c *gin.Context, s *HTTPService, flowID string) {
 
 func writeFlowError(c *gin.Context, s *HTTPService, flowID string, err error) {
 	switch {
+	case errors.Is(err, lifecycle.ErrProtected):
+		c.JSON(409, gin.H{"error": err.Error()})
 	case errors.Is(err, errNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, errConflict):
-		if flowID != "" {
+		if flowID != "" && err.Error() == errConflict.Error() {
 			writeFlowConflict(c, s, flowID)
 			return
 		}

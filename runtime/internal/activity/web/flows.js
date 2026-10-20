@@ -3,7 +3,7 @@ import { openRequestDetail } from './request-detail.js';
 import { revealExecutionStep } from './execution-batch.js';
 
 const root = document.getElementById('flow-workspace');
-const state = { flows: [], flow: null, run: null, history: [], databases: [], services: [], open: new Set(), tabs: new Map(), rail: 'variables', mode: 'edit', dirty: false, revision: 0, saving: null, saveTimer: null, pollTimer: null, visible: false, loading: false, starting: false, error: '', notice: '', apiRuns: new Map(), apiErrors: new Set(), pollBusy: false };
+const state = { archived: false, query: '', flows: [], flow: null, run: null, history: [], databases: [], services: [], open: new Set(), tabs: new Map(), rail: 'variables', mode: 'edit', dirty: false, revision: 0, saving: null, saveTimer: null, pollTimer: null, visible: false, loading: false, starting: false, error: '', notice: '', apiRuns: new Map(), apiErrors: new Set(), pollBusy: false };
 let selection = 0;
 let dialog = null;
 let targetStep = '';
@@ -109,7 +109,8 @@ export async function refreshFlows() {
   if (state.loading) return; state.loading = true;
   const token = selection;
   try {
-    state.flows = await api('/flows') || [];
+    state.flows = await api(state.archived ? '/flows?include_archived=true' : '/flows') || [];
+    state.flows=state.flows.filter(item=>Boolean(item.archived_at)===state.archived);
     if (token !== selection) return;
     if (state.flow && state.mode === 'run' && state.run) { await pollRun(); }
     else if (!state.dirty && !state.saving && state.flow) {
@@ -187,21 +188,23 @@ function renderWorkspace() {
   const toolbar = el('div', 'fw-toolbar');
   const title = el('div', 'fw-title-group');
   title.append(button(state.mode === 'run' ? '← 执行记录' : '← 全部流程', 'fw-back', async () => { if (!(await leaveFlows())) return; state.flow = null; state.run = null; state.error = ''; setLocation(); await refreshFlows(); }), input(state.mode === 'run' ? state.run.flow_name_snapshot : flow.name, '流程名称', value => { flow.name = value; changed(); }, { max: 120 }));
-  title.querySelector('input').readOnly = state.mode === 'run';
+  title.querySelector('input').readOnly = state.mode === 'run' || Boolean(flow.archived_at);
   const actions = el('div', 'fw-toolbar-actions'); const save = el('span', 'fw-save-state'); save.dataset.saveState = '';
   actions.append(save, button('另存副本', 'button small', saveCopy), button('保存', 'button small', () => void saveFlow()), button(state.starting ? '准备运行…' : '▶ 运行流程', 'button primary', runFlow)); actions.lastChild.disabled = state.starting;
+  if(flow.archived_at){for(const b of actions.querySelectorAll('button'))if(b.textContent!=='另存副本')b.disabled=true;actions.append(button('恢复流程','button',()=>changeArchive(flow,false)));}else actions.append(button('归档流程','button small',()=>changeArchive(flow,true)));
   toolbar.append(title, actions); fragment.append(toolbar);
   const workspace = el('div', 'fw-studio'); const canvas = el('div', 'fw-canvas');
   const modebar = el('div', 'fw-modebar'); const modes = el('div', 'fw-segment');
   modes.append(button('流程编排', state.mode === 'edit' ? 'selected' : '', () => { state.mode = 'edit'; setLocation(); renderWorkspace(); }), button('执行结果', state.mode === 'run' ? 'selected' : '', () => { if (!state.run) { state.rail = 'history'; renderRail(); return; } state.mode = 'run'; setLocation(); renderWorkspace(); }));
   modebar.append(modes, el('span', 'fw-hint', state.mode === 'edit' ? '顺序执行 · 修改自动保存' : state.run ? `定义快照 v${state.run.flow_version}` : '从右侧选择运行记录')); canvas.append(modebar);
   if (state.mode === 'run' && state.run) renderRun(canvas); else renderSteps(canvas);
-  const rail = el('aside', 'fw-rail'); rail.setAttribute('aria-label', '流程上下文'); rail.dataset.flowRail = ''; workspace.append(canvas, rail); fragment.append(workspace); root.replaceChildren(fragment); saveLabel(); renderRail();
+  const rail = el('aside', 'fw-rail'); rail.setAttribute('aria-label', '流程上下文'); rail.dataset.flowRail = ''; workspace.append(canvas, rail); if(flow.archived_at&&state.mode!=='run'){canvas.querySelectorAll('input,button,textarea,select').forEach(node=>{node.disabled=true;});canvas.prepend(el('p','fw-message','流程已归档，可查看定义和历史；恢复后才能编辑或运行。'));} fragment.append(workspace); root.replaceChildren(fragment); saveLabel(); renderRail();
 }
 function renderLibrary(fragment) {
   const header = el('div', 'fw-library-heading'); header.append(el('div', '', `多步流程 · ${state.flows.length}`), button('＋ 新建多步流程', 'button primary', createFlow)); fragment.append(header);
+  const filters=el('div','testing-actions');filters.append(input(state.query,'搜索流程',value=>{state.query=value;renderWorkspace();const control=root.querySelector('[aria-label="搜索流程"]');control?.focus();control?.setSelectionRange(value.length,value.length);},{placeholder:'搜索全部流程名称或说明'}),button(state.archived?'返回有效流程':'已归档流程','button',async()=>{state.archived=!state.archived;await refreshFlows();}));fragment.append(filters);
   const grid = el('div', 'fw-library');
-  for (const flow of state.flows) {
+  for (const flow of state.flows.filter(item=>`${item.name} ${item.description}`.toLowerCase().includes(state.query.toLowerCase()))) {
     const card = button('', 'fw-library-card', () => void openFlow(flow.id));
     const top = el('div', 'fw-library-card-top'); top.append(el('span', 'fw-library-icon', '⌘'), el('span', 'fw-hint', `${flow.step_count} STEPS`));
     card.append(top, el('h3', '', flow.name), el('p', 'fw-hint', flow.description || '准备数据，执行请求，验证每一个预期。'));
@@ -539,3 +542,5 @@ function renderServiceResult(body, step) {
 }
 window.addEventListener('beforeunload', event => { if (state.dirty || state.saving) { event.preventDefault(); event.returnValue = ''; } });
 window.addEventListener('keydown', event => { if (state.visible && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void saveFlow(); } });
+
+function changeArchive(flow,archive){const content=el('p','',archive?'归档后禁止新运行，已开始的运行继续完成，历史记录保留。':'恢复前会检查每个步骤的依赖。');showDialog(archive?'归档流程':'恢复流程',flow.name,content,archive?'确认归档':'确认恢复',async()=>{if(!(await leaveFlows()))throw new Error('请先保存当前修改。');await api(`/flows/${encodeURIComponent(flow.id)}${archive?'':'/restore'}`,{method:archive?'DELETE':'POST'});state.flow=await api(`/flows/${encodeURIComponent(flow.id)}`);await refreshFlows();});}

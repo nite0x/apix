@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"net/url"
 	"regexp"
 	"sort"
@@ -451,8 +452,17 @@ func (r *repository) flowSummary(id string) (*FlowSummary, error) {
 // updateFlow persists a full aggregate under optimistic concurrency. On version
 // mismatch it returns errConflict; the caller re-reads the current summary.
 func (r *repository) updateFlow(in *Flow, expectedVersion int64) (*Flow, error) {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
 	current, err := r.getFlow(in.ID)
 	if err != nil {
+		return nil, err
+	}
+	if current.ArchivedAt != nil {
+		return nil, fmt.Errorf("%w: 流程已归档，请先恢复", errConflict)
+	}
+	if err := r.checkFlowDependencies(in); err != nil {
 		return nil, err
 	}
 	in.ProjectID = current.ProjectID
@@ -506,12 +516,18 @@ func (r *repository) updateFlow(in *Flow, expectedVersion int64) (*Flow, error) 
 // patchFlow updates only metadata (name/description/environment_id) under
 // optimistic concurrency. Used by sidebar rename without loading the aggregate.
 func (r *repository) patchFlow(id string, name, description *string, environmentID **string, expectedVersion int64) (*Flow, error) {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
 	current, err := r.getFlow(id)
 	if err != nil {
 		return nil, err
 	}
 	if current.EditVersion != expectedVersion {
 		return nil, errConflict
+	}
+	if current.ArchivedAt != nil {
+		return nil, fmt.Errorf("%w: 流程已归档，请先恢复", errConflict)
 	}
 	newName := current.Name
 	if name != nil {
@@ -548,14 +564,27 @@ func (r *repository) patchFlow(id string, name, description *string, environment
 // archiveFlow soft-deletes a Flow. It is idempotent: archiving an already
 // archived (or missing) Flow is a no-op that returns nil.
 func (r *repository) archiveFlow(id string) error {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
 	now := time.Now().UTC()
-	_, err := r.db.Exec(`UPDATE flows SET archived_at=?, updated_at=? WHERE id=? AND archived_at IS NULL`, now, now, id)
+	_, err := r.db.Exec(`UPDATE flows SET archived_at=?, updated_at=?,edit_version=edit_version+1 WHERE id=? AND archived_at IS NULL`, now, now, id)
 	return err
 }
 
 func (r *repository) restoreFlow(id string) (*FlowSummary, error) {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
+	flow, err := r.getFlow(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.checkFlowDependencies(flow); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
-	res, err := r.db.Exec(`UPDATE flows SET archived_at=NULL, updated_at=? WHERE id=?`, now, id)
+	res, err := r.db.Exec(`UPDATE flows SET archived_at=NULL, updated_at=?,edit_version=edit_version+1 WHERE id=?`, now, id)
 	if err != nil {
 		return nil, err
 	}
@@ -566,6 +595,9 @@ func (r *repository) restoreFlow(id string) (*FlowSummary, error) {
 }
 
 func (r *repository) duplicateFlow(id string) (*Flow, error) {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
 	source, err := r.getFlow(id)
 	if err != nil {
 		return nil, err

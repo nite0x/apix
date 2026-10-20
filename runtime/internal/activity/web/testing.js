@@ -5,7 +5,7 @@ import { openRequestDetail } from './request-detail.js';
 
 const root = document.getElementById('testing-workspace');
 const flowRoot = document.getElementById('flow-workspace');
-const state = { type: 'all', viewRevision: 0, batches: [], batch: null, tab: 'cases', active: false, loading: false, working: false, filter: 'all', batchQuery: '', batchType: 'all', query: '', order: 'sequence', timer: null, error: '', message: '', signature: '', selection: 0, paused: null };
+const state = { cases: [], archivedCases: false, caseQuery: '', caseType: 'all', selectedCases: new Set(), type: 'all', viewRevision: 0, batches: [], batch: null, tab: 'cases', active: false, loading: false, working: false, filter: 'all', batchQuery: '', batchType: 'all', query: '', order: 'sequence', timer: null, error: '', message: '', signature: '', selection: 0, paused: null };
 let mounted = false;
 let editor = null;
 let editorDirty = false;
@@ -36,7 +36,7 @@ function readRoute() {
   const query = new URLSearchParams(location.search);
   const legacyCollection = location.pathname === '/test-collections';
   state.tab = location.pathname === '/execution-records' || legacyCollection || query.get('tab') === 'batches' || query.get('tab') === 'records' || query.has('batch') || query.has('run') ? 'records' : 'cases';
-  state.type = !legacyCollection && !query.has('batch') && query.get('type') !== 'single' && (query.has('id') || query.has('run')) ? 'flow' : 'all';
+  state.type = location.pathname === '/flows' || (state.tab === 'records' && !legacyCollection && !query.has('batch') && query.get('type') !== 'single' && (query.has('id') || query.has('run'))) ? 'flow' : 'all';
 }
 function locationForBatch() {
   if (!state.active || isFlowView() || !['/flows', '/execution-records', '/tests', '/test-collections'].includes(location.pathname)) return;
@@ -61,22 +61,23 @@ function mount() {
 }
 async function showView() {
   render();
-  if (isFlowView() || state.tab === 'cases') await activateFlows();
+  if (isFlowView()) await activateFlows();
   else { deactivateFlows(); await refreshTesting(); }
 }
 function blank(title, text) { const node = el('div', 'testing-empty'); node.append(el('h2', '', title), el('p', '', text)); return node; }
 function render() {
   mount();
-  root.setAttribute('aria-label', state.tab === 'records' ? '执行记录工作区' : '流程工作区');
+  root.setAttribute('aria-label', state.tab === 'records' ? '执行记录工作区' : isFlowView() ? '流程工作区' : '已保存用例工作区');
   root.querySelector('#testing-view-panel').setAttribute('aria-label', state.tab === 'records' ? '执行记录' : '流程');
   toolbar.hidden = state.tab !== 'records' || isFlowView();
   root.querySelector('#testing-type-panel').setAttribute('aria-label', state.tab === 'records' ? '执行记录' : '流程列表');
   toolbar.querySelector('[data-batch-action]').hidden = state.tab !== 'records' || isFlowView();
-  root.querySelector('[data-testing-content]').hidden = isFlowView() || state.tab === 'cases';
-  flowRoot.hidden = state.tab === 'records' && !isFlowView();
+  root.querySelector('[data-testing-content]').hidden = isFlowView();
+  flowRoot.hidden = !isFlowView();
   toolbar.querySelectorAll('button').forEach(node => { node.disabled = state.working; });
   notice(state.error, state.message);
-  if (isFlowView() || state.tab === 'cases') return;
+  if (isFlowView()) return;
+  if (state.tab === 'cases') { renderCases(); return; }
   const signature = JSON.stringify([state.type, state.tab, state.batches, state.batch, state.working, state.paused]);
   if (signature === state.signature) return; state.signature = signature;
   const content = root.querySelector('[data-testing-content]');
@@ -302,7 +303,8 @@ async function selectBatch(id) {
   catch (error) { notice(error.message); }
 }
 export async function refreshTesting() {
-  if (isFlowView() || state.tab === 'cases') { await refreshFlows(); return; }
+  if (isFlowView()) { await refreshFlows(); return; }
+  if (state.tab === 'cases') { try { state.cases = await api(`/test-cases${state.archivedCases ? '?archived=true' : ''}`); renderCases(); } catch(error) { notice(error.message); } return; }
   if (state.loading) return; state.loading = true;
   const selection = state.selection; const id = state.batch?.id;
   try {
@@ -371,8 +373,8 @@ function openCaseEditor(item = null, temporary = false) {
         const result = await api(`/test-batches/${batch.id}/runs`, { method: 'POST', body: { test_case: value } });
         if (ownsBatch) await api(`/test-batches/${batch.id}/finish`, { method: 'POST' });
         await selectBatch(result.batch_id);
-      } else await api(item?.id ? `/test-cases/${item.id}` : '/test-cases', { method: item?.id ? 'PUT' : 'POST', body: value });
-      editorDirty = false; d.element.close(); await refreshTesting(); notice('', d.form.dataset.intent === 'run' ? '本次测试已记录' : '用例已保存');
+      } else { const saved = await api(item?.id ? `/test-cases/${item.id}` : '/test-cases', { method: item?.id ? 'PUT' : 'POST', body: value }); state.lastSavedCase=saved.id; }
+      editorDirty = false; d.element.close(); await refreshTesting(); notice('', d.form.dataset.intent === 'run' ? '本次测试已记录' : '用例已保存'); if(d.form.dataset.intent !== 'run') savedCaseLink(state.lastSavedCase);
     } catch (error) { if (d.element.open) d.showError(error.message); else notice(error.message); } finally { state.working = false; lockDialog(d, false); render(); }
   }); name.input.focus();
 }
@@ -413,9 +415,40 @@ export async function activateTesting() {
   if (revision !== state.viewRevision || !state.active) return;
   await showView(); clearTimeout(state.timer);
   if (revision !== state.viewRevision || !state.active) return;
+  if (location.pathname === '/tests' && query.get('id')) { const item=state.cases.find(item=>item.id===query.get('id')); if(item) openCaseDetails(item); else { try {openCaseDetails(await api(`/test-cases/${encodeURIComponent(query.get('id'))}`));} catch(error){notice(error.message);} } }
   if (targetStep && !isFlowView() && state.batch?.runs?.some(run => run.id === targetStep)) openRunDrawer(targetStep);
   const poll = async () => { if (!state.active) return; if (!isFlowView()) await refreshTesting(); if (state.active) state.timer = setTimeout(poll, 1500); }; state.timer = setTimeout(poll, 1500);
 }
 export function deactivateTesting() { state.active = false; closeRunDrawer(); if (toolbar) toolbar.hidden = true; state.viewRevision++; state.selection++; clearTimeout(state.timer); deactivateFlows(); }
 window.addEventListener('testing-flow-location', () => { if (state.active) { readRoute(); state.signature = ''; render(); if (!isFlowView() && state.tab === 'records') { deactivateFlows(); void refreshTesting(); } } });
 window.addEventListener('beforeunload', event => { if (editorDirty && editor?.open) { event.preventDefault(); event.returnValue = ''; } });
+
+function savedCaseLink(id) {
+  const target=root.querySelector('[data-testing-message]'); if(!target)return;
+  const link=el('a','button small','打开该用例'); link.href=`/tests${id ? '?id='+encodeURIComponent(id) : ''}`;link.dataset.route='';target.append(' ',link);target.hidden=false;
+}
+function renderCases() {
+  const content=root.querySelector('[data-testing-content]');
+  const focused=document.activeElement?.getAttribute('aria-label'); const cursor=document.activeElement?.selectionStart;
+  const panel=el('section','panel'); const head=el('div','panel-heading');head.append(el('h2','','已保存用例'));
+  for(const [type,label] of [['http','HTTP'],['mcp','MCP'],['command','命令行']]) head.append(button(`新建 ${label} 用例`,()=>openCaseEditor({type})));
+  panel.append(head);const tools=el('div','testing-actions');
+  const list=el('div','testing-case-list');
+  const search=searchInput('搜索已保存用例','搜索全部用例：名称、说明、请求目标',state.caseQuery,value=>{state.caseQuery=value;draw();});
+  const type=el('select');type.setAttribute('aria-label','用例类型');for(const [value,label] of [['all','全部类型'],['http','HTTP'],['mcp','MCP'],['command','命令行']])type.add(new Option(label,value));type.value=state.caseType;type.onchange=()=>{state.caseType=type.value;draw();};
+  const archived=button(state.archivedCases?'返回有效用例':'已归档用例',async()=>{state.archivedCases=!state.archivedCases;state.selectedCases.clear();await refreshTesting();});
+  const runSelected=button('运行勾选用例',()=>openRunEditor([...state.selectedCases]));runSelected.disabled=state.archivedCases||state.working||!state.selectedCases.size;
+  tools.append(search,type,archived,runSelected);panel.append(tools,list);content.replaceChildren(panel);
+  function draw(){list.replaceChildren();const query=state.caseQuery.trim().toLowerCase();const items=state.cases.filter(item=>(state.caseType==='all'||(item.type||'http')===state.caseType)&&`${item.name} ${item.description} ${item.request?.url||''} ${item.command_request?.program||''} ${item.mcp_request?.tool_name||''}`.toLowerCase().includes(query));
+    for(const item of items){const card=el('article','test-attempt');const select=el('input');select.type='checkbox';select.setAttribute('aria-label',`选择用例 ${item.name}`);select.checked=state.selectedCases.has(item.id);select.disabled=state.archivedCases;select.onchange=()=>{if(select.checked)state.selectedCases.add(item.id);else state.selectedCases.delete(item.id);runSelected.disabled=!state.selectedCases.size||state.working;};
+      const title=button(item.name,()=>openCaseDetails(item),'fw-text-button');const ops=el('div','testing-actions');ops.append(button('详情',()=>openCaseDetails(item)),button('复制',()=>perform(async()=>{await api(`/test-cases/${encodeURIComponent(item.id)}/duplicate`,{method:'POST'});},'副本已创建')));
+      if(item.archived||state.archivedCases)ops.append(button('恢复',()=>perform(()=>api(`/test-cases/${encodeURIComponent(item.id)}/restore`,{method:'POST'}),'用例已恢复')));
+      else ops.append(button('编辑',()=>openCaseEditor(item)),button('运行',()=>openRunEditor([item.id])),button('归档',()=>confirmArchiveCase(item)));
+      card.append(select,title,el('span','test-pill',item.type||'http'),el('p','subtle',`${item.description||''} · v${item.edit_version}`),ops);list.append(card);
+    }if(!items.length)list.append(blank('没有匹配的用例',state.archivedCases?'归档的用例可以从这里恢复。':'保存 HTTP、MCP 或命令行用例后，可以在这里查找和重复运行。'));
+  }draw();
+  if(focused){const input=[...content.querySelectorAll('[aria-label]')].find(n=>n.getAttribute('aria-label')===focused);input?.focus({preventScroll:true});if(input?.type==='search'&&cursor!=null)input.setSelectionRange(cursor,cursor);}
+}
+function confirmArchiveCase(item){const d=dialog('归档测试用例');d.content.append(el('p','',`归档“${item.name}”后将禁止新运行，已开始的运行和历史记录仍保留。可以在已归档列表恢复。`));d.actions.append(button('确认归档',async()=>{lockDialog(d,true);try{await api(`/test-cases/${encodeURIComponent(item.id)}`,{method:'DELETE'});state.selectedCases.delete(item.id);d.element.close();await refreshTesting();}catch(error){d.showError(error.message);}finally{lockDialog(d,false);}}));}
+function openCaseDetails(item){const d=dialog(`用例详情 · ${item.name}`);d.content.append(el('p','',`${item.type||'http'} · v${item.edit_version} · ${item.archived?'已归档':'使用中'}`),codeSection('用例定义',item));if(item.source_status)d.content.append(el('p','subtle',`来源接口：${item.source_status}`));
+ if(!item.archived)d.actions.append(button('编辑用例',()=>{d.element.close();openCaseEditor(item);}),button('运行用例',()=>{d.element.close();openRunEditor([item.id]);}));else d.actions.append(button('恢复用例',async()=>{try{await api(`/test-cases/${encodeURIComponent(item.id)}/restore`,{method:'POST'});d.element.close();await refreshTesting();}catch(error){d.showError(error.message);}}));}
