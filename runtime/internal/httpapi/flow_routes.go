@@ -116,7 +116,16 @@ func (s *HTTPService) flowRoutes(r gin.IRouter) {
 	})
 
 	g.POST("/:id/restore", func(c *gin.Context) {
-		summary, err := s.repo.restoreFlow(c.Param("id"))
+		var in struct {
+			Name string `json:"name"`
+		}
+		if c.Request.ContentLength > 0 {
+			if err := c.ShouldBindJSON(&in); err != nil {
+				writeBadRequest(c, err)
+				return
+			}
+		}
+		summary, err := s.repo.restoreFlowAs(c.Param("id"), in.Name)
 		if err != nil {
 			writeFlowError(c, s, c.Param("id"), err)
 			return

@@ -1,3 +1,4 @@
+import {recordManagementButtons,openRecordSearch,lifecycleButton} from './lifecycle-ui.js';
 import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flows.js';
 import { openCommandCaseEditor } from './command-tools.js';
 import { openMCPCaseEditor } from './mcp-tools.js';
@@ -50,7 +51,7 @@ function mount() {
   if (mounted) return; mounted = true; root.replaceChildren();
   toolbar = el('div', 'testing-toolbar');
   const actions = el('div', 'testing-actions'); actions.dataset.testingActions = '';
-  const batch = button('＋ 新建集合测试', openBatchEditor); batch.dataset.batchAction = ''; actions.append(batch);
+  actions.append(lifecycleButton('查询全部记录 / 已隐藏',()=>openRecordSearch(selectBatch)));const batch = button('＋ 新建集合测试', openBatchEditor); batch.dataset.batchAction = ''; actions.append(batch);
   toolbar.append(actions);
   const panel = el('div'); panel.id = 'testing-view-panel'; panel.setAttribute('role', 'region');
   const message = el('div', 'detail-alert testing-message'); message.dataset.testingMessage = ''; message.hidden = true;
@@ -145,7 +146,7 @@ function renderBatches() {
   const layout = el('div', 'testing-layout'); const list = el('aside', 'panel testing-batches'); list.setAttribute('aria-label', '执行记录列表');
   const tools = el('div', 'testing-list-tools'); const listHeading = el('div', 'testing-list-heading'); listHeading.append(el('h2', '', '执行批次'), el('span', 'subtle', `${state.batches.length} 条`));
   const items = el('div', 'testing-batch-items');
-  const search = searchInput('搜索执行记录', '搜索名称或批次 ID', state.batchQuery, value => { state.batchQuery = value; renderBatchItems(items); });
+  const search = searchInput('搜索执行记录', '搜索最近 100 条的名称或批次 ID', state.batchQuery, value => { state.batchQuery = value; renderBatchItems(items); });
   const type = el('select', 'testing-filter'); type.setAttribute('aria-label', '筛选记录类型');
   for (const [value, text] of [['all', '全部类型'], ['collection', '集合测试'], ['flow', '多步流程']]) type.add(new Option(text, value));
   type.value = state.batchType; type.addEventListener('change', () => { state.batchType = type.value; renderBatchItems(items); });
@@ -153,7 +154,7 @@ function renderBatches() {
   const detail = el('section', 'panel testing-detail'); const batch = state.batch;
   if (!batch) { detail.append(blank('每次测试，都有自己的记录', '接口、数据库、MCP、命令行和服务执行都会归入批次。打开批次查看输入与结果。')); layout.append(list, detail); return layout; }
   const heading = el('div', 'panel-heading'); const title = el('div'); title.append(el('h2', '', batch.name), el('small', 'subtle', `${clock(batch.created_at)} · #${batch.id.slice(0, 8)}`));
-  const actions = el('div', 'testing-actions'); actions.append(pill(batch.status));
+  const actions = el('div', 'testing-actions'); actions.append(pill(batch.status),recordManagementButtons(batch,()=>refreshTesting(),async()=>{state.batch=null;targetStep='';closeRunDrawer();locationForBatch();await refreshTesting();}));
   if (batch.source !== 'flow' && batch.status === 'running') { const add = button('＋ 添加测试', () => openCaseEditor(null, true)); const addMCP = button('＋ MCP 测试', () => openMCPCaseEditor(null, { batchID: batch.id, onSaved: async () => { await refreshTesting(); } })); addMCP.disabled = state.working; const addCommand = button('＋ 命令行测试', () => openCommandCaseEditor(null, { batchID: batch.id, onSaved: async () => { await refreshTesting(); } })); addCommand.disabled = state.working; actions.append(addMCP, addCommand); add.disabled = state.working; const finish = button('结束批次', () => perform(async () => { await api(`/test-batches/${batch.id}/finish`, { method: 'POST' }); }, '批次已结束')); finish.disabled = state.working || batch.counts.running > 0; actions.append(add, finish); }
   heading.append(title, actions);
   const counts = el('div', 'testing-summary'); counts.setAttribute('role', 'group'); counts.setAttribute('aria-label', '筛选测试结果');
@@ -442,9 +443,9 @@ function renderCases() {
   function draw(){list.replaceChildren();const query=state.caseQuery.trim().toLowerCase();const items=state.cases.filter(item=>(state.caseType==='all'||(item.type||'http')===state.caseType)&&`${item.name} ${item.description} ${item.request?.url||''} ${item.command_request?.program||''} ${item.mcp_request?.tool_name||''}`.toLowerCase().includes(query));
     for(const item of items){const card=el('article','test-attempt');const select=el('input');select.type='checkbox';select.setAttribute('aria-label',`选择用例 ${item.name}`);select.checked=state.selectedCases.has(item.id);select.disabled=state.archivedCases;select.onchange=()=>{if(select.checked)state.selectedCases.add(item.id);else state.selectedCases.delete(item.id);runSelected.disabled=!state.selectedCases.size||state.working;};
       const title=button(item.name,()=>openCaseDetails(item),'fw-text-button');const ops=el('div','testing-actions');ops.append(button('详情',()=>openCaseDetails(item)),button('复制',()=>perform(async()=>{await api(`/test-cases/${encodeURIComponent(item.id)}/duplicate`,{method:'POST'});},'副本已创建')));
-      if(item.archived||state.archivedCases)ops.append(button('恢复',()=>perform(()=>api(`/test-cases/${encodeURIComponent(item.id)}/restore`,{method:'POST'}),'用例已恢复')));
+      if(item.archived||state.archivedCases)ops.append(button('恢复',()=>restoreCase(item)));
       else ops.append(button('编辑',()=>openCaseEditor(item)),button('运行',()=>openRunEditor([item.id])),button('归档',()=>confirmArchiveCase(item)));
-      card.append(select,title,el('span','test-pill',item.type||'http'),el('p','subtle',`${item.description||''} · v${item.edit_version}`),ops);list.append(card);
+      card.append(select,title,el('span','test-pill',item.type||'http'),el('p','subtle',`${item.description||''} · v${item.edit_version}${item.needs_review?' · MCP 工具结构已变化，需检查并重新保存':''}${item.source_status&&item.source_status!=='active'?' · 来源接口已归档或删除，保留请求副本':''}`),ops);list.append(card);
     }if(!items.length)list.append(blank('没有匹配的用例',state.archivedCases?'归档的用例可以从这里恢复。':'保存 HTTP、MCP 或命令行用例后，可以在这里查找和重复运行。'));
   }draw();
   if(focused){const input=[...content.querySelectorAll('[aria-label]')].find(n=>n.getAttribute('aria-label')===focused);input?.focus({preventScroll:true});if(input?.type==='search'&&cursor!=null)input.setSelectionRange(cursor,cursor);}
@@ -452,3 +453,5 @@ function renderCases() {
 function confirmArchiveCase(item){const d=dialog('归档测试用例');d.content.append(el('p','',`归档“${item.name}”后将禁止新运行，已开始的运行和历史记录仍保留。可以在已归档列表恢复。`));d.actions.append(button('确认归档',async()=>{lockDialog(d,true);try{await api(`/test-cases/${encodeURIComponent(item.id)}`,{method:'DELETE'});state.selectedCases.delete(item.id);d.element.close();await refreshTesting();}catch(error){d.showError(error.message);}finally{lockDialog(d,false);}}));}
 function openCaseDetails(item){const d=dialog(`用例详情 · ${item.name}`);d.content.append(el('p','',`${item.type||'http'} · v${item.edit_version} · ${item.archived?'已归档':'使用中'}`),codeSection('用例定义',item));if(item.source_status)d.content.append(el('p','subtle',`来源接口：${item.source_status}`));
  if(!item.archived)d.actions.append(button('编辑用例',()=>{d.element.close();openCaseEditor(item);}),button('运行用例',()=>{d.element.close();openRunEditor([item.id]);}));else d.actions.append(button('恢复用例',async()=>{try{await api(`/test-cases/${encodeURIComponent(item.id)}/restore`,{method:'POST'});d.element.close();await refreshTesting();}catch(error){d.showError(error.message);}}));}
+
+function restoreCase(item){const d=dialog('恢复测试用例');const name=field('恢复用例名称',item.name);d.content.append(name.wrap);d.actions.append(button('确认恢复',async()=>{lockDialog(d,true);try{await api(`/test-cases/${encodeURIComponent(item.id)}/restore`,{method:'POST',body:{name:name.input.value}});d.element.close();await refreshTesting();}catch(error){d.showError(error.message);}finally{lockDialog(d,false);}}));}

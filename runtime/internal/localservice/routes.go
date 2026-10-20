@@ -11,6 +11,7 @@ import (
 )
 
 func (s *Service) Routes(r gin.IRouter) {
+	s.logManagementRoutes(r)
 	g := r.Group("/services")
 	respond := func(c *gin.Context, value any, err error) {
 		if err != nil {
@@ -26,7 +27,10 @@ func (s *Service) Routes(r gin.IRouter) {
 		}
 		c.JSON(http.StatusOK, value)
 	}
-	g.GET("", func(c *gin.Context) { v, e := s.ListDefinitions(c.Request.Context()); respond(c, v, e) })
+	g.GET("", func(c *gin.Context) {
+		v, e := s.ListArchivedDefinitions(c.Request.Context(), c.Query("archived") == "true")
+		respond(c, v, e)
+	})
 	g.GET("/:id", func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 		v, e := s.Details(c.Request.Context(), c.Param("id"))
@@ -41,7 +45,26 @@ func (s *Service) Routes(r gin.IRouter) {
 		v, e := s.PutDefinition(c.Request.Context(), d)
 		respond(c, v, e)
 	})
+	g.POST("/:id/archive", func(c *gin.Context) {
+		e := s.ArchiveDefinition(c.Request.Context(), c.Param("id"))
+		respond(c, gin.H{"archived": e == nil}, e)
+	})
+	g.POST("/:id/restore", func(c *gin.Context) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if c.Request.ContentLength > 0 {
+			if err := c.ShouldBindJSON(&in); err != nil {
+				respond(c, nil, err)
+				return
+			}
+		}
+		v, e := s.RestoreDefinition(c.Request.Context(), c.Param("id"), in.Name)
+		respond(c, v, e)
+	})
 	g.DELETE("/:id", func(c *gin.Context) {
+		c.Header("Deprecation", "true")
+		c.Header("Link", "</api/services/"+c.Param("id")+"/archive>; rel=\"successor-version\"")
 		err := s.DeleteDefinition(c.Request.Context(), c.Param("id"))
 		respond(c, gin.H{"deleted": err == nil}, err)
 	})

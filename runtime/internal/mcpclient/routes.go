@@ -25,7 +25,28 @@ func (s *Service) Routes(r gin.IRouter) {
 		}
 		c.JSON(200, v)
 	}
-	group.GET("", func(c *gin.Context) { v, e := s.List(); respond(c, v, e) })
+	group.GET("", func(c *gin.Context) { v, e := s.ListArchived(c.Query("archived") == "true"); respond(c, v, e) })
+	group.GET("/:id", func(c *gin.Context) { v, e := s.loadAny(c.Param("id"), false, true); respond(c, v, e) })
+	group.POST("/:id/restore", func(c *gin.Context) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if c.Request.ContentLength > 0 {
+			if err := c.ShouldBindJSON(&in); err != nil {
+				respond(c, nil, err)
+				return
+			}
+		}
+		v, e := s.Restore(c.Request.Context(), c.Param("id"), in.Name)
+		respond(c, v, e)
+	})
+	group.POST("/:id/archive", func(c *gin.Context) {
+		if err := s.Archive(c.Param("id")); err != nil {
+			respond(c, nil, err)
+			return
+		}
+		c.Status(204)
+	})
 	group.POST("", func(c *gin.Context) {
 		var in Server
 		if e := c.ShouldBindJSON(&in); e != nil {

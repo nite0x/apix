@@ -28,6 +28,7 @@ func (s *HTTPService) Routes(r gin.IRouter) {
 		}
 		c.JSON(200, items)
 	})
+	s.recordManagementRoutes(r)
 	s.collectionRoutes(r)
 	s.requestRoutes(r)
 	s.workingCopyRoutes(r)
@@ -40,9 +41,25 @@ func (s *HTTPService) Routes(r gin.IRouter) {
 
 func (s *HTTPService) collectionRoutes(r gin.IRouter) {
 	g := r.Group("/collections")
+	g.POST("/:id/restore", func(c *gin.Context) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if c.Request.ContentLength > 0 {
+			if err := c.ShouldBindJSON(&in); err != nil {
+				writeBadRequest(c, err)
+				return
+			}
+		}
+		if err := s.repo.restoreCollection(c.Param("id"), in.Name); err != nil {
+			writeAPIError(c, err)
+			return
+		}
+		c.Status(204)
+	})
 	g.GET("", func(c *gin.Context) {
 		projectID := valueOr(c.Query("project_id"), defaultProjectID)
-		items, err := s.repo.listCollections(projectID)
+		items, err := s.repo.listCollectionsState(projectID, valueOr(c.Query("status"), "active"))
 		if err != nil {
 			writeAPIError(c, err)
 			return
@@ -93,8 +110,53 @@ func (s *HTTPService) collectionRoutes(r gin.IRouter) {
 
 func (s *HTTPService) requestRoutes(r gin.IRouter) {
 	g := r.Group("/requests")
+	for _, action := range []string{"restore", "move"} {
+		g.POST("/:id/"+action, func(c *gin.Context) {
+			var in struct {
+				Name         string `json:"name"`
+				CollectionID string `json:"collection_id"`
+			}
+			if c.Request.ContentLength > 0 {
+				if err := c.ShouldBindJSON(&in); err != nil {
+					writeBadRequest(c, err)
+					return
+				}
+			}
+			item, err := s.repo.restoreRequest(c.Param("id"), in.CollectionID, in.Name)
+			if err != nil {
+				writeAPIError(c, err)
+				return
+			}
+			c.JSON(200, item)
+		})
+	}
+	g.POST("/:id/duplicate", func(c *gin.Context) {
+		item, err := s.repo.getRequest(c.Param("id"))
+		if err != nil {
+			writeAPIError(c, err)
+			return
+		}
+		item.ID = ""
+		item.Name += " · 副本"
+		item.Status = "active"
+		item.ArchivedAt = nil
+		if err := s.repo.createRequest(item); err != nil {
+			writeAPIError(c, err)
+			return
+		}
+		c.JSON(201, item)
+	})
 	g.GET("", func(c *gin.Context) {
 		collectionID := c.Query("collection_id")
+		if c.Query("archived") == "true" {
+			items, err := s.repo.archivedRequests(valueOr(c.Query("project_id"), defaultProjectID))
+			if err != nil {
+				writeAPIError(c, err)
+				return
+			}
+			c.JSON(200, items)
+			return
+		}
 		if collectionID == "" {
 			writeBadRequest(c, errors.New("collection_id is required"))
 			return

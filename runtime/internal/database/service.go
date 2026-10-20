@@ -26,14 +26,16 @@ var (
 )
 
 type Connection struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Host     string `json:"host,omitempty"`
-	Port     int    `json:"port,omitempty"`
-	Database string `json:"database,omitempty"`
-	Username string `json:"username,omitempty"`
-	SSLMode  string `json:"ssl_mode,omitempty"`
+	Archived           bool   `json:"archived"`
+	CredentialsCleared bool   `json:"credentials_cleared"`
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Type               string `json:"type"`
+	Host               string `json:"host,omitempty"`
+	Port               int    `json:"port,omitempty"`
+	Database           string `json:"database,omitempty"`
+	Username           string `json:"username,omitempty"`
+	SSLMode            string `json:"ssl_mode,omitempty"`
 }
 
 // ConnectionInput accepts a password without ever returning it in Connection.
@@ -66,8 +68,9 @@ type Command struct {
 }
 
 type Result struct {
-	Columns []string         `json:"columns"`
-	Rows    []map[string]any `json:"rows"`
+	ExecutionID int64            `json:"execution_id,omitempty"`
+	Columns     []string         `json:"columns"`
+	Rows        []map[string]any `json:"rows"`
 	// RowCount is -1 when Truncated: an exact count is not available.
 	RowCount     int   `json:"row_count"`
 	RowsAffected int64 `json:"rows_affected"`
@@ -92,6 +95,9 @@ type Service struct {
 func New(db *sql.DB) (*Service, error) {
 	if db == nil {
 		return nil, errors.New("database metadata store is required")
+	}
+	if err := lifecycle.Init(db); err != nil {
+		return nil, err
 	}
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS database_connections (
 		id TEXT PRIMARY KEY, name TEXT NOT NULL
@@ -136,6 +142,9 @@ func (s *Service) SaveConnection(ctx context.Context, input ConnectionInput) (*C
 	gate.Lock()
 	defer gate.Unlock()
 	if err := lifecycle.Check(s.store, "database", input.ID, false); err != nil {
+		return nil, err
+	}
+	if err := lifecycle.Active(s.store, "database", input.ID); err != nil {
 		return nil, err
 	}
 	item := input.Connection
@@ -236,6 +245,11 @@ func (s *Service) SaveConnection(ctx context.Context, input ConnectionInput) (*C
 		_ = entry.db.Close()
 		delete(s.pools, item.ID)
 	}
+	if input.Password != nil {
+		if _, err := s.store.ExecContext(ctx, `UPDATE resource_lifecycle SET credentials_cleared=0 WHERE kind='database' AND id=?`, item.ID); err != nil {
+			return nil, err
+		}
+	}
 	return &item, nil
 }
 
@@ -279,7 +293,10 @@ func (s *Service) DeleteConnection(ctx context.Context, id string) error {
 }
 
 func (s *Service) ListConnections(ctx context.Context) ([]Connection, error) {
-	rows, err := s.store.QueryContext(ctx, `SELECT c.id,c.name,COALESCE(d.host,''),COALESCE(d.port,0),COALESCE(d.database_name,''),COALESCE(d.username,''),COALESCE(d.driver_type,'mysql'),COALESCE(d.ssl_mode,'') FROM database_connections c LEFT JOIN database_connection_settings d ON c.id=d.connection_id ORDER BY c.name,c.id`)
+	return s.ListArchivedConnections(ctx, false)
+}
+func (s *Service) ListArchivedConnections(ctx context.Context, archived bool) ([]Connection, error) {
+	rows, err := s.store.QueryContext(ctx, `SELECT c.id,c.name,COALESCE(d.host,''),COALESCE(d.port,0),COALESCE(d.database_name,''),COALESCE(d.username,''),COALESCE(d.driver_type,'mysql'),COALESCE(d.ssl_mode,''),COALESCE(l.credentials_cleared,0) FROM database_connections c LEFT JOIN database_connection_settings d ON c.id=d.connection_id LEFT JOIN resource_lifecycle l ON l.kind='database' AND l.id=c.id WHERE COALESCE(l.archived,0)=? ORDER BY c.name,c.id`, archived)
 	if err != nil {
 		return nil, err
 	}
@@ -287,9 +304,10 @@ func (s *Service) ListConnections(ctx context.Context) ([]Connection, error) {
 	items := make([]Connection, 0)
 	for rows.Next() {
 		var item Connection
-		if err := rows.Scan(&item.ID, &item.Name, &item.Host, &item.Port, &item.Database, &item.Username, &item.Type, &item.SSLMode); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Host, &item.Port, &item.Database, &item.Username, &item.Type, &item.SSLMode, &item.CredentialsCleared); err != nil {
 			return nil, err
 		}
+		item.Archived = archived
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -339,6 +357,8 @@ func (s *Service) connectionConfig(ctx context.Context, id string) (*mysql.Confi
 }
 
 func (s *Service) TestConnection(ctx context.Context, id string) error {
+	release := lifecycle.Lease(s.store, "database", id)
+	defer release()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	db, err := s.pool(ctx, id)
@@ -356,13 +376,22 @@ func (s *Service) Execute(ctx context.Context, cmd Command) (result *Result, err
 	if err := validate(&cmd); err != nil {
 		return nil, err
 	}
+	var historyID int64
 	if s.record != nil && !executionrecord.Skipped(ctx) {
 		finish, e := s.record(ctx, "sql", "SQL · "+cmd.ConnectionID, cmd.BatchID, cmd)
 		if e != nil {
 			return nil, e
 		}
-		defer func() { err = errors.Join(err, finish(result, err)) }()
+		defer func() {
+			err = errors.Join(err, func() error {
+				if result == nil {
+					return finish(map[string]any{"execution_id": historyID}, err)
+				}
+				return finish(result, err)
+			}())
+		}()
 	}
+
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(cmd.TimeoutMS)*time.Millisecond)
 	defer cancel()
 	started := time.Now()
@@ -370,6 +399,7 @@ func (s *Service) Execute(ctx context.Context, cmd Command) (result *Result, err
 	if err != nil {
 		return nil, err
 	}
+	historyID = id
 	defer func() { s.finishExecution(id, started, result, err) }()
 	db, err := s.pool(ctx, cmd.ConnectionID)
 	if err != nil {
@@ -377,6 +407,7 @@ func (s *Service) Execute(ctx context.Context, cmd Command) (result *Result, err
 	}
 	result, err = execute(ctx, db, cmd)
 	if result != nil {
+		result.ExecutionID = id
 		result.DurationMS = time.Since(started).Milliseconds()
 	}
 	return result, err
@@ -474,4 +505,86 @@ func (s *Service) Close() error {
 		delete(s.pools, id)
 	}
 	return errors.Join(errs...)
+}
+
+func (s *Service) ArchiveConnection(ctx context.Context, id string) error {
+	gate := lifecycle.For(s.store)
+	gate.Lock()
+	defer gate.Unlock()
+	if err := lifecycle.Check(s.store, "database", id, true); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var name string
+	if err := s.store.QueryRowContext(ctx, `SELECT name FROM database_connections WHERE id=?`, id).Scan(&name); err != nil {
+		return err
+	}
+	if err := lifecycle.Mark(s.store, "database", id, name, true); err != nil {
+		return err
+	}
+	if entry, ok := s.pools[id]; ok {
+		_ = entry.db.Close()
+		delete(s.pools, id)
+	}
+	return nil
+}
+func (s *Service) RestoreConnection(ctx context.Context, id, name string) error {
+	gate := lifecycle.For(s.store)
+	gate.Lock()
+	defer gate.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var original string
+	if err := s.store.QueryRowContext(ctx, `SELECT name FROM database_connections WHERE id=?`, id).Scan(&original); err != nil {
+		return err
+	}
+	if name == "" {
+		name = original
+	}
+	name = strings.TrimSpace(name)
+	var n int
+	if err := s.store.QueryRowContext(ctx, `SELECT count(*) FROM database_connections c LEFT JOIN resource_lifecycle l ON l.kind='database' AND l.id=c.id WHERE c.id<>? AND COALESCE(l.archived,0)=0 AND lower(trim(c.name))=lower(?)`, id, name).Scan(&n); err != nil {
+		return err
+	}
+	if name == "" || n > 0 {
+		return fmt.Errorf("%w: 名称冲突，请改名后恢复", lifecycle.ErrProtected)
+	}
+	tx, err := s.store.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `UPDATE database_connections SET name=? WHERE id=?`, name, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE resource_lifecycle SET archived=0,name=? WHERE kind='database' AND id=?`, name, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (s *Service) ClearCredentials(ctx context.Context, id string) error {
+	gate := lifecycle.For(s.store)
+	gate.Lock()
+	defer gate.Unlock()
+	if err := lifecycle.Check(s.store, "database", id, true); err != nil {
+		return err
+	}
+	if !lifecycle.Archived(s.store, "database", id) {
+		return fmt.Errorf("%w: 请先归档连接再清除凭据", lifecycle.ErrProtected)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.store.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `UPDATE database_connection_settings SET password_encrypted=X'' WHERE connection_id=?`, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE resource_lifecycle SET credentials_cleared=1 WHERE kind='database' AND id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

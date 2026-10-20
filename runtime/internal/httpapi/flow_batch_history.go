@@ -87,7 +87,7 @@ func (s *HTTPService) appendFlowBatches(project string, items []TestBatch) ([]Te
  (SELECT count(*) FROM outcomes s WHERE s.flow_run_id=f.id AND outcome='failed'),
  (SELECT count(*) FROM outcomes s WHERE s.flow_run_id=f.id AND outcome='error'),
  (SELECT count(*) FROM outcomes s WHERE s.flow_run_id=f.id AND outcome='unverified')
- FROM flow_runs f WHERE f.project_id=? ORDER BY f.created_at DESC,f.id LIMIT 100`, valueOr(project, defaultProjectID))
+ FROM flow_runs f WHERE f.project_id=? ORDER BY f.created_at DESC,f.id`, valueOr(project, defaultProjectID))
 	if err != nil {
 		return nil, err
 	}
@@ -109,8 +109,5 @@ func (s *HTTPService) appendFlowBatches(project string, items []TestBatch) ([]Te
 		}
 		return items[i].CreatedAt.After(items[j].CreatedAt)
 	})
-	if len(items) > 100 {
-		items = items[:100]
-	}
 	return items, nil
 }

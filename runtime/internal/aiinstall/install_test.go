@@ -236,3 +236,52 @@ func TestRoutesValidateOriginTargetAndClient(t *testing.T) {
 		}
 	}
 }
+
+func TestRemovalBacksUpOnlyRecognizedApixEntryAndDetectsConcurrentEdits(t *testing.T) {
+	for _, id := range []string{"codex", "claude", "cursor", "vscode"} {
+		t.Run(id, func(t *testing.T) {
+			s, target := fixture(t)
+			c, _ := s.client(target, id)
+			original := `{"precise":12345678901234567890,"mcpServers":{"other":{"command":"keep"}},"servers":{"other":{"command":"keep"}}}`
+			if id == "codex" {
+				original = "# preserve comment\nmodel = \"keep\"\n[mcp_servers.other]\ncommand=\"keep\"\n"
+			}
+			put(t, c.Path, original)
+			if _, err := s.install(target, id); err != nil {
+				t.Fatal(err)
+			}
+			preview, _, _, _, err := s.removalPlan(target, id)
+			if err != nil || !preview.CanRemove {
+				t.Fatal(preview, err)
+			}
+			current, _ := os.ReadFile(c.Path)
+			if err := os.WriteFile(c.Path, append(current, ' '), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.remove(target, id, preview.Fingerprint); err == nil {
+				t.Fatal("ignored concurrent modification")
+			}
+			if err := os.WriteFile(c.Path, current, 0600); err != nil {
+				t.Fatal(err)
+			}
+			result, err := s.remove(target, id, preview.Fingerprint)
+			if err != nil || result.Status != "removed" || result.Backup == "" {
+				t.Fatal(result, err)
+			}
+			after, _ := os.ReadFile(c.Path)
+			if !strings.Contains(string(after), "keep") || strings.Contains(string(after), s.endpoint) {
+				t.Fatal("lost other settings or retained apix", string(after))
+			}
+			if id != "codex" && !strings.Contains(string(after), "12345678901234567890") {
+				t.Fatal("lost JSON number precision")
+			}
+		})
+	}
+	s, target := fixture(t)
+	c, _ := s.client(target, "cursor")
+	put(t, c.Path, `{"mcpServers":{"apix":{"url":"http://127.0.0.1:4317/mcp","headers":{"Authorization":"user-owned"}}}}`)
+	p, _, _, _, err := s.removalPlan(target, "cursor")
+	if err != nil || p.CanRemove || p.Status != "modified" {
+		t.Fatal("user modified entry removable", p, err)
+	}
+}

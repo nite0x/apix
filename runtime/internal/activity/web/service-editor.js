@@ -1,3 +1,4 @@
+import {openArchived,showReferences,lifecycleButton} from './lifecycle-ui.js';
 const $ = id => document.getElementById(id);
 const dialog = $('service-editor');
 const form = $('service-form');
@@ -72,7 +73,7 @@ export async function openServiceEditor(id, trigger) {
 export function openServiceDelete(service, trigger) {
   if (deleting) return;
   deleteTarget = service; deleteOpener = trigger;
-  $('service-delete-name').textContent = service.name;
+  const name=$('service-delete-name');name.textContent=service.name;const warning=$('service-delete-description');warning.replaceChildren(document.createTextNode('归档“'),name,document.createTextNode(`”的配置？历史日志已保留${service.owner==='external'?'；外部进程继续运行':''}。有效流程引用需要先处理。`));
   notice('service-delete-error'); deleteDialog.showModal();
 }
 
@@ -86,15 +87,15 @@ $('service-delete-confirm').addEventListener('click', async () => {
   if (deleting || !deleteTarget) return;
   const service = deleteTarget;
   deleting = true; $('service-delete-confirm').disabled = true; $('service-delete-cancel').disabled = true;
-  $('service-delete-confirm').textContent = '删除中…'; notice('service-delete-error');
+  $('service-delete-confirm').textContent = '归档中…'; notice('service-delete-error');
   try {
-    await api(`/${encodeURIComponent(service.id)}`, undefined, 'DELETE');
+    await api(`/${encodeURIComponent(service.id)}/archive`, undefined, 'POST');
     changed({ deletedID: service.id }); deleteDialog.close(); $('service-add').focus();
-    notice('service-editor-feedback', `已删除“${service.name}”的服务配置，历史日志已保留。`);
-  } catch (error) { notice('service-delete-error', `删除失败：${error.message}`, true); }
+    notice('service-editor-feedback', `已归档“${service.name}”的服务配置，历史日志已保留。`);
+  } catch (error) { notice('service-delete-error', `归档失败：${error.message}`, true); }
   finally {
     deleting = false; $('service-delete-confirm').disabled = false; $('service-delete-cancel').disabled = false;
-    $('service-delete-confirm').textContent = '删除服务';
+    $('service-delete-confirm').textContent = '归档服务';
   }
 });
 
@@ -142,3 +143,5 @@ form.addEventListener('submit', async event => {
     $('service-save-start').textContent = '保存并启动'; form.setAttribute('aria-busy', 'false'); changed();
   }
 });
+
+$('service-add').parentElement.append(lifecycleButton('已归档服务',()=>openArchived('service',()=>changed())));

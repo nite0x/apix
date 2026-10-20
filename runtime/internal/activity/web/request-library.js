@@ -1,3 +1,4 @@
+import {openArchived,showReferences,moveRequest,lifecycleAPI,lifecycleButton} from './lifecycle-ui.js';
 import { requestAPI, requestError } from './request-api.js';
 import { loadSavedRequest } from './manual-request.js';
 
@@ -32,7 +33,7 @@ function render() {
     const info = element('div', null, 'request-library-info');
     info.append(element('strong', item.name), element('span', `${item.request.method} ${item.request.url}`), element('small', names.get(item.collection_id)));
     const buttons = element('div', null, 'request-actions');
-    buttons.append(action('编辑 / 调试', `编辑接口 ${item.name}`, () => loadSavedRequest(item.id)),
+    buttons.append(action('复制', `复制接口 ${item.name}`,()=>mutate(async()=>{await lifecycleAPI(`/requests/${encodeURIComponent(item.id)}/duplicate`,undefined,'POST');await refreshLibrary();})),action('移动分组',`移动接口 ${item.name}`,()=>moveRequest(item,refreshLibrary)),action('引用与影响',`查看接口 ${item.name} 的引用`,()=>showReferences('request',item.id)),action('编辑 / 调试', `编辑接口 ${item.name}`, () => loadSavedRequest(item.id)),
       action('归档', `归档接口 ${item.name}`, () => mutate(async () => {
         if (!window.confirm(`归档接口“${item.name}”？已有执行记录会保留。`)) return;
         await requestAPI(`/requests/${encodeURIComponent(item.id)}`, null, 'DELETE');
@@ -84,7 +85,7 @@ form.addEventListener('submit', async event => {
 });
 $('collection-archive').addEventListener('click', () => mutate(async () => {
   const item = collections.find(item => item.id === $('library-collection').value);
-  if (!item || !window.confirm(`归档分组“${item.name}”？它将从接口库隐藏，已有执行记录会保留。`)) return;
+  if (!item || !window.confirm(`归档分组“${item.name}”？包含 ${requests.filter(request=>request.collection_id===item.id).length} 个接口；接口自身的归档状态保持不变，已有执行记录保留。`)) return;
   await requestAPI(`/collections/${encodeURIComponent(item.id)}`, null, 'DELETE');
   document.dispatchEvent(new window.CustomEvent('request-collection-archived', { detail: item.id }));
   await refreshLibrary();
@@ -93,3 +94,5 @@ $('library-collection').addEventListener('change', render);
 $('library-search').addEventListener('input', render);
 $('library-refresh').addEventListener('click', refreshLibrary);
 document.addEventListener('request-saved', refreshLibrary);
+
+$('library-refresh').parentElement.append(lifecycleButton('已归档接口',()=>openArchived('request',refreshLibrary)),lifecycleButton('已归档分组',()=>openArchived('collection',refreshLibrary)));

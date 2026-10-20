@@ -353,6 +353,7 @@ func (r *repository) getFlow(id string) (*Flow, error) {
 		return nil, err
 	}
 	flow.Steps = steps
+	r.enrichFlow(flow)
 	return flow, nil
 }
 
@@ -572,7 +573,8 @@ func (r *repository) archiveFlow(id string) error {
 	return err
 }
 
-func (r *repository) restoreFlow(id string) (*FlowSummary, error) {
+func (r *repository) restoreFlow(id string) (*FlowSummary, error) { return r.restoreFlowAs(id, "") }
+func (r *repository) restoreFlowAs(id, name string) (*FlowSummary, error) {
 	gate := lifecycle.For(r.db)
 	gate.Lock()
 	defer gate.Unlock()
@@ -582,6 +584,20 @@ func (r *repository) restoreFlow(id string) (*FlowSummary, error) {
 	}
 	if err := r.checkFlowDependencies(flow); err != nil {
 		return nil, err
+	}
+	if name == "" {
+		name = flow.Name
+	}
+	name = strings.TrimSpace(name)
+	if err := validateFlowMeta(name, flow.Description); err != nil {
+		return nil, err
+	}
+	var conflicts int
+	if err := r.db.QueryRow(`SELECT count(*) FROM flows WHERE project_id=? AND archived_at IS NULL AND id<>? AND lower(trim(name))=lower(?)`, flow.ProjectID, id, name).Scan(&conflicts); err != nil {
+		return nil, err
+	}
+	if conflicts > 0 {
+		return nil, fmt.Errorf("%w: 名称冲突，请改名后恢复", lifecycle.ErrProtected)
 	}
 	now := time.Now().UTC()
 	res, err := r.db.Exec(`UPDATE flows SET archived_at=NULL, updated_at=?,edit_version=edit_version+1 WHERE id=?`, now, id)

@@ -31,6 +31,7 @@ type MCPRunData struct {
 // TestCase is an independent input/expectation pair, not a Flow step. The
 // request is owned by the case so changing an API definition cannot change it.
 type TestCase struct {
+	NeedsReview  bool   `json:"needs_review"`
 	Archived     bool   `json:"archived"`
 	SourceStatus string `json:"source_status,omitempty"`
 	Type         string `json:"type"`
@@ -61,6 +62,8 @@ type TestCounts struct {
 // Batch lifecycle is explicit. A completed batch may contain failing cases;
 // counts describe the test outcome independently of lifecycle state.
 type TestBatch struct {
+	Hidden     bool          `json:"hidden"`
+	IsPinned   bool          `json:"is_pinned"`
 	Source     string        `json:"source,omitempty"`
 	ID         string        `json:"id"`
 	ProjectID  string        `json:"project_id"`

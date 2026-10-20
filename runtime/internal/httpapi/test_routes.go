@@ -137,7 +137,16 @@ func (s *HTTPService) testRoutes(r gin.IRouter) {
 		c.JSON(200, item)
 	})
 	t.POST("/:id/restore", func(c *gin.Context) {
-		item, err := s.RestoreTestCase(c.Param("id"))
+		var in struct {
+			Name string `json:"name"`
+		}
+		if c.Request.ContentLength > 0 {
+			if err := c.ShouldBindJSON(&in); err != nil {
+				writeBadRequest(c, err)
+				return
+			}
+		}
+		item, err := s.RestoreTestCaseAs(c.Param("id"), in.Name)
 		if err != nil {
 			writeTestError(c, err)
 			return

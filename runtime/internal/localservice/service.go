@@ -22,6 +22,7 @@ import (
 )
 
 type Definition struct {
+	Archived         bool     `json:"archived"`
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
 	WorkDir          string   `json:"work_dir"`
@@ -64,10 +65,14 @@ func New(db *sql.DB) (*Service, error) {
 	if db == nil {
 		return nil, errors.New("localservice: database is required")
 	}
+	if err := lifecycle.Init(db); err != nil {
+		return nil, err
+	}
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS local_service_definitions (id TEXT PRIMARY KEY, data TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS local_service_logs (sequence INTEGER PRIMARY KEY AUTOINCREMENT, service_id TEXT NOT NULL, time TEXT NOT NULL, stream TEXT NOT NULL, message TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS local_service_logs_service ON local_service_logs(service_id,sequence)`,
+		`CREATE TABLE IF NOT EXISTS log_cleanup_previews(token TEXT PRIMARY KEY,source TEXT NOT NULL,after_time TEXT NOT NULL,before_time TEXT NOT NULL,max_sequence INTEGER NOT NULL,expires_at TEXT NOT NULL)`,
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			return nil, err
@@ -83,6 +88,10 @@ func (s *Service) PutDefinition(ctx context.Context, d Definition) (*Definition,
 	if err := lifecycle.Check(s.db, "service", d.ID, false); err != nil {
 		return nil, err
 	}
+	if err := lifecycle.Active(s.db, "service", d.ID); err != nil {
+		return nil, err
+	}
+	d.Archived = false
 	if strings.TrimSpace(d.Name) == "" || strings.TrimSpace(d.Command) == "" {
 		return nil, errors.New("name and executable command are required")
 	}
@@ -119,6 +128,9 @@ func (s *Service) PutDefinition(ctx context.Context, d Definition) (*Definition,
 		return nil, err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO local_service_definitions(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data`, d.ID, string(data))
+	if err == nil {
+		err = lifecycle.Mark(s.db, "service", d.ID, d.Name, false)
+	}
 	return &d, err
 }
 
@@ -137,6 +149,13 @@ func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
 	}
 	if p := s.running[id]; p != nil && (p.instance.Status == "starting" || p.instance.Status == "running" || p.instance.Status == "stopping" || p.instance.Status == "cleanup_failed") {
 		return errors.New("stop service before deleting its definition")
+	}
+	d, err := s.definition(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := lifecycle.Mark(s.db, "service", id, d.Name, true); err != nil {
+		return err
 	}
 	result, err := s.db.ExecContext(ctx, `DELETE FROM local_service_definitions WHERE id=?`, id)
 	if err != nil {
@@ -159,7 +178,10 @@ func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
 	return nil
 }
 func (s *Service) ListDefinitions(ctx context.Context) ([]Definition, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT data FROM local_service_definitions ORDER BY id`)
+	return s.ListArchivedDefinitions(ctx, false)
+}
+func (s *Service) ListArchivedDefinitions(ctx context.Context, archived bool) ([]Definition, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT d.data FROM local_service_definitions d LEFT JOIN resource_lifecycle l ON l.kind='service' AND l.id=d.id WHERE COALESCE(l.archived,0)=? ORDER BY d.id`, archived)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +196,7 @@ func (s *Service) ListDefinitions(ctx context.Context) ([]Definition, error) {
 		if err := json.Unmarshal([]byte(raw), &d); err != nil {
 			return nil, err
 		}
+		d.Archived = archived
 		result = append(result, d)
 	}
 	return result, rows.Err()
@@ -186,6 +209,7 @@ func (s *Service) definition(ctx context.Context, id string) (Definition, error)
 		return d, err
 	}
 	err = json.Unmarshal([]byte(raw), &d)
+	d.Archived = lifecycle.Archived(s.db, "service", id)
 	return d, err
 }
 func ownerName(owner string) string {
@@ -227,6 +251,10 @@ func (s *Service) start(ctx context.Context, id, owner string) (*Instance, error
 	if err != nil {
 		s.mu.Unlock()
 		return nil, err
+	}
+	if d.Archived {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("%w: 服务配置已归档，请先恢复", lifecycle.ErrProtected)
 	}
 	if p := s.running[id]; p != nil && (p.instance.Status == "starting" || p.instance.Status == "running" || p.instance.Status == "stopping" || p.instance.Status == "cleanup_failed") {
 		if p.instance.Status == "starting" {
@@ -511,4 +539,63 @@ func (s *Service) Close() error {
 		result = errors.Join(result, s.Cleanup(ctx, owner))
 	}
 	return result
+}
+
+// ArchiveDefinition retires the Apix configuration; external processes keep running.
+func (s *Service) ArchiveDefinition(ctx context.Context, id string) error {
+	gate := lifecycle.For(s.db)
+	gate.Lock()
+	defer gate.Unlock()
+	if err := lifecycle.Check(s.db, "service", id, true); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, err := s.definition(ctx, id)
+	if err != nil {
+		return err
+	}
+	if p := s.running[id]; p != nil && (p.instance.Status == "starting" || p.instance.Status == "running" || p.instance.Status == "stopping" || p.instance.Status == "cleanup_failed") {
+		return fmt.Errorf("%w: 请先停止服务或完成进程清理", lifecycle.ErrProtected)
+	}
+	return lifecycle.Mark(s.db, "service", id, d.Name, true)
+}
+func (s *Service) RestoreDefinition(ctx context.Context, id, name string) (*Definition, error) {
+	gate := lifecycle.For(s.db)
+	gate.Lock()
+	defer gate.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, err := s.definition(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if name != "" {
+		d.Name = strings.TrimSpace(name)
+	}
+	var conflicts int
+	err = s.db.QueryRowContext(ctx, `SELECT count(*) FROM local_service_definitions d LEFT JOIN resource_lifecycle l ON l.kind='service' AND l.id=d.id WHERE d.id<>? AND COALESCE(l.archived,0)=0 AND lower(trim(json_extract(d.data,'$.name')))=lower(?)`, id, d.Name).Scan(&conflicts)
+	if err != nil {
+		return nil, err
+	}
+	if conflicts > 0 || d.Name == "" {
+		return nil, fmt.Errorf("%w: 名称冲突，请改名后恢复", lifecycle.ErrProtected)
+	}
+	d.Archived = false
+	raw, err := json.Marshal(d)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `UPDATE local_service_definitions SET data=? WHERE id=?`, string(raw), id); err != nil {
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE resource_lifecycle SET archived=0,name=? WHERE kind='service' AND id=?`, d.Name, id); err != nil {
+		return nil, err
+	}
+	return &d, tx.Commit()
 }

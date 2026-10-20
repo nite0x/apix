@@ -3,6 +3,7 @@ package httpapi
 import (
 	"database/sql"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/lifecycle"
 )
 
 const httpSchemaVersion = 7
@@ -15,6 +16,12 @@ const httpSchemaVersion = 7
 // schema in one pass. Unknown versions are rejected without replacing tables.
 func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 	s.db = db
+	if err := migrateRecordManagement(db); err != nil {
+		return err
+	}
+	if err := lifecycle.Init(db); err != nil {
+		return err
+	}
 
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_metadata (
 		name       TEXT PRIMARY KEY,

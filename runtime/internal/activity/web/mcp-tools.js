@@ -1,3 +1,4 @@
+import {openArchived,showReferences,lifecycleButton} from './lifecycle-ui.js';
 import { executionBatchLink } from './execution-batch.js';
 import { attachExecutionHistory } from './execution-history.js';
 let executionHistory = null;
@@ -20,10 +21,10 @@ function feedback(text = '', error = false) { const n = root.querySelector('[dat
 function mount() {
   if (mounted) return; mounted = true;
   const panel = node('section', 'panel'); const heading = node('div', 'panel-heading'); const intro = node('div'); intro.append(node('h2', '', 'MCP 服务器'), node('p', '', '通过 Streamable HTTP 连接服务器，发现工具并验证调用结果。'));
-  heading.append(intro, button('＋ 添加服务器', () => openServerEditor(), 'button primary')); panel.append(heading);
+  heading.append(intro, button('＋ 添加服务器', () => openServerEditor(), 'button primary'),lifecycleButton('已归档服务器',()=>openArchived('mcp',refreshMCP)));const search=field('搜索服务器','','input');search.input.type='search';search.input.placeholder='服务器名称或地址';search.input.oninput=()=>{state.serverQuery=search.input.value;const matches=state.servers.filter(s=>`${s.name} ${s.url}`.toLowerCase().includes(state.serverQuery.toLowerCase()));if(!matches.some(s=>s.id===state.server)){state.server=matches[0]?.id||'';clearTools();}renderConnection();};heading.append(search.wrap); panel.append(heading);
   const config = node('div', 'mcp-connection'); const server = field('当前服务器', '', 'select'); server.input.dataset.mcpServer = '';
   server.input.addEventListener('change', () => { state.server = server.input.value; clearTools(); renderConnection(); });
-  const actions = node('div', 'mcp-actions'); actions.append(button('编辑连接', () => openServerEditor(state.servers.find(s => s.id === state.server))), button('删除连接', archiveServer), button('测试连接并获取工具', discover, 'button primary'));
+  const actions = node('div', 'mcp-actions'); actions.append(button('编辑连接', () => openServerEditor(state.servers.find(s => s.id === state.server))), button('归档连接', archiveServer),lifecycleButton('引用与影响',()=>showReferences('mcp',state.server)), button('测试连接并获取工具', discover, 'button primary'));
   config.append(server.wrap, actions); const info = node('p', 'subtle'); info.dataset.mcpConnectionInfo = ''; panel.append(config, info);
   const message = node('div', 'detail-alert'); message.dataset.mcpFeedback = ''; message.hidden = true; panel.append(message);
   const workspace = node('div', 'mcp-layout'); const tools = node('aside', 'panel mcp-tools'); tools.setAttribute('aria-label', 'MCP 工具列表'); tools.dataset.mcpTools = '';
@@ -33,9 +34,9 @@ function mount() {
 function clearTools() { state.generation++; state.tools = []; state.tool = ''; state.discovery = null; renderTools(); feedback(); }
 function renderConnection() {
   mount(); const select = root.querySelector('[data-mcp-server]'); select.replaceChildren(new Option('请选择服务器', ''));
-  for (const s of state.servers) select.add(new Option(s.name, s.id)); select.value = state.server; select.disabled = state.working;
+  for (const s of state.servers.filter(s=>!state.serverQuery||`${s.name} ${s.url}`.toLowerCase().includes(state.serverQuery.toLowerCase()))) select.add(new Option(s.name, s.id)); select.value = state.server; select.disabled = state.working;
   const selected = state.servers.find(s => s.id === state.server);
-  root.querySelector('[data-mcp-connection-info]').textContent = selected ? `${selected.url} · 超时 ${selected.timeout_seconds} 秒${state.discovery ? ` · 已连接 ${state.discovery.server_name} · ${state.tools.length} 个工具 · ${state.discovery.duration_ms} ms` : ' · 尚未测试连接'}` : '添加并选择一个服务器开始测试。';
+  root.querySelector('[data-mcp-connection-info]').textContent = selected ? `${selected.url} · 超时 ${selected.timeout_seconds} 秒${state.discovery ? ` · 已连接 ${state.discovery.server_name} · ${state.tools.length} 个工具 · ${state.discovery.duration_ms} ms` : selected.discovered_at ? ` · 上次发现 ${new Date(selected.discovered_at).toLocaleString('zh-CN')}，请重新发现以确认工具有效` : ' · 尚未测试连接'}` : '添加并选择一个服务器开始测试。';
   root.querySelector('.panel-heading button').disabled = state.working;
   root.querySelectorAll('.mcp-tool').forEach(n => { n.disabled = state.working; });
   root.querySelectorAll('.mcp-actions button').forEach(n => { n.disabled = state.working || !selected; });
@@ -110,8 +111,8 @@ function openServerEditor(server) {
     d.lock(true); try { const saved = await api(server ? `/mcp-servers/${server.id}` : '/mcp-servers', { method: server ? 'PUT' : 'POST', body: value }); d.element.close(); state.server = saved.id; clearTools(); await refreshMCP(); feedback('连接已保存，可测试连接并获取工具。'); } catch (error) { d.error(error.message); } finally { d.lock(false); } }); name.input.focus();
 }
 function archiveServer() {
-  const server = state.servers.find(s => s.id === state.server); if (!server) return; const d = dialog('删除 MCP 服务器'); d.content.append(node('p', '', `删除“${server.name}”的连接配置？已有测试记录会保留，引用此服务器的用例需要重新选择连接。`));
-  d.actions.append(button('取消', () => d.element.close()), button('删除连接', async () => { d.lock(true); try { await api(`/mcp-servers/${server.id}`, { method: 'DELETE' }); d.element.close(); state.server = ''; clearTools(); await refreshMCP(); } catch (error) { d.error(error.message); } finally { d.lock(false); } }, 'button danger'));
+  const server = state.servers.find(s => s.id === state.server); if (!server) return; const d = dialog('归档 MCP 服务器连接'); d.content.append(node('p', '', `归档“${server.name}”的连接配置？不会停止远端 MCP 服务。加密认证信息和测试记录保留；有效用例引用需要先替换或归档。`));
+  d.actions.append(button('取消', () => d.element.close()), button('归档连接', async () => { d.lock(true); try { await api(`/mcp-servers/${server.id}/archive`, { method: 'POST' }); d.element.close(); state.server = ''; clearTools(); await refreshMCP(); } catch (error) { d.error(error.message); } finally { d.lock(false); } }, 'button danger'));
 }
 export async function openMCPCaseEditor(item = null, options = {}) {
   const d = dialog(item?.id ? '编辑 MCP 测试用例' : '新建 MCP 测试用例');

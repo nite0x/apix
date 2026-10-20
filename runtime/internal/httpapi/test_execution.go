@@ -51,6 +51,9 @@ func (s *HTTPService) RunTest(ctx context.Context, in RunTestInput, runner func(
 		copy.EditVersion = 0
 		item = &copy
 	}
+	if item.NeedsReview {
+		return nil, fmt.Errorf("%w: MCP 工具列表已变化，请检查并重新保存用例", lifecycle.ErrProtected)
+	}
 	if item.Archived {
 		return nil, fmt.Errorf("%w: 用例已归档，请先恢复", errConflict)
 	}

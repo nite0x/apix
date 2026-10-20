@@ -9,6 +9,7 @@ import (
 
 // Flow is the durable, editable process definition. It carries no run state.
 type Flow struct {
+	Dependencies  []FlowDependency         `json:"dependencies"`
 	ID            string                   `json:"id"`
 	ProjectID     string                   `json:"project_id"`
 	Name          string                   `json:"name"`
@@ -43,6 +44,7 @@ type FlowVariableDefinition struct {
 }
 
 type FlowStep struct {
+	SourceStatus       string             `json:"source_status,omitempty"`
 	ID                 string             `json:"id"`
 	Position           int                `json:"position"`
 	Type               string             `json:"type"`
@@ -180,4 +182,13 @@ type flowSnapshot struct {
 	Settings    FlowSettings             `json:"settings"`
 	Variables   []FlowVariableDefinition `json:"variables"`
 	Steps       []FlowStep               `json:"steps"`
+}
+
+type FlowDependency struct {
+	Kind   string `json:"kind"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	StepID string `json:"step_id"`
+	Step   string `json:"step"`
+	Status string `json:"status"`
 }

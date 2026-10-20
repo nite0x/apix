@@ -32,7 +32,7 @@ test('service management edits existing definitions and confirms deletion with l
       await new Promise(resolve => { release = resolve; });
       Object.assign(definition, JSON.parse(options.body)); Object.assign(services[0], definition); return result(definition);
     }
-    if (path === '/api/services/svc%2F1' && method === 'DELETE') {
+    if (path === '/api/services/svc%2F1/archive' && method === 'POST') {
       if (failDelete) return result({ error: 'stop service before deleting its definition' }, 400);
       await new Promise(resolve => { release = resolve; });
       services = services.filter(item => item.id !== definition.id); return result({ deleted: true });
@@ -44,9 +44,9 @@ test('service management edits existing definitions and confirms deletion with l
   try {
     await import('./web/app.js'); await tick();
     for (const name of ['running', 'starting', 'stopping', 'cleanup_failed', 'flow']) {
-      assert.equal(button('编辑', name).disabled, true); assert.equal(button('删除', name).disabled, true);
+      assert.equal(button('编辑', name).disabled, true); assert.equal(button('归档', name).disabled, true);
     }
-    assert.equal(button('编辑', 'external').disabled, false); assert.equal(button('删除', 'external').disabled, false);
+    assert.equal(button('编辑', 'external').disabled, false); assert.equal(button('归档', 'external').disabled, false);
     failLoad = true; button('编辑').click(); await tick();
     assert.match($('service-form-error').textContent, /load failed/); assert.equal($('service-save').disabled, true);
     $('service-editor-cancel').click(); failLoad = false;
@@ -61,17 +61,17 @@ test('service management edits existing definitions and confirms deletion with l
     release(); await tick();
     assert.equal($('service-editor').open, false); assert.equal(definition.id, 'svc/1'); assert.equal(definition.name, 'Edited service');
     assert.deepEqual(definition.args, ['server file.js', '--port', '18888']);
-    assert.equal(writes.some(item => item.method === 'POST'), false); assert.ok(button('编辑'));
+    assert.equal(writes.some(item => item.path.endsWith('/start')), false); assert.ok(button('编辑'));
     $('service-add').click(); assert.equal($('service-editor-title').textContent, '新增服务'); assert.equal($('service-name').value, ''); assert.equal($('service-save-start').hidden, false); $('service-editor-cancel').click();
-    button('删除').click(); assert.equal($('service-delete-name').textContent, definition.name);
-    $('service-delete-cancel').click(); assert.equal(writes.some(item => item.method === 'DELETE'), false);
-    button('删除').click(); failDelete = true; $('service-delete-confirm').click(); await tick();
-    assert.equal($('service-delete').open, true); assert.match($('service-delete-error').textContent, /stop service/); assert.ok(button('删除'));
+    button('归档').click(); assert.equal($('service-delete-name').textContent, definition.name);
+    $('service-delete-cancel').click(); assert.equal(writes.some(item => item.path.endsWith('/archive')), false);
+    button('归档').click(); failDelete = true; $('service-delete-confirm').click(); await tick();
+    assert.equal($('service-delete').open, true); assert.match($('service-delete-error').textContent, /stop service/); assert.ok(button('归档'));
     failDelete = false; $('service-delete-confirm').click(); $('service-delete-confirm').click(); await tick();
-    assert.equal(writes.filter(item => item.method === 'DELETE').length, 2); assert.equal($('service-delete-cancel').disabled, true);
+    assert.equal(writes.filter(item => item.path.endsWith('/archive')).length, 2); assert.equal($('service-delete-cancel').disabled, true);
     const cancel = new dom.window.Event('cancel', { cancelable: true }); $('service-delete').dispatchEvent(cancel); assert.equal(cancel.defaultPrevented, true);
     release(); await tick();
-    assert.equal($('service-delete').open, false); assert.equal(button('删除'), null); assert.match($('service-editor-feedback').textContent, /历史日志已保留/);
+    assert.equal($('service-delete').open, false); assert.equal(button('归档'), null); assert.match($('service-editor-feedback').textContent, /历史日志已保留/);
     assert.equal(document.activeElement, $('service-add'));
   } finally { dom.window.close(); }
 });

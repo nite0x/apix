@@ -498,3 +498,66 @@ func TestHistoricalLogsSurviveDefinitionRemoval(t *testing.T) {
 		t.Fatalf("historical logs lost: %v %v", logs, err)
 	}
 }
+
+func TestArchivedLogSourcesAndCleanupPreviewExcludeNewLines(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	s, err := New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	d, err := s.PutDefinition(ctx, Definition{Name: "retired", Command: "echo", WorkDir: t.TempDir(), HealthURL: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.log(d.ID, "stdout", "first")
+	if err := s.ArchiveDefinition(ctx, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := s.LogSources(ctx)
+	if err != nil || len(sources) != 1 || !sources[0].Archived || sources[0].Name != "retired" {
+		t.Fatal(sources, err)
+	}
+	router := gin.New()
+	s.Routes(router.Group("/api"))
+	body := fmt.Sprintf(`{"source":%q,"before":%q}`, d.ID, time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano))
+	req := httptest.NewRequest("POST", "/api/service-logs/cleanup-preview", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	var plan struct {
+		Token string `json:"token"`
+		Count int    `json:"count"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &plan); err != nil || plan.Count != 1 {
+		t.Fatal(plan, err)
+	}
+	s.log(d.ID, "stdout", "after preview")
+	req = httptest.NewRequest("POST", "/api/service-logs/cleanup", strings.NewReader(fmt.Sprintf(`{"token":%q}`, plan.Token)))
+	req.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	lines, err := s.Logs(ctx, d.ID, 0)
+	if err != nil || len(lines) != 1 || lines[0].Message != "after preview" {
+		t.Fatal("preview deleted future evidence", lines, err)
+	}
+	if err := s.DeleteDefinition(ctx, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	sources, err = s.LogSources(ctx)
+	if err != nil || sources[0].Name != "retired" || !sources[0].Deleted {
+		t.Fatal("lost historical identity", sources, err)
+	}
+}

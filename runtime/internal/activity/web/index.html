@@ -147,12 +147,12 @@
     </form>
   </dialog>
   <dialog id="service-delete" class="database-dialog" aria-labelledby="service-delete-title" aria-describedby="service-delete-description">
-    <div class="detail-heading"><h2 id="service-delete-title">删除服务</h2></div>
+    <div class="detail-heading"><h2 id="service-delete-title">归档服务配置</h2></div>
     <div class="database-form-body">
-      <p id="service-delete-description">确定删除“<strong id="service-delete-name"></strong>”的服务配置？历史日志会保留；复用的外部服务会继续运行。引用此服务的流程需重新配置服务。</p>
+      <p id="service-delete-description">归档“<strong id="service-delete-name"></strong>”的服务配置？历史日志会保留；复用的外部服务会继续运行。有效流程引用需要先处理；可从已归档列表恢复。</p>
       <div id="service-delete-error" class="detail-alert error" role="alert" hidden></div>
     </div>
-    <div class="database-dialog-actions"><button id="service-delete-cancel" class="button" type="button" autofocus>取消</button><button id="service-delete-confirm" class="button danger" type="button">删除服务</button></div>
+    <div class="database-dialog-actions"><button id="service-delete-cancel" class="button" type="button" autofocus>取消</button><button id="service-delete-confirm" class="button danger" type="button">归档服务</button></div>
   </dialog>
   <dialog id="request-detail" class="request-detail" aria-labelledby="detail-title">
     <div class="detail-heading"><div><div class="eyebrow">REQUEST INSPECTOR</div><h2 id="detail-title">接口执行详情</h2></div><div class="detail-tools"><button id="detail-refresh" class="button small" type="button">刷新详情</button><button id="detail-close" class="button small" type="button" aria-label="关闭请求详情" autofocus>关闭 ×</button></div></div>
@@ -191,9 +191,9 @@
     </form>
   </dialog>
   <dialog id="database-delete" class="database-dialog" aria-labelledby="database-delete-title" aria-describedby="database-delete-description">
-    <div class="detail-heading"><h2 id="database-delete-title">删除连接配置</h2></div>
-    <div class="database-form-body"><p id="database-delete-description"></p><p class="database-hint">只移除 Apix 中的连接配置，不会删除 MySQL 数据库或表数据。引用此连接的测试流程需重新配置后才能运行。</p><div id="database-delete-error" class="detail-alert error" role="alert" hidden></div></div>
-    <div class="database-dialog-actions"><button id="database-delete-cancel" class="button" type="button" autofocus>取消</button><button id="database-delete-confirm" class="button danger" type="button">删除连接</button></div>
+    <div class="detail-heading"><h2 id="database-delete-title">归档连接配置</h2></div>
+    <div class="database-form-body"><p id="database-delete-description"></p><p class="database-hint">只归档 Apix 中的连接配置，远端数据库不受影响，加密凭据与 SQL 历史保留。有效流程引用需要先处理；可从已归档列表恢复。</p><div id="database-delete-error" class="detail-alert error" role="alert" hidden></div></div>
+    <div class="database-dialog-actions"><button id="database-delete-cancel" class="button" type="button" autofocus>取消</button><button id="database-delete-confirm" class="button danger" type="button">归档连接</button></div>
   </dialog>
 <dialog id="collection-dialog" class="database-dialog" aria-labelledby="collection-dialog-title"><form id="collection-form"><div class="detail-heading"><h2 id="collection-dialog-title">新建分组</h2></div><div class="database-form-body"><label for="collection-name">分组名称</label><input id="collection-name" required maxlength="200" autocomplete="off"><p id="collection-error" class="detail-alert error" role="alert" hidden></p></div><div class="database-dialog-actions"><button id="collection-cancel" class="button" type="button">取消</button><button id="collection-submit" class="button primary" type="submit">保存分组</button></div></form></dialog>
 </body>

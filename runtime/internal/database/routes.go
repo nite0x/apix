@@ -35,7 +35,7 @@ func (s *Service) Routes(r gin.IRouter) {
 		c.JSON(http.StatusOK, items)
 	})
 	g.GET("/connections", func(c *gin.Context) {
-		items, err := s.ListConnections(c.Request.Context())
+		items, err := s.ListArchivedConnections(c.Request.Context(), c.Query("archived") == "true")
 		if err != nil {
 			writeError(c, err)
 			return
@@ -63,7 +63,38 @@ func (s *Service) Routes(r gin.IRouter) {
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
+	g.POST("/connections/:id/archive", func(c *gin.Context) {
+		if err := s.ArchiveConnection(c.Request.Context(), c.Param("id")); err != nil {
+			writeError(c, err)
+			return
+		}
+		c.Status(204)
+	})
+	g.POST("/connections/:id/restore", func(c *gin.Context) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if c.Request.ContentLength > 0 {
+			if err := c.ShouldBindJSON(&in); err != nil {
+				writeError(c, err)
+				return
+			}
+		}
+		if err := s.RestoreConnection(c.Request.Context(), c.Param("id"), in.Name); err != nil {
+			writeError(c, err)
+			return
+		}
+		c.Status(204)
+	})
+	g.DELETE("/connections/:id/credentials", func(c *gin.Context) {
+		if err := s.ClearCredentials(c.Request.Context(), c.Param("id")); err != nil {
+			writeError(c, err)
+			return
+		}
+		c.Status(204)
+	})
 	g.DELETE("/connections/:id", func(c *gin.Context) {
+		c.Header("Deprecation", "true")
 		if err := s.DeleteConnection(c.Request.Context(), c.Param("id")); err != nil {
 			writeError(c, err)
 			return

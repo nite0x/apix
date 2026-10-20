@@ -28,6 +28,7 @@ type monitor struct {
 	history  *journal.Store
 }
 type serviceItem struct {
+	Command   string `json:"command"`
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	HealthURL string `json:"health_url"`
@@ -76,7 +77,7 @@ func Routes(r gin.IRouter, db *sql.DB, services *localservice.Service, history *
 	web, _ := fs.Sub(assets, "web")
 	r.GET("/activity/assets/:name", func(c *gin.Context) {
 		name := c.Param("name")
-		if name != "execution-history.js" && name != "execution-history.css" && name != "execution-batch.js" && name != "command-tools.js" && name != "command-tools.css" && name != "mcp-tools.js" && name != "mcp-tools.css" && name != "ai-tools.js" && name != "ai-tools.css" && name != "request-api.js" && name != "request-library.js" && name != "request-history.js" && name != "workspace-tabs.js" && name != "app.js" && name != "request-detail.js" && name != "service-detail.js" && name != "databases.js" && name != "style.css" && name != "desktop.css" && name != "services.css" && name != "flows.js" && name != "flow-model.js" && name != "flows.css" && name != "testing.js" && name != "testing.css" && name != "manual-request.js" && name != "manual-request.css" && name != "service-editor.js" && name != "manual-tools.css" {
+		if name != "lifecycle-ui.js" && name != "execution-history.js" && name != "execution-history.css" && name != "execution-batch.js" && name != "command-tools.js" && name != "command-tools.css" && name != "mcp-tools.js" && name != "mcp-tools.css" && name != "ai-tools.js" && name != "ai-tools.css" && name != "request-api.js" && name != "request-library.js" && name != "request-history.js" && name != "workspace-tabs.js" && name != "app.js" && name != "request-detail.js" && name != "service-detail.js" && name != "databases.js" && name != "style.css" && name != "desktop.css" && name != "services.css" && name != "flows.js" && name != "flow-model.js" && name != "flows.css" && name != "testing.js" && name != "testing.css" && name != "manual-request.js" && name != "manual-request.css" && name != "service-editor.js" && name != "manual-tools.css" {
 			c.Status(404)
 			return
 		}
@@ -141,7 +142,7 @@ func (m *monitor) snapshot(c *gin.Context) {
 		if state.Status == "running" {
 			running++
 		}
-		services = append(services, serviceItem{ID: d.ID, Name: d.Name, HealthURL: safeURL(d.HealthURL), Status: state.Status, PID: state.PID, Owner: state.Owner})
+		services = append(services, serviceItem{Command: d.Command, ID: d.ID, Name: d.Name, HealthURL: safeURL(d.HealthURL), Status: state.Status, PID: state.PID, Owner: state.Owner})
 	}
 	sort.SliceStable(services, func(i, j int) bool {
 		a, b := services[i].Status == "running", services[j].Status == "running"

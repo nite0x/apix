@@ -23,23 +23,24 @@ func WithFlowOrigin(ctx context.Context, flowID, runID, stepID string) context.C
 
 // Execution keeps SQL history separate from runtime logs and database credentials.
 type Execution struct {
-	ID             int64           `json:"id"`
-	ConnectionID   string          `json:"connection_id"`
-	ConnectionName string          `json:"connection_name"`
-	Mode           string          `json:"mode"`
-	SQL            string          `json:"sql"`
-	Params         json.RawMessage `json:"params"`
-	Status         string          `json:"status"`
-	StartedAt      time.Time       `json:"started_at"`
-	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
-	DurationMS     int64           `json:"duration_ms"`
-	RowCount       int             `json:"row_count"`
-	RowsAffected   int64           `json:"rows_affected"`
-	Truncated      bool            `json:"truncated"`
-	Error          string          `json:"error,omitempty"`
-	FlowID         string          `json:"flow_id,omitempty"`
-	FlowRunID      string          `json:"flow_run_id,omitempty"`
-	StepID         string          `json:"step_id,omitempty"`
+	ConnectionStatus string          `json:"connection_status"`
+	ID               int64           `json:"id"`
+	ConnectionID     string          `json:"connection_id"`
+	ConnectionName   string          `json:"connection_name"`
+	Mode             string          `json:"mode"`
+	SQL              string          `json:"sql"`
+	Params           json.RawMessage `json:"params"`
+	Status           string          `json:"status"`
+	StartedAt        time.Time       `json:"started_at"`
+	FinishedAt       *time.Time      `json:"finished_at,omitempty"`
+	DurationMS       int64           `json:"duration_ms"`
+	RowCount         int             `json:"row_count"`
+	RowsAffected     int64           `json:"rows_affected"`
+	Truncated        bool            `json:"truncated"`
+	Error            string          `json:"error,omitempty"`
+	FlowID           string          `json:"flow_id,omitempty"`
+	FlowRunID        string          `json:"flow_run_id,omitempty"`
+	StepID           string          `json:"step_id,omitempty"`
 }
 
 func (s *Service) initHistory() error {
@@ -154,7 +155,7 @@ func (s *Service) GetExecutionResult(ctx context.Context, id int64) (*Result, er
 }
 
 func (s *Service) ListExecutions(ctx context.Context, connectionID string) ([]Execution, error) {
-	rows, err := s.store.QueryContext(ctx, `SELECT id,connection_id,connection_name,mode,sql_text,params,status,started_at,finished_at,duration_ms,row_count,rows_affected,truncated,error,flow_id,flow_run_id,step_id
+	rows, err := s.store.QueryContext(ctx, `SELECT id,connection_id,connection_name,mode,sql_text,params,status,started_at,finished_at,duration_ms,row_count,rows_affected,truncated,error,flow_id,flow_run_id,step_id,CASE WHEN NOT EXISTS(SELECT 1 FROM database_connections c WHERE c.id=database_executions.connection_id) THEN 'deleted' WHEN EXISTS(SELECT 1 FROM resource_lifecycle l WHERE l.kind='database' AND l.id=database_executions.connection_id AND l.archived=1) THEN 'archived' ELSE 'active' END
 		FROM database_executions WHERE (?='' OR connection_id=?) ORDER BY id DESC LIMIT 100`, connectionID, connectionID)
 	if err != nil {
 		return nil, err
@@ -164,7 +165,7 @@ func (s *Service) ListExecutions(ctx context.Context, connectionID string) ([]Ex
 	for rows.Next() {
 		var item Execution
 		var params, started, finished string
-		if err := rows.Scan(&item.ID, &item.ConnectionID, &item.ConnectionName, &item.Mode, &item.SQL, &params, &item.Status, &started, &finished, &item.DurationMS, &item.RowCount, &item.RowsAffected, &item.Truncated, &item.Error, &item.FlowID, &item.FlowRunID, &item.StepID); err != nil {
+		if err := rows.Scan(&item.ID, &item.ConnectionID, &item.ConnectionName, &item.Mode, &item.SQL, &params, &item.Status, &started, &finished, &item.DurationMS, &item.RowCount, &item.RowsAffected, &item.Truncated, &item.Error, &item.FlowID, &item.FlowRunID, &item.StepID, &item.ConnectionStatus); err != nil {
 			return nil, err
 		}
 		item.Params = json.RawMessage(params)

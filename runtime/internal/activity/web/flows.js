@@ -218,7 +218,7 @@ function renderLibrary(fragment) {
   fragment.append(grid);
 }
 function renderSteps(canvas) {
-  const flow = state.flow; flow.steps = orderedSteps(flow.steps); flow.steps.forEach((step, index) => { step.position = index; }); const start = el('div', 'fw-boundary'); start.append(el('span', 'fw-boundary-dot'), el('strong', '', '流程输入'), button(`${flow.variables.length} 个共享变量 ↗`, 'fw-text-button', () => { state.rail = 'variables'; renderRail(); })); canvas.append(start);
+  const flow = state.flow; if(flow.dependencies?.length){const deps=section('执行依赖');for(const dep of flow.dependencies){const link=el('a','fw-text-button',`${dep.step} · ${dep.name||dep.id} · ${({active:'使用中',archived:'已归档',deleted:'已删除'})[dep.status]}`);link.href=dep.kind==='database'?'/databases':'/services';link.dataset.route='';deps.append(link);}canvas.append(deps);} flow.steps = orderedSteps(flow.steps); flow.steps.forEach((step, index) => { step.position = index; }); const start = el('div', 'fw-boundary'); start.append(el('span', 'fw-boundary-dot'), el('strong', '', '流程输入'), button(`${flow.variables.length} 个共享变量 ↗`, 'fw-text-button', () => { state.rail = 'variables'; renderRail(); })); canvas.append(start);
   for (const phase of ['', 'finally']) {
     const group = el('section', 'fw-phase' + (phase ? ' fw-finally' : '')); group.setAttribute('aria-label', phase ? '收尾步骤' : '执行步骤');
     group.append(el('h3', 'fw-phase-title', phase ? '收尾步骤' : '执行步骤'));
@@ -228,6 +228,7 @@ function renderSteps(canvas) {
     groupSteps.forEach((step, groupIndex) => {
       const index = flow.steps.indexOf(step);
       const card = el('article', `fw-step${step.enabled ? '' : ' disabled'}`); card.dataset.step = step.id;
+      if(step.source_status&&step.source_status!=='active')card.append(el('p','fw-hint','来源接口已归档或删除；本步骤保留独立请求副本。'));
       const head = el('div', 'fw-step-heading'); const toggle = button('', 'fw-step-toggle', () => { if (state.open.has(step.id)) state.open.delete(step.id); else state.open.add(step.id); renderWorkspace(); }); toggle.setAttribute('aria-expanded', String(state.open.has(step.id)));
       const summary = el('div', 'fw-step-summary'); const upper = el('div', 'fw-step-summary-top'); upper.append(el('span', `fw-type ${step.type}`, step.type === 'http' ? step.request.method : step.type.toUpperCase()), el('strong', '', step.name || '未命名步骤'));
       const detail = el('span', 'fw-step-endpoint', endpoint(step)); summary.append(upper, detail);
@@ -543,4 +544,4 @@ function renderServiceResult(body, step) {
 window.addEventListener('beforeunload', event => { if (state.dirty || state.saving) { event.preventDefault(); event.returnValue = ''; } });
 window.addEventListener('keydown', event => { if (state.visible && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void saveFlow(); } });
 
-function changeArchive(flow,archive){const content=el('p','',archive?'归档后禁止新运行，已开始的运行继续完成，历史记录保留。':'恢复前会检查每个步骤的依赖。');showDialog(archive?'归档流程':'恢复流程',flow.name,content,archive?'确认归档':'确认恢复',async()=>{if(!(await leaveFlows()))throw new Error('请先保存当前修改。');await api(`/flows/${encodeURIComponent(flow.id)}${archive?'':'/restore'}`,{method:archive?'DELETE':'POST'});state.flow=await api(`/flows/${encodeURIComponent(flow.id)}`);await refreshFlows();});}
+function changeArchive(flow,archive){const content=el('div');const restoreName=input(flow.name,'恢复流程名称',()=>{},{max:120});if(!archive)content.append(field('恢复流程名称',restoreName));content.append(el('p','',archive?'归档后禁止新运行，已开始的运行继续完成，历史记录保留。':'恢复前会检查每个步骤的依赖。'));showDialog(archive?'归档流程':'恢复流程',flow.name,content,archive?'确认归档':'确认恢复',async()=>{if(!(await leaveFlows()))throw new Error('请先保存当前修改。');await api(`/flows/${encodeURIComponent(flow.id)}${archive?'':'/restore'}`,{method:archive?'DELETE':'POST',...(!archive?{body:{name:restoreName.value}}:{})});state.flow=await api(`/flows/${encodeURIComponent(flow.id)}`);await refreshFlows();});}

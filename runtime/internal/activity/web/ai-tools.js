@@ -1,3 +1,4 @@
+import {openAIRemoval,lifecycleButton} from './lifecycle-ui.js';
 const $ = id => document.getElementById(id);
 let data;
 let loading;
@@ -101,6 +102,7 @@ function render() {
       button.addEventListener('click', () => install(client.id));
       actions.append(button);
     }
+    if(client.status==='configured'||client.status==='blocked'||client.status==='external')actions.append(lifecycleButton(client.status==='external'?'手动移除说明':'移除配置',()=>openAIRemoval(client,data.target,refreshAITools)));
     card.append(actions);
     return card;
   });

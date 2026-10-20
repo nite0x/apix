@@ -1,3 +1,4 @@
+import {showReferences,lifecycleButton,openLogManager} from './lifecycle-ui.js';
 'use strict';
 import { refreshCommands } from './command-tools.js';
 import { refreshMCP } from './mcp-tools.js';
@@ -48,7 +49,7 @@ import { refreshRequestHistory } from './request-history.js';
   const pages = {
     '/ai-tools': { id: 'ai-tools', title: 'AI 工具', eyebrow: 'CONNECT YOUR AI', description: '一键将 Apix 接入常用 AI 工具，让 AI 直接调试接口、查询数据库和管理服务。' },
     '/': { id: 'home', title: '主页', eyebrow: 'RUNTIME OVERVIEW', description: '本地运行概况，从这里进入服务、接口和日志。' },
-    '/services': { id: 'services', title: '服务', eyebrow: 'LOCAL SERVICES', description: '新增、编辑或删除本地服务配置，手动启停服务，查看状态和运行日志。' },
+    '/services': { id: 'services', title: '服务', eyebrow: 'LOCAL SERVICES', description: '新增、编辑或归档本地服务配置，手动启停服务，查看状态和运行日志。' },
     '/requests': { id: 'requests', title: '接口', eyebrow: 'API REQUESTS', description: '调试 HTTP 请求、导入 cURL、管理接口库与执行历史。' },
     '/databases': { id: 'databases', title: '数据库', eyebrow: 'DATABASE CONNECTIONS', description: '手动执行 SQL、查看结果，管理 MySQL、PostgreSQL 和 Hologres 连接。' },
     '/commands': { id: 'commands', title: '命令行', eyebrow: 'COMMAND TESTING', description: '运行命令和脚本，验证退出码与输出，保存用例并追踪测试记录。' },
@@ -104,13 +105,14 @@ import { refreshRequestHistory } from './request-history.js';
   function clock(value, ms = false) { const date = new Date(value); if (!Number.isFinite(date.getTime())) return '—'; return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, ...(ms ? { fractionalSecondDigits: 3 } : {}) }); }
   function empty(message, hint) { const el = node('div', 'empty', message); if (hint) el.append(node('small', '', hint)); return el; }
   function setOnline(online) { $('connection').textContent = online ? '实时同步中' : '连接中断，正在重试'; $('connection-dot').className = `dot ${online ? '' : 'offline'}`; $('log-dot').className = `dot ${online ? '' : 'offline'}`; }
+  const serviceQuery=document.createElement('input');serviceQuery.type='search';serviceQuery.placeholder='名称、启动程序或健康地址';serviceQuery.setAttribute('aria-label','搜索服务');const serviceStatus=document.createElement('select');serviceStatus.setAttribute('aria-label','服务运行状态');for(const [v,label] of [['','全部运行状态'],['running','运行中'],['stopped','已停止'],['failed','异常'],['starting','启动中'],['stopping','停止中'],['cleanup_failed','清理失败']])serviceStatus.add(new Option(label,v));const serviceOwner=document.createElement('select');serviceOwner.setAttribute('aria-label','服务归属');for(const [v,label] of [['','全部归属'],['manual','手动启动'],['external','外部复用'],['flow','流程使用']])serviceOwner.add(new Option(label,v));$('service-add').parentElement.append(serviceQuery,serviceStatus,serviceOwner);serviceQuery.oninput=renderServices;serviceStatus.onchange=renderServices;serviceOwner.onchange=renderServices;
   function renderServices() {
     $('running-count').textContent = state.services.filter(s => s.status === 'running').length;
     $('services-note').textContent = `共 ${state.services.length} 个已配置`;
     $('service-total').textContent = `${state.services.length} 个服务`;
-    const key = JSON.stringify([state.services, [...serviceActions], [...serviceFeedback]]); if (key === state.serviceKey) return; state.serviceKey = key;
+    const key = JSON.stringify([state.services,serviceQuery.value,serviceStatus.value,serviceOwner.value, [...serviceActions], [...serviceFeedback]]); if (key === state.serviceKey) return; state.serviceKey = key;
     const fragment = document.createDocumentFragment();
-    for (const service of state.services) {
+    for (const service of state.services.filter(item=>(!serviceQuery.value||`${item.name} ${item.command||''} ${item.health_url}`.toLowerCase().includes(serviceQuery.value.toLowerCase()))&&(!serviceStatus.value||item.status===serviceStatus.value)&&(!serviceOwner.value||(serviceOwner.value==='flow'?!['manual','external',''].includes(item.owner):item.owner===serviceOwner.value)))) {
       const card = node('div', 'service-card');
       const top = node('div', 'service-top'); const name = node('span', 'service-name', service.name); name.title = service.name;
       const badge = node('span', `badge status-${service.status}`); if (service.status === 'running') badge.append(node('span', 'dot')); badge.append(document.createTextNode(serviceLabels[service.status] || service.status)); top.append(name, badge);
@@ -134,11 +136,11 @@ import { refreshRequestHistory } from './request-history.js';
       edit.setAttribute('aria-label', `编辑服务 ${service.name}`); edit.setAttribute('aria-haspopup', 'dialog'); edit.setAttribute('aria-controls', 'service-editor');
       edit.title = locked ? '请先停止服务并完成清理，再编辑配置' : '编辑服务启动配置';
       edit.addEventListener('click', () => openServiceEditor(service.id, edit));
-      const remove = node('button', 'button small danger', '删除'); remove.type = 'button'; remove.disabled = locked;
-      remove.setAttribute('aria-label', `删除服务 ${service.name}`); remove.setAttribute('aria-haspopup', 'dialog'); remove.setAttribute('aria-controls', 'service-delete');
-      remove.title = locked ? '请先停止服务并完成清理，再删除配置' : '删除服务配置，保留历史日志';
+      const remove = node('button', 'button small danger', '归档'); remove.type = 'button'; remove.disabled = locked;
+      remove.setAttribute('aria-label', `归档服务 ${service.name}`); remove.setAttribute('aria-haspopup', 'dialog'); remove.setAttribute('aria-controls', 'service-delete');
+      remove.title = locked ? '请先停止服务并完成清理，再归档配置' : '归档服务配置，保留历史日志';
       remove.addEventListener('click', () => openServiceDelete(service, remove));
-      actions.append(details, logs, edit, remove, control); bottom.append(actions); card.append(top, url, bottom);
+      actions.append(details, logs, edit, remove, control,lifecycleButton('引用与影响',()=>showReferences('service',service.id))); bottom.append(actions); card.append(top, url, bottom);
       const feedback = serviceFeedback.get(service.id); if (feedback) { const message = node('div', `service-feedback ${feedback.error ? 'error' : ''}`, feedback.message); message.setAttribute('role', feedback.error ? 'alert' : 'status'); card.append(message); }
       fragment.append(card);
     }
@@ -176,6 +178,7 @@ import { refreshRequestHistory } from './request-history.js';
     $('logs-count').textContent = state.totalLogs.toLocaleString('zh-CN');
     if ((added || data.reset_events || data.reset_services) && !state.paused) renderLogs();
   }
+  $('log-source').parentElement.append(lifecycleButton('查询 / 清理已存日志',openLogManager),lifecycleButton('清空屏幕显示',()=>{state.logs=[];renderLogs();}));
   function renderLogs() {
     const source = $('log-source').value; const logs = state.logs.filter(line => source === 'all' || line.source === source); const output = $('log-output'); const previousTop = output.scrollTop; const fragment = document.createDocumentFragment();
     for (const line of logs) { const row = node('div', 'log-line'); row.append(node('span', 'log-time', clock(line.time, true)), node('span', `log-level ${line.level.toLowerCase()}`, line.level)); const sourceName = node('span', 'log-source-name', line.sourceName); sourceName.title = line.sourceName; const message = node('span', 'log-message', line.message); if (line.reference) { const ref = node('small', '', `#${line.reference.replace(/^session-/, '').slice(0, 8)}`); ref.title = line.reference; message.append(ref); } row.append(sourceName, message); fragment.append(row); }

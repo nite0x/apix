@@ -66,10 +66,13 @@ func optionalString(value string) any {
 }
 
 func (r *repository) listCollections(projectID string) ([]APICollection, error) {
+	return r.listCollectionsState(projectID, "active")
+}
+func (r *repository) listCollectionsState(projectID, state string) ([]APICollection, error) {
 	rows, err := r.db.Query(`SELECT id, project_id, parent_id, name, COALESCE(description,''), sort_order,
 		status, COALESCE(created_by,''), created_at, updated_at, archived_at
-		FROM api_collections WHERE project_id = ? AND status = 'active'
-		ORDER BY sort_order, created_at`, projectID)
+		FROM api_collections WHERE project_id = ? AND status = ?
+		ORDER BY sort_order, created_at`, projectID, state)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +147,7 @@ func (r *repository) archiveCollection(id string) error {
 }
 
 func (r *repository) listRequests(collectionID string) ([]APIRequest, error) {
-	rows, err := r.db.Query(`SELECT id FROM api_requests WHERE collection_id=? AND status='active' ORDER BY sort_order, updated_at DESC`, collectionID)
+	rows, err := r.db.Query(`SELECT id FROM api_requests WHERE collection_id=? AND status='active' AND EXISTS(SELECT 1 FROM api_collections c WHERE c.id=collection_id AND c.status='active') ORDER BY sort_order, updated_at DESC`, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +209,16 @@ func (r *repository) getRequest(id string) (*APIRequest, error) {
 }
 
 func (r *repository) createRequest(item *APIRequest) error {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
+	var active int
+	if err := r.db.QueryRow(`SELECT count(*) FROM api_collections WHERE id=? AND status='active'`, item.CollectionID).Scan(&active); err != nil {
+		return err
+	}
+	if active == 0 {
+		return fmt.Errorf("%w: 分组不存在或已归档", lifecycle.ErrProtected)
+	}
 	normalizeRequest(&item.Request)
 	if item.ID == "" {
 		item.ID = uuid.NewString()
@@ -230,6 +243,19 @@ func (r *repository) createRequest(item *APIRequest) error {
 }
 
 func (r *repository) updateRequest(item *APIRequest) error {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
+	if err := r.assertRequestExecutable(item.ID); err != nil {
+		return err
+	}
+	var active int
+	if err := r.db.QueryRow(`SELECT count(*) FROM api_collections WHERE id=? AND status='active'`, item.CollectionID).Scan(&active); err != nil {
+		return err
+	}
+	if active == 0 {
+		return fmt.Errorf("%w: 请选择有效分组", lifecycle.ErrProtected)
+	}
 	normalizeRequest(&item.Request)
 	item.UpdatedAt = time.Now().UTC()
 	result, err := r.db.Exec(`UPDATE api_requests SET collection_id=?, name=?, description=?, method=?, url=?,
@@ -374,6 +400,19 @@ func (r *repository) saveWorkingCopy(id, collectionID, name string, description 
 	copy, err := r.getWorkingCopy(id)
 	if err != nil {
 		return nil, err
+	}
+	if copy.APIRequestID != nil {
+		if err := r.assertRequestExecutable(*copy.APIRequestID); err != nil {
+			return nil, err
+		}
+	} else {
+		var active int
+		if err := r.db.QueryRow(`SELECT count(*) FROM api_collections WHERE id=? AND status='active'`, collectionID).Scan(&active); err != nil {
+			return nil, err
+		}
+		if active == 0 {
+			return nil, fmt.Errorf("%w: 请选择有效分组", lifecycle.ErrProtected)
+		}
 	}
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -628,6 +667,9 @@ func (r *repository) listRuns(projectID string, limit int) ([]APIRun, error) {
 }
 
 func (r *repository) pinRun(id string, pinned bool) error {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
 	var expires any
 	if !pinned {
 		expires = time.Now().UTC().Add(30 * 24 * time.Hour)
@@ -644,6 +686,9 @@ func (r *repository) pinRun(id string, pinned bool) error {
 }
 
 func (r *repository) deleteRun(id string) error {
+	gate := lifecycle.For(r.db)
+	gate.Lock()
+	defer gate.Unlock()
 	result, err := r.db.Exec(`DELETE FROM api_runs WHERE id=? AND status NOT IN ('running','queued','paused') AND is_pinned=0 AND NOT EXISTS(SELECT 1 FROM test_case_runs WHERE api_run_id=api_runs.id) AND NOT EXISTS(SELECT 1 FROM flow_run_steps WHERE api_run_id=api_runs.id)`, id)
 	if err != nil {
 		return err

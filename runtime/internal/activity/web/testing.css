@@ -82,3 +82,12 @@ body:has(.testing-editor[open]){overflow:hidden}
   .testing-form{padding:18px 16px}.testing-editor .detail-heading{padding:18px 16px}.test-run-drawer .detail-foot{padding:12px 16px}.test-run-drawer .detail-tabs{gap:18px}.test-run-drawer .detail-tabs button{font-size:12px}
   .test-assertion{padding:12px}.test-assertion-values{grid-template-columns:1fr;gap:10px}
 }
+
+.testing-case-list .test-attempt{display:flex;flex-wrap:wrap;gap:12px;cursor:default;align-items:center}
+.testing-case-list .test-attempt>p{flex:1 1 220px;overflow-wrap:anywhere}
+.testing-case-list .testing-actions{flex-wrap:wrap}
+.lifecycle-dialog article.test-attempt{display:flex;flex-direction:column;align-items:stretch;gap:10px;cursor:default}
+.lifecycle-dialog .testing-actions{display:flex;flex-wrap:wrap;gap:8px}
+.lifecycle-dialog code,.lifecycle-dialog pre{overflow-wrap:anywhere;white-space:pre-wrap;max-width:100%}
+.lifecycle-dialog label{display:flex;flex-direction:column;gap:6px;min-width:0}
+.lifecycle-dialog input,.lifecycle-dialog select{max-width:100%;min-width:0}

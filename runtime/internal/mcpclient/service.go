@@ -27,6 +27,8 @@ var ErrNotFound = errors.New("MCP server not found")
 var ErrConflict = errors.New("MCP server changed; reload before saving")
 
 type Server struct {
+	Archived       bool              `json:"archived"`
+	DiscoveredAt   *time.Time        `json:"discovered_at,omitempty"`
 	ID             string            `json:"id"`
 	Name           string            `json:"name"`
 	URL            string            `json:"url"`
@@ -61,7 +63,14 @@ type Service struct {
 }
 
 func New(db *sql.DB) (*Service, error) {
+	if err := lifecycle.Init(db); err != nil {
+		return nil, err
+	}
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS mcp_servers(id TEXT PRIMARY KEY,name TEXT NOT NULL,url TEXT NOT NULL,headers BLOB NOT NULL,timeout_seconds INTEGER NOT NULL,edit_version INTEGER NOT NULL DEFAULT 1,archived INTEGER NOT NULL DEFAULT 0)`)
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS mcp_discoveries(server_id TEXT PRIMARY KEY,discovered_at TEXT NOT NULL,tools TEXT NOT NULL)`)
 	return &Service{db: db, credentials: database.NewCredentials(db)}, err
 }
 func validServer(v *Server) error {
@@ -115,9 +124,12 @@ func validServer(v *Server) error {
 	return nil
 }
 func (s *Service) load(id string, secrets bool) (*Server, error) {
+	return s.loadAny(id, secrets, false)
+}
+func (s *Service) loadAny(id string, secrets, includeArchived bool) (*Server, error) {
 	var v Server
 	var encrypted []byte
-	err := s.db.QueryRow(`SELECT id,name,url,headers,timeout_seconds,edit_version FROM mcp_servers WHERE id=? AND archived=0`, id).Scan(&v.ID, &v.Name, &v.URL, &encrypted, &v.TimeoutSeconds, &v.EditVersion)
+	err := s.db.QueryRow(`SELECT id,name,url,headers,timeout_seconds,edit_version,archived FROM mcp_servers WHERE id=? AND (archived=0 OR ?)`, id, includeArchived).Scan(&v.ID, &v.Name, &v.URL, &encrypted, &v.TimeoutSeconds, &v.EditVersion, &v.Archived)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -136,11 +148,18 @@ func (s *Service) load(id string, secrets bool) (*Server, error) {
 			v.Headers[k] = Mask
 		}
 	}
+	var timestamp string
+	if err := s.db.QueryRow(`SELECT discovered_at FROM mcp_discoveries WHERE server_id=?`, id).Scan(&timestamp); err == nil {
+		if t, err := time.Parse(time.RFC3339Nano, timestamp); err == nil {
+			v.DiscoveredAt = &t
+		}
+	}
 	return &v, nil
 }
 func (s *Service) Get(id string) (*Server, error) { return s.load(id, false) }
-func (s *Service) List() ([]Server, error) {
-	rows, err := s.db.Query(`SELECT id FROM mcp_servers WHERE archived=0 ORDER BY name,id`)
+func (s *Service) List() ([]Server, error)        { return s.ListArchived(false) }
+func (s *Service) ListArchived(archived bool) ([]Server, error) {
+	rows, err := s.db.Query(`SELECT id FROM mcp_servers WHERE archived=? ORDER BY name,id`, archived)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +179,7 @@ func (s *Service) List() ([]Server, error) {
 	}
 	out := []Server{}
 	for _, id := range ids {
-		v, e := s.Get(id)
+		v, e := s.loadAny(id, false, true)
 		if e != nil {
 			return nil, e
 		}
@@ -304,6 +323,9 @@ func (s *Service) Discover(ctx context.Context, id string) (*Discovery, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.discoverServer(ctx, v)
+}
+func (s *Service) discoverServer(ctx context.Context, v *Server) (*Discovery, error) {
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(v.TimeoutSeconds)*time.Second)
 	defer cancel()
@@ -315,6 +337,13 @@ func (s *Service) Discover(ctx context.Context, id string) (*Discovery, error) {
 	tools, err := list(ctx, cli)
 	if err != nil {
 		return nil, errors.New("读取 MCP 工具列表失败或超时")
+	}
+	raw, err := json.Marshal(tools)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = s.db.Exec(`INSERT INTO mcp_discoveries(server_id,discovered_at,tools) VALUES(?,?,?) ON CONFLICT(server_id) DO UPDATE SET discovered_at=excluded.discovered_at,tools=excluded.tools`, v.ID, time.Now().UTC().Format(time.RFC3339Nano), string(raw)); err != nil {
+		return nil, err
 	}
 	return &Discovery{ServerName: info.ServerInfo.Name, ProtocolVersion: info.ProtocolVersion, Tools: tools, DurationMS: time.Since(started).Milliseconds()}, nil
 }
@@ -458,4 +487,69 @@ func ValidateRequest(req *Request) error {
 		req.Arguments = map[string]any{}
 	}
 	return nil
+}
+
+// Restore verifies the actual endpoint and discovers current tools before making
+// the original identity available again. A failed handshake leaves it archived.
+func (s *Service) Restore(ctx context.Context, id, name string) (*Server, error) {
+	release := lifecycle.Lease(s.db, "mcp", id)
+	defer release()
+	v, err := s.loadAny(id, true, true)
+	if err != nil {
+		return nil, err
+	}
+	if !v.Archived {
+		return s.Get(id)
+	}
+	if name != "" {
+		v.Name = strings.TrimSpace(name)
+	}
+	if err := validServer(v); err != nil {
+		return nil, err
+	}
+	var before string
+	_ = s.db.QueryRow(`SELECT tools FROM mcp_discoveries WHERE server_id=?`, id).Scan(&before)
+	discovery, err := s.discoverServer(ctx, v)
+	if err != nil {
+		return nil, err
+	}
+	gate := lifecycle.For(s.db)
+	gate.Lock()
+	defer gate.Unlock()
+	var conflict int
+	if err := s.db.QueryRow(`SELECT count(*) FROM mcp_servers WHERE archived=0 AND id<>? AND lower(trim(name))=lower(?)`, id, v.Name).Scan(&conflict); err != nil {
+		return nil, err
+	}
+	if conflict > 0 {
+		return nil, fmt.Errorf("%w: 名称冲突，请改名后恢复", lifecycle.ErrProtected)
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`UPDATE mcp_servers SET archived=0,name=?,edit_version=edit_version+1 WHERE id=? AND archived=1 AND edit_version=?`, v.Name, id, v.EditVersion)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return nil, ErrConflict
+	}
+	current, _ := json.Marshal(discovery.Tools)
+	// A rediscovered schema requires explicit review, never silently rewrite a case.
+	if before != string(current) {
+		var exists int
+		if err := tx.QueryRow(`SELECT count(*) FROM pragma_table_info('test_cases') WHERE name='needs_review'`).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if exists > 0 {
+			if _, err := tx.Exec(`UPDATE test_cases SET needs_review=1,edit_version=edit_version+1 WHERE type='mcp' AND json_extract(mcp_data,'$.mcp_request.server_id')=?`, id); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.Get(id)
 }

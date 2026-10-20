@@ -1,3 +1,4 @@
+import {openArchived,showReferences,lifecycleButton} from './lifecycle-ui.js';
 import { setupWorkspaceTabs } from './workspace-tabs.js';
 
 import { executionBatchLink } from './execution-batch.js';
@@ -19,6 +20,7 @@ let historyLoading = false;
 let historyKey = null;
 let resultRevision = 0;
 let editing = false;
+let credentialsRequired=false;
 let editorType = 'mysql';
 let sqlRunning = false;
 const driverLabels = { mysql: 'MySQL', postgresql: 'PostgreSQL', hologres: 'Hologres' };
@@ -59,7 +61,7 @@ function errorText(error) {
 function render() {
   $('database-total').textContent = `${connections.length} 个连接`;
   const fragment = document.createDocumentFragment();
-  for (const connection of connections) {
+  for (const connection of connections.filter(item=>(!databaseSearch.value||`${item.name} ${item.type} ${item.host} ${item.database}`.toLowerCase().includes(databaseSearch.value.toLowerCase()))&&(!databaseType.value||item.type===databaseType.value))) {
     const card = node('article', 'database-card');
     const row = node('div', 'database-row');
     const icon = node('span', 'database-connection-icon', '▤'); icon.setAttribute('aria-hidden', 'true');
@@ -102,17 +104,17 @@ function render() {
     edit.setAttribute('aria-label', `编辑 ${connection.name} 的连接配置`);
     edit.setAttribute('aria-haspopup', 'dialog'); edit.setAttribute('aria-controls', 'database-editor');
     edit.addEventListener('click', () => openEditor(connection));
-    const remove = node('button', 'button small danger', '删除');
+    const remove = node('button', 'button small danger', '归档');
     remove.type = 'button'; remove.disabled = pending.has(connection.id);
-    remove.setAttribute('aria-label', `删除 ${connection.name} 的连接配置`);
+    remove.setAttribute('aria-label', `归档 ${connection.name} 的连接配置`);
     remove.setAttribute('aria-haspopup', 'dialog'); remove.setAttribute('aria-controls', 'database-delete');
     remove.addEventListener('click', () => {
       deleteTarget = connection;
-      $('database-delete-description').textContent = `确定删除“${connection.name}”的连接配置？`;
+      $('database-delete-description').textContent = `归档“${connection.name}”的 Apix 连接配置？远端数据库不受影响，加密凭据和 SQL 历史保留。`;
       message('database-delete-error', '');
       $('database-delete').showModal();
     });
-    const settings = node('div', 'database-settings-actions'); settings.append(edit, remove);
+    const settings = node('div', 'database-settings-actions');
     detailPanel.append(list, settings);
     const execute = node('button', 'button small database-execute', '执行 SQL'); execute.type = 'button';
     execute.disabled = sqlRunning; execute.setAttribute('aria-label', `使用 ${connection.name} 执行 SQL`);
@@ -121,7 +123,7 @@ function render() {
       $('sql-run-connection').value = connection.id; updateSQLHint();
       selectDatabaseTab($('sql-tab')); $('sql-statement-input').focus();
     });
-    actions.append(execute, test, details); row.append(icon, overview, actions); card.append(row, detailPanel);
+    actions.append(execute, test, details,edit,remove,lifecycleButton('引用与影响',()=>showReferences('database',connection.id))); row.append(icon, overview, actions); card.append(row, detailPanel);
     const result = feedback.get(connection.id);
     if (result) {
       const text = node('div', `service-feedback${result.error ? ' error' : ''}`, result.message);
@@ -166,7 +168,7 @@ function renderHistory() {
     preview.setAttribute('aria-haspopup', 'dialog'); preview.setAttribute('aria-controls', 'sql-result');
     preview.addEventListener('click', () => openSQLResult(item));
     statement.append(preview);
-    const connection = node('td', 'sql-connection-name', item.connection_name); connection.title = `${item.connection_name} · ${item.connection_id}`;
+    const connection = node('td', 'sql-connection-name', item.connection_name); connection.title = `${item.connection_name} · ${item.connection_id}`;if(item.connection_status&&item.connection_status!=='active')connection.append(node('small','subtle',item.connection_status==='archived'?'原连接已归档':'原连接已删除'));
     const status = node('td');
     status.append(node('span', `sql-status ${item.status === 'succeeded' ? 'response-ok' : item.status === 'running' ? 'response-pending' : 'response-error'}`, { succeeded: '成功', running: '执行中', failed: '失败' }[item.status] || item.status));
     if (item.status === 'succeeded') status.append(node('small', 'sql-row-count', item.mode === 'query' ? (item.truncated ? '结果已截断' : `返回 ${item.row_count} 行`) : `影响 ${item.rows_affected} 行`));
@@ -323,7 +325,7 @@ function updateDriverFields(changePort = false) {
   $('database-driver-hint').textContent = type === 'mysql' ? '默认端口 3306，SQL 使用 ? 绑定参数。' : type === 'hologres' ? '使用 PostgreSQL 协议，默认端口 80。SQL 使用 $1、$2 绑定参数；VPC 地址需要本机网络可达。' : '默认端口 5432，SQL 使用 $1、$2 绑定参数。';
 }
 function openEditor(connection = null) {
-  editing = !!connection;
+  editing = !!connection;credentialsRequired=Boolean(connection?.credentials_cleared);
   draftID = connection?.id || crypto.randomUUID();
   $('database-form').reset();
   $('database-editor-title').textContent = editing ? '编辑数据库连接' : '新增数据库连接';
@@ -332,7 +334,7 @@ function openEditor(connection = null) {
   }
   $('database-type').value = connection?.type || 'mysql';
   $('database-ssl-mode').value = connection?.ssl_mode || 'prefer';
-  $('database-password').placeholder = editing ? '留空保留原密码' : '数据库密码（允许为空）';
+  $('database-password').placeholder = editing&&!credentialsRequired ? '留空保留原密码' : '数据库密码（允许为空）';
   $('database-password-hint').textContent = editing ? '密码在本机加密保存。留空保留原密码，填写新密码则更新。' : '密码在本机加密保存。保存后即可测试连接，无需重启。';
   updateDriverFields();
   message('database-form-error', ''); $('database-editor').showModal();
@@ -350,7 +352,7 @@ $('database-form').addEventListener('submit', async event => {
     port: Number($('database-port').value), database: $('database-schema').value.trim(),
     username: $('database-username').value.trim(),
   };
-  if (!editing || $('database-password').value !== '') connection.password = $('database-password').value;
+  if (!editing || credentialsRequired || $('database-password').value !== '') connection.password = $('database-password').value;
   if (connection.type !== 'mysql') connection.ssl_mode = $('database-ssl-mode').value;
   if (!connection.name || !connection.host || !connection.database || !connection.username || !Number.isInteger(connection.port) || connection.port < 1 || connection.port > 65535) { message('database-form-error', '请填写连接名称、主机、库名和用户名，端口范围为 1–65535。', true); return; }
   message('database-form-error', ''); setSaving(true);
@@ -368,14 +370,14 @@ $('database-delete-confirm').addEventListener('click', async () => {
   if (!deleteTarget || deleting) return;
   const connection = deleteTarget;
   deleting = true; $('database-delete-confirm').disabled = true; $('database-delete-cancel').disabled = true;
-  $('database-delete-confirm').textContent = '删除中…'; message('database-delete-error', '');
+  $('database-delete-confirm').textContent = '归档中…'; message('database-delete-error', '');
   try {
-    await request(`/${encodeURIComponent(connection.id)}`, { method: 'DELETE' });
+    await request(`/${encodeURIComponent(connection.id)}/archive`, { method: 'POST' });
     revision++; connections = connections.filter(item => item.id !== connection.id); feedback.delete(connection.id); render();
     $('database-delete').close(); $('database-add').focus();
-    $('database-feedback').dataset.loadError = 'false'; message('database-feedback', `已删除“${connection.name}”的连接配置。`);
-  } catch (error) { message('database-delete-error', `删除失败：${errorText(error)}`, true); }
-  finally { deleting = false; $('database-delete-confirm').disabled = false; $('database-delete-cancel').disabled = false; $('database-delete-confirm').textContent = '删除连接'; }
+    $('database-feedback').dataset.loadError = 'false'; message('database-feedback', `已归档“${connection.name}”的连接配置，凭据和历史已保留。`);
+  } catch (error) { message('database-delete-error', `归档失败：${errorText(error)}`, true); }
+  finally { deleting = false; $('database-delete-confirm').disabled = false; $('database-delete-cancel').disabled = false; $('database-delete-confirm').textContent = '归档连接'; }
 });
 export function closeDatabaseDialogs() {
   if ($('sql-result').open) $('sql-result').close();
@@ -419,7 +421,7 @@ function fillSQL(item) {
   $('sql-params-input').value = item.params?.length ? JSON.stringify(item.params, null, 2) : '';
   $('sql-params-input').closest('details').open = Boolean(item.params?.length);
   updateSQLHint(); resetSQLResult();
-  message('sql-run-feedback', $('sql-run-connection').value ? '已填入历史 SQL，可修改后执行。' : '已填入历史 SQL，原连接已不存在，请重新选择连接。');
+  message('sql-run-feedback', $('sql-run-connection').value ? '已填入历史 SQL，可修改后执行。' : '已填入历史 SQL，原连接已归档或删除，请明确选择有效连接后重新执行。');
   $('sql-statement-input').focus(); $('sql-form').scrollIntoView?.({ block: 'start', behavior: 'smooth' });
 }
 
@@ -469,3 +471,5 @@ $('sql-form').addEventListener('submit', async event => {
   }
 });
 updateSQLHint();
+
+const databaseSearch=node('input');databaseSearch.type='search';databaseSearch.setAttribute('aria-label','搜索数据库连接');databaseSearch.placeholder='名称、类型、主机或库名';const databaseType=node('select');databaseType.setAttribute('aria-label','数据库类型');for(const [value,label] of [['','全部类型'],['mysql','MySQL'],['postgresql','PostgreSQL'],['hologres','Hologres']])databaseType.add(new window.Option(label,value));databaseSearch.oninput=render;databaseType.onchange=render;$('database-add').parentElement.append(databaseSearch,databaseType,lifecycleButton('已归档连接',()=>openArchived('database',refreshDatabases)));

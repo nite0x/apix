@@ -183,7 +183,7 @@ func (s *HTTPService) SaveTestCase(item TestCase) (*TestCase, error) {
 	if item.EditVersion < 1 {
 		return nil, invalidTest("edit_version is required when updating a case")
 	}
-	result, err := tx.Exec(`UPDATE test_cases SET api_request_id=?,name=?,description=?,request_data=?,expected_status=?,assertions=?,edit_version=edit_version+1,updated_at=?,type=?,mcp_data=?,command_data=? WHERE id=? AND project_id=? AND edit_version=? AND archived=0`, item.APIRequestID, item.Name, item.Description, marshalJSON(item.Request), item.ExpectedStatus, marshalJSON(item.Assertions), now, item.Type, marshalJSON(item.MCPTestData), marshalJSON(item.CommandTestData), item.ID, item.ProjectID, item.EditVersion)
+	result, err := tx.Exec(`UPDATE test_cases SET needs_review=0,api_request_id=?,name=?,description=?,request_data=?,expected_status=?,assertions=?,edit_version=edit_version+1,updated_at=?,type=?,mcp_data=?,command_data=? WHERE id=? AND project_id=? AND edit_version=? AND archived=0`, item.APIRequestID, item.Name, item.Description, marshalJSON(item.Request), item.ExpectedStatus, marshalJSON(item.Assertions), now, item.Type, marshalJSON(item.MCPTestData), marshalJSON(item.CommandTestData), item.ID, item.ProjectID, item.EditVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -204,12 +204,12 @@ func (s *HTTPService) SaveTestCase(item TestCase) (*TestCase, error) {
 	return s.GetTestCase(item.ID)
 }
 
-const testCaseColumns = `id,project_id,api_request_id,name,description,request_data,expected_status,assertions,edit_version,created_at,updated_at,type,mcp_data,command_data,archived`
+const testCaseColumns = `id,project_id,api_request_id,name,description,request_data,expected_status,assertions,edit_version,created_at,updated_at,type,mcp_data,command_data,archived,needs_review`
 
 func scanTestCase(row interface{ Scan(...any) error }) (*TestCase, error) {
 	var item TestCase
 	var request, assertions, mcpData, commandData string
-	if err := row.Scan(&item.ID, &item.ProjectID, &item.APIRequestID, &item.Name, &item.Description, &request, &item.ExpectedStatus, &assertions, &item.EditVersion, &item.CreatedAt, &item.UpdatedAt, &item.Type, &mcpData, &commandData, &item.Archived); err != nil {
+	if err := row.Scan(&item.ID, &item.ProjectID, &item.APIRequestID, &item.Name, &item.Description, &request, &item.ExpectedStatus, &assertions, &item.EditVersion, &item.CreatedAt, &item.UpdatedAt, &item.Type, &mcpData, &commandData, &item.Archived, &item.NeedsReview); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errNotFound
 		}
@@ -231,7 +231,11 @@ func scanTestCase(row interface{ Scan(...any) error }) (*TestCase, error) {
 }
 
 func (s *HTTPService) GetTestCase(id string) (*TestCase, error) {
-	return scanTestCase(s.db.QueryRow(`SELECT `+testCaseColumns+` FROM test_cases WHERE id=?`, id))
+	item, err := scanTestCase(s.db.QueryRow(`SELECT `+testCaseColumns+` FROM test_cases WHERE id=?`, id))
+	if err == nil {
+		s.caseSourceStatus(item)
+	}
+	return item, err
 }
 func (s *HTTPService) ListTestCases(project string) ([]TestCase, error) {
 	return s.listTestCases(project, false)
@@ -250,7 +254,15 @@ func (s *HTTPService) listTestCases(project string, archived bool) ([]TestCase, 
 		}
 		items = append(items, *item)
 	}
-	return items, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		s.caseSourceStatus(&items[i])
+	}
+	return items, nil
 }
 func (s *HTTPService) ArchiveTestCase(id string) error {
 	gate := lifecycle.For(s.db)
@@ -287,7 +299,14 @@ func scanTestBatch(row interface{ Scan(...any) error }) (*TestBatch, error) {
 	return &b, err
 }
 func (s *HTTPService) ListTestBatches(project string) ([]TestBatch, error) {
-	rows, err := s.db.Query(`SELECT `+batchColumns+` FROM test_batches b WHERE b.project_id=? ORDER BY b.created_at DESC,b.id LIMIT 100`, valueOr(project, defaultProjectID))
+	page, err := s.ListRecords(project, RecordQuery{Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	return page.Items, nil
+}
+func (s *HTTPService) listAllTestBatches(project string) ([]TestBatch, error) {
+	rows, err := s.db.Query(`SELECT `+batchColumns+` FROM test_batches b WHERE b.project_id=? ORDER BY b.created_at DESC,b.id`, valueOr(project, defaultProjectID))
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +327,13 @@ func (s *HTTPService) ListTestBatches(project string) ([]TestBatch, error) {
 	return s.appendFlowBatches(project, items)
 }
 func (s *HTTPService) GetTestBatch(id string) (*TestBatch, error) {
+	b, err := s.getTestBatchData(id)
+	if err == nil {
+		s.recordState(b)
+	}
+	return b, err
+}
+func (s *HTTPService) getTestBatchData(id string) (*TestBatch, error) {
 	b, err := scanTestBatch(s.db.QueryRow(`SELECT `+batchColumns+` FROM test_batches b WHERE b.id=?`, id))
 	if errors.Is(err, errNotFound) {
 		return s.getFlowBatch(id)
@@ -360,6 +386,15 @@ func (s *HTTPService) FinishTestBatch(id string) (*TestBatch, error) {
 
 // migrateIndependentTests extends only independent tests; Flow schemas are unchanged.
 func migrateIndependentTests(db *sql.DB) error {
+	var reviewColumn int
+	if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info('test_cases') WHERE name='needs_review'`).Scan(&reviewColumn); err != nil {
+		return err
+	}
+	if reviewColumn == 0 {
+		if _, err := db.Exec(`ALTER TABLE test_cases ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err

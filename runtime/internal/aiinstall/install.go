@@ -268,11 +268,14 @@ func (s *Installer) install(t Target, id string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	return s.writeConfig(c, original, updated, exists, "installed")
+}
+func (s *Installer) writeConfig(c Client, original, updated []byte, exists bool, status string) (Result, error) {
 	result := Result{Status: "configured", Path: c.Path}
 	if exists && bytes.Equal(original, updated) {
 		return result, nil
 	}
-	if err = os.MkdirAll(filepath.Dir(c.Path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(c.Path), 0700); err != nil {
 		return Result{}, errors.New("无法创建配置目录，请检查访问权限")
 	}
 	// Exclusive backup creation ensures an earlier backup is never overwritten.
@@ -316,7 +319,7 @@ func (s *Installer) install(t Target, id string) (Result, error) {
 	if err = os.Rename(temporary.Name(), c.Path); err != nil {
 		return Result{}, errors.New("无法替换配置文件，请检查权限或关闭占用该文件的程序")
 	}
-	result.Status = "installed"
+	result.Status = status
 	return result, nil
 }
 
@@ -350,6 +353,7 @@ func (s *Installer) Routes(r gin.IRouter) {
 		c.Next()
 	}
 	group := r.Group("/api/ai-tools", local)
+	s.removalRoutes(group)
 	group.GET("", func(c *gin.Context) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
