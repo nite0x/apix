@@ -60,8 +60,9 @@ test('MCP workspace discovers tools, preserves drafts, prevents duplicate calls,
   const testing = await import('./web/testing.js'); await testing.activateTesting();
   assert.equal(document.querySelector('.test-cases'), null);
   history.replaceState(null, '', '/execution-records'); await testing.activateTesting(); await tick();
-  assert.match(document.querySelector('.test-endpoint').textContent, /MCP .*get_order/);
-  assert.match(document.querySelector('.test-attempt-body').textContent, /MCP 返回结果/); assert.equal(document.querySelectorAll('#testing-workspace script').length, 0);
-  click('另存为用例', '#testing-workspace'); await tick(); assert.equal(document.querySelector('dialog[open] [aria-label="工具名称"]').value, 'get_order'); click('关闭 ×', 'dialog[open]');
+  assert.match(document.querySelector('.testing-run-target').textContent, /MCP .*get_order/);
+  document.querySelector('.test-attempt').click(); document.querySelector('[data-run-tab="output"]').click();
+  assert.match(document.querySelector('#test-run-panel-output').textContent, /MCP 返回结果/); assert.equal(document.querySelectorAll('.test-run-drawer script').length, 0);
+  click('另存为用例', '.test-run-drawer'); await tick(); assert.equal(document.querySelector('dialog[open] [aria-label="工具名称"]').value, 'get_order'); click('关闭 ×', 'dialog[open]');
   testing.deactivateTesting(); dom.window.close();
 });

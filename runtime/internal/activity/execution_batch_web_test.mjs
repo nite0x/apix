@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 
-test('execution links select the exact batch and expand HTTP, MCP, command and SQL records', async t => {
+test('execution links select the exact batch and open HTTP, MCP, command and SQL details', async t => {
   const { JSDOM } = createRequire(import.meta.url)('jsdom');
   const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/requests' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, Event: dom.window.Event, location: dom.window.location, history: dom.window.history, Option: dom.window.Option, localStorage: dom.window.localStorage });
   dom.window.matchMedia = () => ({ matches: false, addEventListener() {} });
   dom.window.scrollTo = () => {};
   dom.window.HTMLElement.prototype.scrollIntoView = () => {};
-  dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; this.querySelector('button')?.focus(); };
   dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new window.Event('close')); };
   t.mock.method(globalThis, 'setTimeout', () => 0);
   const now = new Date().toISOString();
@@ -64,15 +64,19 @@ test('execution links select the exact batch and expand HTTP, MCP, command and S
     let target = document.getElementById(`test-attempt-${attempts[0].id}`);
     assert.equal(location.pathname, '/execution-records');
     assert.match(document.querySelector('.testing-detail h2').textContent, /目标批次/);
-    assert.equal(target.open, true);
-    assert.equal(document.activeElement, target);
+    assert.equal(target.getAttribute('aria-pressed'), 'true');
+    assert.equal(document.querySelector('.test-run-drawer').open, true);
+    assert.equal(document.querySelector('.test-run-drawer').contains(document.activeElement), true);
     assert.equal(new URLSearchParams(location.search).get('step'), attempts[0].id);
     // Each protocol uses the same durable batch/run identifiers.
     for (const attempt of attempts.slice(1)) {
+      document.querySelector('[aria-label="关闭执行详情"]')?.click();
       const link = executionBatchLink({ batch_id: batch.id, test_run_id: attempt.id }); document.body.append(link);
       link.click(); await tick();
       target = document.getElementById(`test-attempt-${attempt.id}`);
-      assert.equal(target.open, true); assert.equal(document.activeElement, target); link.remove();
+      assert.equal(target.getAttribute('aria-pressed'), 'true');
+      assert.equal(document.querySelector('.test-run-drawer').open, true);
+      assert.equal(document.querySelector('.test-run-drawer').contains(document.activeElement), true); link.remove();
     }
     // Opening request details also offers the same navigation and closes the dialog.
     await navigate('/requests');
@@ -80,7 +84,8 @@ test('execution links select the exact batch and expand HTTP, MCP, command and S
     assert.equal(document.getElementById('request-detail').open, true);
     document.querySelector('#detail-content a[data-route]').click(); await tick();
     assert.equal(document.getElementById('request-detail').open, false);
-    assert.equal(document.getElementById(`test-attempt-${attempts[0].id}`).open, true);
+    assert.equal(document.getElementById(`test-attempt-${attempts[0].id}`).getAttribute('aria-pressed'), 'true');
+    document.querySelector('[aria-label="关闭执行详情"]').click();
     await navigate('/databases');
     const sqlLink = document.querySelector('#sql-executions a[data-route]');
     assert.equal(new URL(sqlLink.href).searchParams.get('run'), flowRun.id);

@@ -86,13 +86,15 @@ test('separate flow and execution record pages preserve deep links, navigation s
     assert.equal([...document.querySelectorAll('.testing-detail button')].some(node => node.textContent === '查看测试批次'), false);
     assert.equal([...document.querySelectorAll('.testing-detail button')].some(node => node.textContent === '查看执行记录 →'), false);
 
-    const resultFilter = document.querySelector('[aria-label="筛选测试结果"]');
-    resultFilter.value = 'failed'; resultFilter.dispatchEvent(new window.Event('change'));
+    document.querySelector('.testing-result-filter[data-filter="failed"]').click();
     assert.match(document.querySelector('.testing-detail').textContent, /没有符合筛选条件的结果/);
-    const allResults = document.querySelector('[aria-label="筛选测试结果"]'); allResults.value = 'all'; allResults.dispatchEvent(new window.Event('change'));
-    document.querySelector('.test-attempt summary').click();
-    assert.equal(document.querySelector('.test-attempt').open, true);
-    assert.match(document.querySelector('.test-attempt-body').textContent, /请求快照.*断言结果/s);
+    document.querySelector('.testing-result-filter[data-filter="all"]').click();
+    document.querySelector('.test-attempt').click();
+    assert.equal(document.querySelector('.test-run-drawer').open, true);
+    assert.match(document.querySelector('.test-run-drawer').textContent, /断言结果/);
+    document.querySelector('[data-run-tab="input"]').click();
+    assert.match(document.querySelector('#test-run-panel-input').textContent, /HTTP 请求快照/);
+    document.querySelector('[aria-label="关闭执行详情"]').click();
 
     document.querySelectorAll('.testing-batch')[1].click(); await tick();
     assert.equal(new URLSearchParams(location.search).get('batch'), flowBatch.id);

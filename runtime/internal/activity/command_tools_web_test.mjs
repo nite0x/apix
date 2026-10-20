@@ -46,7 +46,10 @@ test('command workspace validates arguments, executes once, retains drafts, and 
   failSave = false; click('保存测试用例'); await tick(); assert.equal(cases[0].type, 'command'); assert.deepEqual(cases[0].command_request.args, ['-']); assert.equal(cases[0].expected_exit_code, 0);
   history.replaceState(null, '', '/tests?tab=cases'); const testing = await import('./web/testing.js'); await testing.activateTesting();
   assert.equal(document.querySelector('.test-cases'), null);
-  history.replaceState(null, '', '/execution-records'); await testing.activateTesting(); await tick(); assert.match(document.querySelector('.test-endpoint').textContent, /命令行 python3/); assert.match(document.querySelector('.test-attempt-body').textContent, /命令执行结果 · 退出码 0/); assert.equal(document.querySelectorAll('#testing-workspace script').length, 0);
-  click('另存为用例', '#testing-workspace'); assert.equal(document.querySelector('dialog[open] [aria-label="执行程序"]').value, 'python3'); fill('标准输入 / 脚本正文', 'print("edited draft")', 'dialog[open]'); await testing.refreshTesting(); assert.equal(document.querySelector('dialog[open] [aria-label="标准输入 / 脚本正文"]').value, 'print("edited draft")'); click('关闭 ×', 'dialog[open]');
+  history.replaceState(null, '', '/execution-records'); await testing.activateTesting(); await tick(); assert.match(document.querySelector('.testing-run-target').textContent, /命令行 · python3/);
+  document.querySelector('.test-attempt').click();
+  document.querySelector('[data-run-tab="output"]').click();
+  assert.match(document.querySelector('#test-run-panel-output').textContent, /退出码 0/); assert.equal(document.querySelectorAll('.test-run-drawer script').length, 0);
+  click('另存为用例', '.test-run-drawer'); assert.equal(document.querySelector('dialog[open] [aria-label="执行程序"]').value, 'python3'); fill('标准输入 / 脚本正文', 'print("edited draft")', 'dialog[open]'); await testing.refreshTesting(); assert.equal(document.querySelector('dialog[open] [aria-label="标准输入 / 脚本正文"]').value, 'print("edited draft")'); click('关闭 ×', 'dialog[open]');
   testing.deactivateTesting(); dom.window.close();
 });

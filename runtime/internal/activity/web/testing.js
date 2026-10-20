@@ -2,15 +2,19 @@ import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flow
 import { openCommandCaseEditor } from './command-tools.js';
 import { openMCPCaseEditor } from './mcp-tools.js';
 import { openRequestDetail } from './request-detail.js';
-import { revealExecutionStep } from './execution-batch.js';
 
 const root = document.getElementById('testing-workspace');
 const flowRoot = document.getElementById('flow-workspace');
-const state = { type: 'all', viewRevision: 0, batches: [], batch: null, tab: 'cases', active: false, loading: false, working: false, open: new Set(), filter: 'all', timer: null, error: '', message: '', signature: '', selection: 0, paused: null };
+const state = { type: 'all', viewRevision: 0, batches: [], batch: null, tab: 'cases', active: false, loading: false, working: false, filter: 'all', batchQuery: '', batchType: 'all', query: '', order: 'sequence', timer: null, error: '', message: '', signature: '', selection: 0, paused: null };
 let mounted = false;
 let editor = null;
 let editorDirty = false;
 let targetStep = '';
+let toolbar = null;
+let runDrawer = null;
+let drawerKey = '';
+let drawerTab = 'assertions';
+const resultTypes = [['all', '全部', 'total'], ['failed', '断言失败', 'failed'], ['error', '执行错误', 'errors'], ['passed', '通过', 'passed'], ['unverified', '未验证', 'unverified'], ['running', '进行中', 'running']];
 
 function el(tag, cls, text) { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = String(text); return node; }
 function button(text, action, cls = 'button') { const item = el('button', cls, text); item.type = 'button'; item.addEventListener('click', action); return item; }
@@ -18,7 +22,7 @@ function field(label, value = '', type = 'input') { const wrap = el('label'); co
 function display(value) { return typeof value === 'string' ? value : JSON.stringify(value, null, 2); }
 function clock(value) { return new Date(value).toLocaleString('zh-CN'); }
 function pill(status) { return el('span', `test-pill ${status}`, ({ passed: '通过', failed: '断言失败', error: '执行错误', unverified: '未验证', running: '进行中', completed: '已结束', interrupted: '已中断' })[status] || status); }
-function summary(counts) { return `${counts.total} 次执行 · 通过 ${counts.passed} · 失败 ${counts.failed} · 错误 ${counts.errors} · 未验证 ${counts.unverified}`; }
+function summary(counts) { return `通过 ${counts.passed} · 断言失败 ${counts.failed} · 执行错误 ${counts.errors}`; }
 async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, { cache: 'no-store', ...options, ...(options.body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options.body) } : {}) });
   if (response.status === 204) return null;
@@ -44,7 +48,7 @@ function locationForBatch() {
 }
 function mount() {
   if (mounted) return; mounted = true; root.replaceChildren();
-  const toolbar = el('div', 'testing-toolbar');
+  toolbar = el('div', 'testing-toolbar');
   const actions = el('div', 'testing-actions'); actions.dataset.testingActions = '';
   const batch = button('＋ 新建集合测试', openBatchEditor); batch.dataset.batchAction = ''; actions.append(batch);
   toolbar.append(actions);
@@ -52,7 +56,8 @@ function mount() {
   const message = el('div', 'detail-alert testing-message'); message.dataset.testingMessage = ''; message.hidden = true;
   const typePanel = el('div'); typePanel.id = 'testing-type-panel'; typePanel.setAttribute('role', 'region');
   const content = el('div'); content.dataset.testingContent = '';
-  typePanel.append(flowRoot, content); panel.append(message, typePanel); root.append(toolbar, panel);
+  typePanel.append(flowRoot, content); panel.append(message, typePanel); root.append(panel);
+  (document.querySelector('.heading-actions') || root).append(toolbar);
 }
 async function showView() {
   render();
@@ -64,80 +69,236 @@ function render() {
   mount();
   root.setAttribute('aria-label', state.tab === 'records' ? '执行记录工作区' : '流程工作区');
   root.querySelector('#testing-view-panel').setAttribute('aria-label', state.tab === 'records' ? '执行记录' : '流程');
-  root.querySelector('.testing-toolbar').hidden = state.tab !== 'records' || isFlowView();
+  toolbar.hidden = state.tab !== 'records' || isFlowView();
   root.querySelector('#testing-type-panel').setAttribute('aria-label', state.tab === 'records' ? '执行记录' : '流程列表');
-  root.querySelector('[data-batch-action]').hidden = state.tab !== 'records' || isFlowView();
+  toolbar.querySelector('[data-batch-action]').hidden = state.tab !== 'records' || isFlowView();
   root.querySelector('[data-testing-content]').hidden = isFlowView() || state.tab === 'cases';
   flowRoot.hidden = state.tab === 'records' && !isFlowView();
-  root.querySelectorAll('.testing-toolbar button').forEach(node => { node.disabled = state.working; });
+  toolbar.querySelectorAll('button').forEach(node => { node.disabled = state.working; });
   notice(state.error, state.message);
   if (isFlowView() || state.tab === 'cases') return;
-  const signature = JSON.stringify([state.type, state.tab, state.batches, state.batch, state.working, state.filter, state.paused]);
+  const signature = JSON.stringify([state.type, state.tab, state.batches, state.batch, state.working, state.paused]);
   if (signature === state.signature) return; state.signature = signature;
   const content = root.querySelector('[data-testing-content]');
+  const focused = content.contains(document.activeElement) ? document.activeElement : null;
+  const focusLabel = focused?.getAttribute('aria-label');
+  const cursor = focused?.selectionStart;
+  const listScroll = content.querySelector('.testing-batch-items')?.scrollTop || 0;
+  const resultScroll = content.querySelector('.testing-results')?.scrollTop || 0;
   content.replaceChildren(renderBatches());
+  content.querySelector('.testing-batch-items').scrollTop = listScroll;
+  const results = content.querySelector('.testing-results'); if (results) results.scrollTop = resultScroll;
+  if (focusLabel) {
+    const next = [...content.querySelectorAll('[aria-label]')].find(node => node.getAttribute('aria-label') === focusLabel);
+    next?.focus({ preventScroll: true });
+    if (cursor != null && next?.type === 'search') next.setSelectionRange(cursor, cursor);
+  }
+  if (targetStep && runDrawer?.open) updateRunDrawer();
+}
+function searchInput(label, placeholder, value, change) {
+  const input = el('input', 'testing-search'); input.type = 'search'; input.placeholder = placeholder;
+  input.setAttribute('aria-label', label); input.value = value; input.addEventListener('input', () => change(input.value)); return input;
+}
+function runTarget(run) {
+  if (run.type === 'sql') return `数据库 · ${run.execution_input?.connection_id || 'SQL'}`;
+  if (run.type === 'service') return `服务 · ${run.execution_input?.service_id || ''} · ${run.execution_input?.action === 'stop' ? '停止' : '启动'}`;
+  if (run.type === 'command') return `命令行 · ${run.command_request_snapshot?.program || ''}`;
+  if (run.type === 'mcp') return `MCP · ${run.mcp_result?.server?.name || run.mcp_request_snapshot?.server_id || ''} / ${run.mcp_request_snapshot?.tool_name || ''}`;
+  return `${run.request_snapshot?.method || 'HTTP'} ${run.request_snapshot?.url || ''}`;
+}
+function duration(run) {
+  if (run.status === 'running') return '进行中';
+  const result = run.command_result || run.execution_result || run.mcp_result;
+  const ms = run.duration_ms ?? result?.duration_ms;
+  if (ms != null) return `${ms} ms`;
+  if (!run.finished_at || !run.started_at) return '—';
+  const elapsed = new Date(run.finished_at) - new Date(run.started_at);
+  return Number.isFinite(elapsed) && elapsed >= 0 ? `${elapsed} ms` : '—';
+}
+function runReason(run) {
+  if (run.error_message) return run.error_message;
+  const failed = (run.assertions || []).filter(item => !item.passed);
+  if (failed.length) {
+    const first = failed[0];
+    const operator = ({ not_equals: '不等于 ', contains: '包含 ', exists: '存在 ' })[first.operator] || '';
+    return `${first.kind}${first.path ? `.${first.path}` : ''} · 预期 ${operator}${display(first.expected) ?? '—'}，实际 ${display(first.actual) ?? '—'}${failed.length > 1 ? ` · 共 ${failed.length} 项断言失败` : ''}`;
+  }
+  return ({ passed: '所有预期验证通过', failed: '断言未通过，请查看预期值与实际值', error: '执行未完成，请查看错误详情', running: '正在执行，结果将自动更新', unverified: '未设置预期断言' })[run.status] || run.status;
+}
+function renderBatchItems(container) {
+  container.replaceChildren();
+  const query = state.batchQuery.trim().toLowerCase();
+  const batches = state.batches.filter(batch => (state.batchType === 'all' || (batch.source === 'flow' ? 'flow' : 'collection') === state.batchType)
+    && `${batch.name} ${batch.id}`.toLowerCase().includes(query));
+  for (const batch of batches) {
+    const item = button('', () => selectBatch(batch.id), 'testing-batch'); item.setAttribute('aria-pressed', String(state.batch?.id === batch.id));
+    const meta = el('div', 'testing-batch-top'); meta.append(el('span', 'testing-kind', batch.source === 'flow' ? '多步流程' : '集合测试'), pill(batch.status));
+    item.append(meta, el('strong', '', batch.name), el('small', '', `${clock(batch.created_at)} · ${batch.counts.total} 次执行`), el('small', 'testing-batch-counts', summary(batch.counts)));
+    const pending = (batch.counts.unverified || 0) + (batch.counts.running || 0);
+    if (pending) item.append(el('small', '', `未验证 ${batch.counts.unverified || 0} · 进行中 ${batch.counts.running || 0}`));
+    container.append(item);
+  }
+  if (!batches.length) container.append(blank(state.batches.length ? '没有匹配的记录' : '还没有执行记录', state.batches.length ? '换个关键词或记录类型试试。' : '开始执行后，记录会自动保存在这里。'));
 }
 function renderBatches() {
   const layout = el('div', 'testing-layout'); const list = el('aside', 'panel testing-batches'); list.setAttribute('aria-label', '执行记录列表');
-  for (const batch of state.batches) {
-    const item = button('', () => selectBatch(batch.id), 'testing-batch'); item.setAttribute('aria-pressed', String(state.batch?.id === batch.id));
-    item.append(el('span', 'testing-kind', batch.source === 'flow' ? '多步流程' : '集合测试'), el('strong', '', batch.name), el('small', '', `${clock(batch.created_at)} · ${batch.counts.total} 次执行`), el('small', '', `通过 ${batch.counts.passed} / 失败 ${batch.counts.failed + batch.counts.errors}`), pill(batch.status)); list.append(item);
-  }
-  if (!state.batches.length) list.append(blank('还没有测试批次', 'AI 开始测试后会自动出现在这里，也可以手动新建。'));
+  const tools = el('div', 'testing-list-tools'); const listHeading = el('div', 'testing-list-heading'); listHeading.append(el('h2', '', '执行批次'), el('span', 'subtle', `${state.batches.length} 条`));
+  const items = el('div', 'testing-batch-items');
+  const search = searchInput('搜索执行记录', '搜索名称或批次 ID', state.batchQuery, value => { state.batchQuery = value; renderBatchItems(items); });
+  const type = el('select', 'testing-filter'); type.setAttribute('aria-label', '筛选记录类型');
+  for (const [value, text] of [['all', '全部类型'], ['collection', '集合测试'], ['flow', '多步流程']]) type.add(new Option(text, value));
+  type.value = state.batchType; type.addEventListener('change', () => { state.batchType = type.value; renderBatchItems(items); });
+  tools.append(listHeading, search, type); list.append(tools, items); renderBatchItems(items);
   const detail = el('section', 'panel testing-detail'); const batch = state.batch;
   if (!batch) { detail.append(blank('每次测试，都有自己的记录', '接口、数据库、MCP、命令行和服务执行都会归入批次。打开批次查看输入与结果。')); layout.append(list, detail); return layout; }
   const heading = el('div', 'panel-heading'); const title = el('div'); title.append(el('h2', '', batch.name), el('small', 'subtle', `${clock(batch.created_at)} · #${batch.id.slice(0, 8)}`));
   const actions = el('div', 'testing-actions'); actions.append(pill(batch.status));
   if (batch.source !== 'flow' && batch.status === 'running') { const add = button('＋ 添加测试', () => openCaseEditor(null, true)); const addMCP = button('＋ MCP 测试', () => openMCPCaseEditor(null, { batchID: batch.id, onSaved: async () => { await refreshTesting(); } })); addMCP.disabled = state.working; const addCommand = button('＋ 命令行测试', () => openCommandCaseEditor(null, { batchID: batch.id, onSaved: async () => { await refreshTesting(); } })); addCommand.disabled = state.working; actions.append(addMCP, addCommand); add.disabled = state.working; const finish = button('结束批次', () => perform(async () => { await api(`/test-batches/${batch.id}/finish`, { method: 'POST' }); }, '批次已结束')); finish.disabled = state.working || batch.counts.running > 0; actions.append(add, finish); }
-  heading.append(title, actions); const counts = el('div', 'testing-summary'); counts.append(el('span', '', summary(batch.counts)));
-  const filter = el('select', 'testing-filter'); filter.setAttribute('aria-label', '筛选测试结果'); for (const [value, text] of [['all', '全部结果'], ['failed', '断言失败'], ['error', '执行错误'], ['passed', '通过'], ['unverified', '未验证'], ['running', '进行中']]) filter.add(new Option(text, value)); filter.value = state.filter; filter.addEventListener('change', () => { state.filter = filter.value; render(); }); counts.append(filter); detail.append(heading, counts);
+  heading.append(title, actions);
+  const counts = el('div', 'testing-summary'); counts.setAttribute('role', 'group'); counts.setAttribute('aria-label', '筛选测试结果');
+  const results = el('div', 'testing-results'); results.setAttribute('aria-label', '用例执行结果');
+  for (const [value, text, key] of resultTypes) {
+    const filter = button('', () => { state.filter = value; counts.querySelectorAll('button').forEach(node => node.setAttribute('aria-pressed', String(node.dataset.filter === value))); renderResults(results, batch); }, `testing-result-filter ${value}`);
+    filter.dataset.filter = value; filter.setAttribute('aria-pressed', String(state.filter === value)); filter.append(el('span', '', text), el('strong', '', batch.counts[key] || 0)); counts.append(filter);
+  }
+  detail.append(heading, counts);
   if (batch.source === 'flow') {
     const link = el('a', 'button small', '查看步骤详情'); link.href = '/execution-records?type=flow&run=' + encodeURIComponent(batch.id); link.dataset.route = ''; actions.append(link);
   }
   if (state.paused) { const paused = el('div', 'detail-alert'); paused.append(el('strong', '', '测试正在等待暂停规则确认')); for (const [action, label] of [['continue', '继续请求'], ['skip', '跳过'], ['stop', '停止']]) paused.append(button(label, async event => { event.currentTarget.disabled = true; try { await api(`/steps/${state.paused.id}/resume`, { method: 'POST', body: { action } }); await refreshTesting(); } catch (error) { notice(error.message); event.currentTarget.disabled = false; } })); detail.append(paused); }
-  const runs = (batch.runs || []).filter(run => state.filter === 'all' || run.status === state.filter);
-  const groups = new Map();
-  for (const run of runs) { const request = run.request_snapshot; const key = run.type === 'sql' ? '数据库 ' + (run.execution_input?.connection_id || '') : run.type === 'service' ? '服务 ' + (run.execution_input?.service_id || '') + ' · ' + (run.execution_input?.action === 'stop' ? '停止' : '启动') : run.type === 'command' ? `命令行 ${run.command_request_snapshot?.program || ''}` : run.type === 'mcp' ? `MCP ${run.mcp_result?.server?.name || run.mcp_request_snapshot?.server_id} / ${run.mcp_request_snapshot?.tool_name}` : `${request.method} ${request.url.split('?')[0]}`; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(run); }
-  for (const [endpoint, attempts] of groups) { const section = el('section'); section.append(el('h3', 'test-endpoint', `${endpoint} · ${attempts.length} 次执行`)); for (const run of attempts) section.append(renderAttempt(run)); detail.append(section); }
-  if (!runs.length) detail.append(blank(batch.counts.total ? '没有符合筛选条件的结果' : '等待添加测试', batch.counts.total ? '切换结果筛选查看其他用例。' : '在上方添加测试，执行后即可在这里查看结果。'));
+  const resultTools = el('div', 'testing-result-tools');
+  const runSearch = searchInput('搜索执行用例', '搜索用例、目标或错误信息', state.query, value => { state.query = value; renderResults(results, batch); });
+  const order = el('select', 'testing-filter'); order.setAttribute('aria-label', '结果展示方式');
+  for (const [value, text] of [['sequence', '按执行顺序'], ['issues', '异常优先'], ['target', '按目标分组']]) order.add(new Option(text, value));
+  order.value = state.order; order.addEventListener('change', () => { state.order = order.value; renderResults(results, batch); });
+  resultTools.append(runSearch, order); detail.append(resultTools, results); renderResults(results, batch);
   layout.append(list, detail); return layout;
 }
-function renderAttempt(run) {
-  const details = el('details', 'test-attempt'); details.open = state.open.has(run.id); details.addEventListener('toggle', () => { if (details.open) state.open.add(run.id); else state.open.delete(run.id); });
-  details.id = `test-attempt-${run.id}`; details.tabIndex = -1;
-  details.classList.toggle('execution-target', run.id === targetStep);
-  const title = el('summary'); const chevron = el('span', 'test-attempt-chevron'); chevron.setAttribute('aria-hidden', 'true'); title.append(chevron, pill(run.status), el('strong', '', run.name), el('small', '', `${clock(run.started_at)}${run.case_version ? ` · 用例 v${run.case_version}` : ' · 临时用例'} · #${run.id.slice(0, 8)}`));
-  const body = el('div', 'test-attempt-body'); const request = run.request_snapshot;
-  const snapshot = el('section', 'test-attempt-section'); snapshot.append(el('h4', 'test-section-title', ({ sql: 'SQL 执行快照', service: '服务执行快照', command: '命令执行快照', mcp: 'MCP 调用快照' })[run.type] || 'HTTP 请求快照'), el('pre', 'detail-code', display(run.type === 'sql' || run.type === 'service' ? run.execution_input : run.type === 'command' ? run.command_request_snapshot : run.type === 'mcp' ? run.mcp_request_snapshot : { method: request.method, url: request.url, query_params: request.query_params, headers: request.headers, body: request.body }))); body.append(snapshot);
-  const assertions = run.assertions || [];
-  const results = el('section', 'test-attempt-section'); const resultHeading = el('h4', 'test-section-title', '断言结果');
-  const passed = assertions.filter(assertion => assertion.passed).length;
-  resultHeading.append(el('span', 'test-section-meta', assertions.length ? `${assertions.length} 项 · ${passed} 项通过${passed < assertions.length ? ` · ${assertions.length - passed} 项失败` : ''}` : '暂无断言结果')); results.append(resultHeading);
-  const list = el('div', 'test-assertions');
-  for (const assertion of assertions) {
-    const row = el('div', `test-assertion${assertion.passed ? '' : ' is-failed'}`); const heading = el('div', 'test-assertion-heading'); const target = el('div', 'test-assertion-target'); target.append(el('code', '', `${assertion.kind}${assertion.path ? `.${assertion.path}` : ''}`), el('span', 'test-assertion-operator', assertion.operator || 'equals')); heading.append(target, pill(assertion.passed ? 'passed' : 'failed'));
-    const values = el('dl', 'test-assertion-values');
-    for (const [label, value] of [['预期值', assertion.expected], ['实际值', assertion.actual]]) { const pair = el('div'); pair.append(el('dt', '', label), el('dd', '', display(value) ?? '—')); values.append(pair); }
-    row.append(heading, values); list.append(row);
+function renderResults(container, batch) {
+  container.replaceChildren();
+  const query = state.query.trim().toLowerCase();
+  const runs = (batch.runs || []).filter(run => (state.filter === 'all' || run.status === state.filter) && `${run.name} ${runTarget(run)} ${run.error_message || ''} ${run.id}`.toLowerCase().includes(query));
+  if (state.order === 'issues') runs.sort((a, b) => Number(['failed', 'error'].includes(b.status)) - Number(['failed', 'error'].includes(a.status)));
+  const caption = el('div', 'testing-result-caption', `显示 ${runs.length} / ${(batch.runs || []).length} 条执行`); caption.setAttribute('role', 'status'); container.append(caption);
+  if (!runs.length) { container.append(blank(batch.counts.total ? '没有符合筛选条件的结果' : '等待添加测试', batch.counts.total ? '切换结果筛选或调整关键词。' : '在上方添加测试，执行后即可在这里查看结果。')); return; }
+  const columns = el('div', 'testing-result-columns'); columns.setAttribute('aria-hidden', 'true');
+  for (const text of ['结果', '用例 / 执行目标', '执行时间', '耗时', '']) columns.append(el('span', '', text)); container.append(columns);
+  const list = el('div', 'testing-result-list'); list.setAttribute('role', 'list');
+  let previousGroup = '';
+  const ordered = state.order === 'target' ? runs.toSorted((a, b) => runTarget(a).localeCompare(runTarget(b))) : runs;
+  for (const run of ordered) {
+    if (state.order === 'target' && runTarget(run) !== previousGroup) { previousGroup = runTarget(run); const group = el('div', 'test-endpoint', previousGroup); group.setAttribute('role', 'listitem'); list.append(group); }
+    const item = el('div', 'testing-result-item'); item.setAttribute('role', 'listitem'); item.append(renderAttempt(run)); list.append(item);
   }
-  results.append(list);
-  if (run.expected_status && !assertions.length) results.append(el('p', '', `预期 HTTP ${run.expected_status}`));
-  body.append(results);
-  if (run.error_message) body.append(el('p', 'response-error', run.error_message));
-  if (run.status === 'unverified') body.append(el('p', '', '本次执行没有设置预期断言，因此保留为“未验证”。'));
-  const actions = el('div', 'testing-actions test-attempt-actions');
+  container.append(list);
+}
+function renderAttempt(run) {
+  const row = button('', () => openRunDrawer(run.id), 'test-attempt'); row.id = `test-attempt-${run.id}`;
+  row.setAttribute('aria-label', `查看执行详情：${run.name}`); row.setAttribute('aria-haspopup', 'dialog'); row.setAttribute('aria-pressed', String(targetStep === run.id));
+  const info = el('span', 'testing-result-info'); info.append(el('strong', '', run.name), el('small', 'testing-run-target', runTarget(run)));
+  if (['failed', 'error'].includes(run.status)) info.append(el('small', 'testing-run-reason', runReason(run)));
+  const time = el('time', 'testing-run-time', clock(run.started_at)); time.dateTime = run.started_at;
+  const arrow = el('span', 'testing-run-arrow', '›'); arrow.setAttribute('aria-hidden', 'true');
+  row.append(pill(run.status), info, time, el('span', 'testing-run-duration', duration(run)), arrow); return row;
+}
+function closeRunDrawer(updateLocation = true) {
+  if (!runDrawer) return;
+  const drawer = runDrawer; runDrawer = null;
+  const opener = document.getElementById(`test-attempt-${targetStep}`); targetStep = ''; drawerKey = '';
+  if (drawer.open) drawer.close(); drawer.remove();
+  root.querySelectorAll('.test-attempt').forEach(node => node.setAttribute('aria-pressed', 'false'));
+  if (state.active && updateLocation) locationForBatch();
+  if (opener && !document.querySelector('dialog[open]')) opener.focus({ preventScroll: true });
+}
+function openRunDrawer(id) {
+  if (!state.batch?.runs?.some(run => run.id === id)) return;
+  targetStep = id; drawerTab = 'assertions'; drawerKey = '';
+  if (!runDrawer) {
+    runDrawer = el('dialog', 'request-detail test-run-drawer'); runDrawer.setAttribute('aria-labelledby', 'test-run-title');
+    const drawer = runDrawer;
+    drawer.addEventListener('close', () => { if (runDrawer === drawer) closeRunDrawer(); });
+    drawer.addEventListener('cancel', event => { event.preventDefault(); closeRunDrawer(); });
+    document.body.append(runDrawer);
+  }
+  updateRunDrawer();
+  if (!runDrawer.open) runDrawer.showModal();
+  root.querySelectorAll('.test-attempt').forEach(node => node.setAttribute('aria-pressed', String(node.id === `test-attempt-${id}`)));
+  locationForBatch();
+}
+function updateRunDrawer() {
+  const run = state.batch?.runs?.find(item => item.id === targetStep); if (!run) { closeRunDrawer(); return; }
+  const key = JSON.stringify([run, state.working]); if (key === drawerKey) return; drawerKey = key;
+  const scroll = runDrawer.querySelector('.detail-content')?.scrollTop || 0;
+  const hadFocus = runDrawer.contains(document.activeElement);
+  const activeTab = hadFocus ? document.activeElement?.dataset.runTab : null;
+  const heading = el('div', 'detail-heading'); const title = el('div'); title.append(el('div', 'eyebrow', '执行详情')); const name = el('h2', '', run.name); name.id = 'test-run-title'; title.append(name);
+  const close = button('关闭 ×', () => closeRunDrawer(), 'button small'); close.setAttribute('aria-label', '关闭执行详情'); heading.append(title, close);
+  const content = el('div', 'detail-content'); const overview = el('section', `testing-run-overview ${run.status}`);
+  const meta = el('div', 'testing-actions'); meta.append(pill(run.status), el('span', 'subtle', duration(run))); overview.append(meta, el('p', 'testing-run-conclusion', runReason(run)), el('div', 'detail-url', runTarget(run))); content.append(overview);
+  const tabs = el('div', 'detail-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '执行详情内容');
+  const definitions = [['assertions', '断言结果', renderAssertions(run)], ['input', '执行输入', renderRunInput(run)], ['output', '执行输出', renderRunOutput(run)], ['metadata', '记录信息', renderRunMetadata(run)]];
+  const panels = el('div');
+  function activate(index, focus = false) {
+    drawerTab = definitions[index][0];
+    definitions.forEach(([id, , panel], i) => { const tab = tabs.children[i]; const selected = i === index; tab.setAttribute('aria-selected', String(selected)); tab.tabIndex = selected ? 0 : -1; panel.hidden = !selected; if (selected && focus) tab.focus(); });
+  }
+  for (const [id, label, panel] of definitions) {
+    const tab = button(label, () => activate(definitions.findIndex(item => item[0] === id)), ''); tab.dataset.runTab = id;
+    tab.id = `test-run-tab-${id}`; tab.setAttribute('role', 'tab'); tab.setAttribute('aria-controls', `test-run-panel-${id}`);
+    panel.id = `test-run-panel-${id}`; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', tab.id); panel.tabIndex = 0;
+    panel.classList.add('testing-run-panel'); tabs.append(tab); panels.append(panel);
+  }
+  tabs.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const index = [...tabs.children].indexOf(event.target); if (index < 0) return; event.preventDefault();
+    activate(event.key === 'Home' ? 0 : event.key === 'End' ? definitions.length - 1 : (index + (event.key === 'ArrowLeft' ? -1 : 1) + definitions.length) % definitions.length, true);
+  });
+  activate(Math.max(0, definitions.findIndex(item => item[0] === drawerTab))); content.append(tabs, panels);
+  const actions = el('div', 'testing-actions detail-foot');
   if (run.api_run_id) actions.append(button('请求与响应详情', event => openRequestDetail(run.api_run_id, event.currentTarget)));
-  else if (run.finished_at && (!run.type || run.type === 'http')) body.append(el('p', '', '本次执行没有可用的请求详情。'));
-  if (run.type === 'command') { const response = el('section', 'test-attempt-section'); const data = run.command_result || {}; response.append(el('h4', 'test-section-title', `命令执行结果 · 退出码 ${data.exit_code ?? '—'} · ${data.duration_ms ?? 0} ms`)); for (const source of ['stdout', 'stderr']) { response.append(el('h4', 'test-section-title', source), el('pre', 'detail-code', data[source] || '（空）')); if (data[`${source}_truncated`]) response.append(el('p', 'response-error', '输出已截断，相关输出断言不能判为通过。')); } body.append(response); }
-  if (run.type === 'mcp') { const response = el('section', 'test-attempt-section'); response.append(el('h4', 'test-section-title', 'MCP 返回结果'), el('pre', 'detail-code', display(run.mcp_result))); body.append(response); }
-  if (run.type === 'sql' || run.type === 'service') { const result = el('section', 'test-attempt-section'); result.append(el('h4', 'test-section-title', run.type === 'sql' ? 'SQL 执行结果' : '服务执行结果'), el('pre', 'detail-code', display(run.execution_result) ?? '暂无结果')); body.append(result); }
   if (!run.type || ['http', 'mcp', 'command'].includes(run.type)) actions.append(button('另存为用例', () => openCaseEditor(run.type === 'command' ? { type: 'command', name: run.name, command_request: run.command_request_snapshot, expected_exit_code: run.expected_exit_code, assertions: run.assertion_definitions || [] } : run.type === 'mcp' ? { type: 'mcp', name: run.name, mcp_request: run.mcp_request_snapshot, expected_is_error: run.expected_is_error, validate_output_schema: run.validate_output_schema, assertions: run.assertion_definitions || [] } : { name: run.name, request: run.request_snapshot, expected_status: run.expected_status, assertions: run.assertion_definitions || [] })));
   if (run.case_id) { const retry = button('重试用例', () => openRunEditor([run.case_id])); retry.disabled = state.working; actions.append(retry); }
-  body.append(actions); details.append(title, body); return details;
+  runDrawer.replaceChildren(heading, content, actions); content.scrollTop = scroll;
+  if (hadFocus) (tabs.querySelector(`[data-run-tab="${activeTab}"]`) || close).focus({ preventScroll: true });
+}
+function codeSection(title, value, copy = false) {
+  const section = el('section', 'test-attempt-section'); const heading = el('h3', 'test-section-title', title); const text = display(value) ?? '（空）';
+  if (copy) heading.append(button('复制', async event => { const control = event.currentTarget; try { await navigator.clipboard.writeText(text); control.textContent = '已复制'; } catch { control.textContent = '复制失败，请手动选择'; } }, 'button small'));
+  section.append(heading, el('pre', 'detail-code', text)); return section;
+}
+function renderAssertions(run) {
+  const results = el('div'); const assertions = run.assertions || []; const passed = assertions.filter(assertion => assertion.passed).length;
+  results.append(el('p', 'testing-assertion-summary', assertions.length ? `${assertions.length} 项断言 · ${passed} 项通过 · ${assertions.length - passed} 项失败` : run.status === 'running' ? '执行中，断言结果将在完成后更新。' : run.status === 'unverified' ? '本次执行没有设置预期断言，因此保留为“未验证”。' : run.status === 'error' ? '执行发生错误，暂无断言结果。' : '暂无断言结果。'));
+  for (const assertion of assertions) {
+    const row = el('section', `test-assertion${assertion.passed ? '' : ' is-failed'}`); const heading = el('div', 'test-assertion-heading'); const target = el('div', 'test-assertion-target'); target.append(el('code', '', `${assertion.kind}${assertion.path ? `.${assertion.path}` : ''}`), el('span', 'test-assertion-operator', assertion.operator || 'equals')); heading.append(target, pill(assertion.passed ? 'passed' : 'failed'));
+    const values = el('dl', 'test-assertion-values');
+    for (const [label, value] of [['预期值', assertion.expected], ['实际值', assertion.actual]]) { const pair = el('div'); pair.append(el('dt', '', label), el('dd', '', display(value) ?? '—')); values.append(pair); }
+    row.append(heading, values); results.append(row);
+  }
+  if (run.expected_status && !assertions.length) results.append(el('p', '', `预期 HTTP ${run.expected_status}`)); return results;
+}
+function renderRunInput(run) {
+  const panel = el('div'); const input = run.type === 'sql' || run.type === 'service' ? run.execution_input : run.type === 'command' ? run.command_request_snapshot : run.type === 'mcp' ? run.mcp_request_snapshot : run.request_snapshot;
+  panel.append(codeSection(({ sql: 'SQL 执行快照', service: '服务执行快照', command: '命令执行快照', mcp: 'MCP 调用快照' })[run.type] || 'HTTP 请求快照', input, true)); return panel;
+}
+function renderRunOutput(run) {
+  const panel = el('div');
+  if (run.type === 'command') {
+    const data = run.command_result || {}; panel.append(el('p', 'testing-assertion-summary', `退出码 ${data.exit_code ?? '—'} · ${duration(run)}`));
+    for (const source of ['stdout', 'stderr']) { panel.append(codeSection(source, data[source] || '（空）', true)); if (data[`${source}_truncated`]) panel.append(el('p', 'response-error', '输出已截断，相关输出断言不能判为通过。')); }
+  } else if (run.type === 'mcp') panel.append(codeSection('MCP 返回结果', run.mcp_result, true));
+  else if (run.type === 'sql' || run.type === 'service') panel.append(codeSection(run.type === 'sql' ? 'SQL 执行结果' : '服务执行结果', run.execution_result, true));
+  else panel.append(el('p', 'detail-empty', run.api_run_id ? '打开“请求与响应详情”查看保存的 HTTP 响应正文、响应头和请求信息。' : run.status === 'running' ? '正在执行，等待响应。' : '本次执行没有可用的请求详情。'));
+  if (run.error_message) panel.prepend(codeSection('执行错误', run.error_message, true)); return panel;
+}
+function renderRunMetadata(run) {
+  const panel = el('div'); const pairs = el('dl', 'detail-pairs');
+  for (const [label, value] of [['执行 ID', run.id], ['批次', state.batch.name], ['批次 ID', state.batch.id], ['开始时间', clock(run.started_at)], ['结束时间', run.finished_at ? clock(run.finished_at) : '—'], ['耗时', duration(run)], ['用例版本', run.case_version ? `v${run.case_version}` : '临时用例']]) pairs.append(el('dt', '', label), el('dd', '', value));
+  panel.append(pairs); return panel;
 }
 async function selectBatch(id) {
   const selection = ++state.selection;
-  try { const batch = await api(`/test-batches/${encodeURIComponent(id)}`); if (selection !== state.selection) return; state.batch = batch; state.paused = null; state.tab = 'records'; state.type = 'all'; deactivateFlows(); state.filter = 'all'; state.signature = ''; render(); locationForBatch(); }
+  try { const batch = await api(`/test-batches/${encodeURIComponent(id)}`); if (selection !== state.selection) return; if (state.batch?.id !== batch.id) { closeRunDrawer(); targetStep = ''; state.query = ''; } state.batch = batch; state.paused = null; state.tab = 'records'; state.type = 'all'; deactivateFlows(); state.filter = 'all'; state.signature = ''; render(); locationForBatch(); }
   catch (error) { notice(error.message); }
 }
 export async function refreshTesting() {
@@ -239,17 +400,22 @@ function openRunEditor(ids) {
 }
 export async function activateTesting() {
   const revision = ++state.viewRevision; state.selection++;
+  closeRunDrawer(false);
   targetStep = new URLSearchParams(location.search).get('step') || '';
-  if (targetStep) { state.open.add(targetStep); state.filter = 'all'; }
+  if (targetStep) { state.filter = 'all'; state.query = ''; }
   state.active = true; mount(); readRoute(); state.signature = ''; render();
   const query = new URLSearchParams(location.search);
-  if (!isFlowView() && query.get('batch') && query.get('batch') !== state.batch?.id) await selectBatch(query.get('batch'));
+  if (!isFlowView() && query.get('batch') && query.get('batch') !== state.batch?.id) {
+    const requestedStep = targetStep; await selectBatch(query.get('batch'));
+    if (revision !== state.viewRevision || !state.active) return;
+    targetStep = requestedStep;
+  }
   if (revision !== state.viewRevision || !state.active) return;
   await showView(); clearTimeout(state.timer);
   if (revision !== state.viewRevision || !state.active) return;
-  if (targetStep && !isFlowView()) revealExecutionStep(`test-attempt-${targetStep}`);
+  if (targetStep && !isFlowView() && state.batch?.runs?.some(run => run.id === targetStep)) openRunDrawer(targetStep);
   const poll = async () => { if (!state.active) return; if (!isFlowView()) await refreshTesting(); if (state.active) state.timer = setTimeout(poll, 1500); }; state.timer = setTimeout(poll, 1500);
 }
-export function deactivateTesting() { state.active = false; state.viewRevision++; state.selection++; clearTimeout(state.timer); deactivateFlows(); }
+export function deactivateTesting() { state.active = false; closeRunDrawer(); if (toolbar) toolbar.hidden = true; state.viewRevision++; state.selection++; clearTimeout(state.timer); deactivateFlows(); }
 window.addEventListener('testing-flow-location', () => { if (state.active) { readRoute(); state.signature = ''; render(); if (!isFlowView() && state.tab === 'records') { deactivateFlows(); void refreshTesting(); } } });
 window.addEventListener('beforeunload', event => { if (editorDirty && editor?.open) { event.preventDefault(); event.returnValue = ''; } });

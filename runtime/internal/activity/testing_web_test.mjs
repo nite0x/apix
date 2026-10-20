@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 
-test('execution records group input variants, preserve snapshot drafts and retry a saved case without a case bank', async () => {
+test('execution records list attempts, preserve snapshot drafts and retry a saved case without a case bank', async () => {
   const require = createRequire(import.meta.url);
   const { JSDOM } = require('jsdom');
   const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/tests?tab=records' });
@@ -35,15 +35,17 @@ test('execution records group input variants, preserve snapshot drafts and retry
   const click = (text, scope = '#testing-workspace') => { const node = [...document.querySelectorAll(`${scope} button`)].find(node => node.textContent === text); assert.ok(node, text); node.click(); };
   const set = (label, value) => { const node = document.querySelector(`[aria-label="${label}"]`); assert.ok(node, label); node.value = value; node.dispatchEvent(new window.Event('input', { bubbles: true })); };
   await module.activateTesting();
-  assert.equal(document.querySelectorAll('.test-endpoint').length, 1);
-  assert.match(document.querySelector('.testing-summary').textContent, /通过 1.*失败 1/);
+  assert.equal(document.querySelectorAll('.test-endpoint').length, 0);
+  assert.equal(document.querySelectorAll('.test-attempt').length, 2);
+  assert.match(document.querySelector('.testing-summary').textContent, /断言失败1.*执行错误0.*通过1/);
   assert.match(document.querySelector('#testing-workspace').textContent, /缺少邮箱/);
-  click('另存为用例'); set('用例名称', '缺少用户名'); set('请求地址', 'http://localhost/users'); set('预期状态码', '400');
+  document.querySelector('.test-attempt').click();
+  click('另存为用例', '.test-run-drawer'); set('用例名称', '缺少用户名'); set('请求地址', 'http://localhost/users'); set('预期状态码', '400');
   await module.refreshTesting();
   assert.equal(document.querySelector('[aria-label="用例名称"]').value, '缺少用户名');
   document.querySelector('.testing-editor form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await tick();
   const write = writes.find(item => item.path === '/api/test-cases'); assert.ok(write); assert.equal(write.input.expected_status, 400);
-  click('重试用例');
+  click('重试用例', '.test-run-drawer');
   document.querySelector('.testing-editor form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await tick();
   assert.ok(writes.some(item => item.path === '/api/test-batches/new-batch/runs' && item.input.case_id === 'case-1'));
   assert.ok(writes.some(item => item.path.endsWith('/new-batch/finish')));
