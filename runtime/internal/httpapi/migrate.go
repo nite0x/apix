@@ -6,7 +6,7 @@ import (
 	"github.com/apix/apix/runtime/internal/lifecycle"
 )
 
-const httpSchemaVersion = 7
+const httpSchemaVersion = 8
 
 // MigrateSchema installs the current HTTP domain schema.
 //
@@ -16,6 +16,12 @@ const httpSchemaVersion = 7
 // schema in one pass. Unknown versions are rejected without replacing tables.
 func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 	s.db = db
+	if err := s.initRetention(); err != nil {
+		return err
+	}
+	if err := migrateBulkLifecycle(s); err != nil {
+		return err
+	}
 	if err := migrateRecordManagement(db); err != nil {
 		return err
 	}
@@ -78,7 +84,7 @@ func (s *HTTPService) MigrateSchema(db *sql.DB) error {
 		s.initRepositories()
 		return nil
 	}
-	if err == nil && (version == 5 || version == 6) {
+	if err == nil && (version == 5 || version == 6 || version == 7) {
 		if err := migrateIndependentTests(db); err != nil {
 			return err
 		}

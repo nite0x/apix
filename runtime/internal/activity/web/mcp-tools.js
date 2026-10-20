@@ -1,4 +1,4 @@
-import {openArchived,showReferences,lifecycleButton} from './lifecycle-ui.js';
+import {openArchived,showReferences,lifecycleButton,openBulkManager} from './lifecycle-ui.js';
 import { executionBatchLink } from './execution-batch.js';
 import { attachExecutionHistory } from './execution-history.js';
 let executionHistory = null;
@@ -21,7 +21,7 @@ function feedback(text = '', error = false) { const n = root.querySelector('[dat
 function mount() {
   if (mounted) return; mounted = true;
   const panel = node('section', 'panel'); const heading = node('div', 'panel-heading'); const intro = node('div'); intro.append(node('h2', '', 'MCP 服务器'), node('p', '', '通过 Streamable HTTP 连接服务器，发现工具并验证调用结果。'));
-  heading.append(intro, button('＋ 添加服务器', () => openServerEditor(), 'button primary'),lifecycleButton('已归档服务器',()=>openArchived('mcp',refreshMCP)));const search=field('搜索服务器','','input');search.input.type='search';search.input.placeholder='服务器名称或地址';search.input.oninput=()=>{state.serverQuery=search.input.value;const matches=state.servers.filter(s=>`${s.name} ${s.url}`.toLowerCase().includes(state.serverQuery.toLowerCase()));if(!matches.some(s=>s.id===state.server)){state.server=matches[0]?.id||'';clearTools();}renderConnection();};heading.append(search.wrap); panel.append(heading);
+  heading.append(intro, button('＋ 添加服务器', () => openServerEditor(), 'button primary'),lifecycleButton('已归档服务器',()=>openArchived('mcp',refreshMCP)),lifecycleButton('批量管理',()=>openBulkManager('mcp',refreshMCP)));const search=field('搜索服务器','','input');search.input.type='search';search.input.placeholder='服务器名称或地址';search.input.oninput=()=>{state.serverQuery=search.input.value;const matches=state.servers.filter(s=>`${s.name} ${s.url}`.toLowerCase().includes(state.serverQuery.toLowerCase()));if(!matches.some(s=>s.id===state.server)){state.server=matches[0]?.id||'';clearTools();}renderConnection();};heading.append(search.wrap); panel.append(heading);
   const config = node('div', 'mcp-connection'); const server = field('当前服务器', '', 'select'); server.input.dataset.mcpServer = '';
   server.input.addEventListener('change', () => { state.server = server.input.value; clearTools(); renderConnection(); });
   const actions = node('div', 'mcp-actions'); actions.append(button('编辑连接', () => openServerEditor(state.servers.find(s => s.id === state.server))), button('归档连接', archiveServer),lifecycleButton('引用与影响',()=>showReferences('mcp',state.server)), button('测试连接并获取工具', discover, 'button primary'));

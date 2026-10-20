@@ -600,7 +600,7 @@ func (r *repository) restoreFlowAs(id, name string) (*FlowSummary, error) {
 		return nil, fmt.Errorf("%w: 名称冲突，请改名后恢复", lifecycle.ErrProtected)
 	}
 	now := time.Now().UTC()
-	res, err := r.db.Exec(`UPDATE flows SET archived_at=NULL, updated_at=?,edit_version=edit_version+1 WHERE id=?`, now, id)
+	res, err := r.db.Exec(`UPDATE flows SET archived_at=NULL, updated_at=?,name=?,edit_version=edit_version+1 WHERE id=?`, now, name, id)
 	if err != nil {
 		return nil, err
 	}

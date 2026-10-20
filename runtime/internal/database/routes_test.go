@@ -48,6 +48,8 @@ func TestConnectionManagementRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.pools[item.ID] = poolEntry{db: pool}
+	call("DELETE", "/connections/"+item.ID, "", 409)
+	call("POST", "/connections/"+item.ID+"/archive", "", 204)
 	call("DELETE", "/connections/"+item.ID, "", 204)
 	if err := pool.Ping(); err == nil {
 		t.Fatal("deleted connection pool is still open")

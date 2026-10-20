@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // This additive metadata table never replaces resource IDs, credentials or history.
@@ -29,4 +30,24 @@ func CredentialsCleared(db *sql.DB, id string) bool {
 	var cleared bool
 	_ = db.QueryRow(`SELECT credentials_cleared FROM resource_lifecycle WHERE kind='database' AND id=?`, id).Scan(&cleared)
 	return cleared
+}
+
+// PurgeReferences must run under the lifecycle lock. Archived definitions still
+// own their references; purge requires those references to be handled explicitly.
+func PurgeReferences(db *sql.DB, kind, id string) error {
+	if err := Check(db, kind, id, false); err != nil {
+		return err
+	}
+	refs, err := References(db, kind, id)
+	if err != nil {
+		return err
+	}
+	if len(refs) > 0 {
+		names := []string{}
+		for _, r := range refs {
+			names = append(names, r.Name+" / "+r.Step+" ("+r.ID+")")
+		}
+		return fmt.Errorf("%w: 彻底删除前请处理全部定义引用（包括已归档定义）：%s", ErrProtected, strings.Join(names, "；"))
+	}
+	return nil
 }

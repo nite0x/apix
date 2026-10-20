@@ -1,4 +1,4 @@
-import {recordManagementButtons,openRecordSearch,lifecycleButton} from './lifecycle-ui.js';
+import {recordManagementButtons,openRecordSearch,lifecycleButton,openBulkManager,openRetentionPolicy} from './lifecycle-ui.js';
 import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flows.js';
 import { openCommandCaseEditor } from './command-tools.js';
 import { openMCPCaseEditor } from './mcp-tools.js';
@@ -51,7 +51,7 @@ function mount() {
   if (mounted) return; mounted = true; root.replaceChildren();
   toolbar = el('div', 'testing-toolbar');
   const actions = el('div', 'testing-actions'); actions.dataset.testingActions = '';
-  actions.append(lifecycleButton('查询全部记录 / 已隐藏',()=>openRecordSearch(selectBatch)));const batch = button('＋ 新建集合测试', openBatchEditor); batch.dataset.batchAction = ''; actions.append(batch);
+  actions.append(lifecycleButton('查询全部记录 / 已隐藏',()=>openRecordSearch(selectBatch)),lifecycleButton('自动保留策略',openRetentionPolicy));const batch = button('＋ 新建集合测试', openBatchEditor); batch.dataset.batchAction = ''; actions.append(batch);
   toolbar.append(actions);
   const panel = el('div'); panel.id = 'testing-view-panel'; panel.setAttribute('role', 'region');
   const message = el('div', 'detail-alert testing-message'); message.dataset.testingMessage = ''; message.hidden = true;
@@ -394,7 +394,7 @@ function openRunEditor(ids) {
       batch = target.input.value === 'new' ? await api('/test-batches', { method: 'POST', body: { name: name.input.value } }) : { id: target.input.value };
       await selectBatch(batch.id); editorDirty = false; d.element.close();
       const failures = [];
-      for (const id of ids) { try { await api(`/test-batches/${batch.id}/runs`, { method: 'POST', body: { case_id: id, variables: values } }); } catch (error) { failures.push(error.message); } await refreshTesting(); }
+      for (const id of ids) { try { await api(`/test-batches/${batch.id}/runs`, { method: 'POST', body: { case_id: id, variables: values } }); } catch (error) { failures.push(`${state.cases.find(item=>item.id===id)?.name||id}：${error.message}`); } await refreshTesting(); }
       if (target.input.value === 'new') await api(`/test-batches/${batch.id}/finish`, { method: 'POST' });
       notice(failures.length ? failures.join('；') : '', failures.length ? '' : `${ids.length} 个用例已完成，结果已保存`);
     } catch (error) { if (d.element.open) d.showError(error.message); else notice(error.message); }
@@ -431,7 +431,7 @@ function savedCaseLink(id) {
 function renderCases() {
   const content=root.querySelector('[data-testing-content]');
   const focused=document.activeElement?.getAttribute('aria-label'); const cursor=document.activeElement?.selectionStart;
-  const panel=el('section','panel'); const head=el('div','panel-heading');head.append(el('h2','','已保存用例'));
+  const panel=el('section','panel'); const head=el('div','panel-heading');head.append(el('h2','','已保存用例'),lifecycleButton('批量管理',()=>openBulkManager('test_case',refreshTesting)));
   for(const [type,label] of [['http','HTTP'],['mcp','MCP'],['command','命令行']]) head.append(button(`新建 ${label} 用例`,()=>openCaseEditor({type})));
   panel.append(head);const tools=el('div','testing-actions');
   const list=el('div','testing-case-list');

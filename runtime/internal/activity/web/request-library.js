@@ -1,4 +1,4 @@
-import {openArchived,showReferences,moveRequest,lifecycleAPI,lifecycleButton} from './lifecycle-ui.js';
+import {openArchived,showReferences,moveRequest,lifecycleAPI,lifecycleButton,openBulkManager} from './lifecycle-ui.js';
 import { requestAPI, requestError } from './request-api.js';
 import { loadSavedRequest } from './manual-request.js';
 
@@ -96,3 +96,5 @@ $('library-refresh').addEventListener('click', refreshLibrary);
 document.addEventListener('request-saved', refreshLibrary);
 
 $('library-refresh').parentElement.append(lifecycleButton('已归档接口',()=>openArchived('request',refreshLibrary)),lifecycleButton('已归档分组',()=>openArchived('collection',refreshLibrary)));
+
+$('library-refresh').parentElement.append(lifecycleButton('批量管理',()=>openBulkManager('request',refreshLibrary)));

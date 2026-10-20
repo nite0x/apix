@@ -84,6 +84,9 @@ func TestSQLExecutionHistoryOutcomesAndRestart(t *testing.T) {
 		t.Fatalf("failed executions missing: %+v", items)
 	}
 	// A connection deletion does not erase SQL history or its saved name.
+	if err := s.ArchiveConnection(ctx, id); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.DeleteConnection(ctx, id); err != nil {
 		t.Fatal(err)
 	}

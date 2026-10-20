@@ -195,6 +195,10 @@ func (r *repository) archivedRequests(project string) ([]APIRequest, error) {
 
 func (s *HTTPService) caseSourceStatus(item *TestCase) {
 	if item.APIRequestID == nil {
+		var source string
+		if s.db.QueryRow(`SELECT source_id FROM resource_source_links WHERE owner_kind='test_case' AND owner_id=?`, item.ID).Scan(&source) == nil {
+			item.SourceStatus = "detached"
+		}
 		return
 	}
 	item.SourceStatus = "deleted"
@@ -226,6 +230,12 @@ func (r *repository) enrichFlow(flow *Flow) {
 				}
 			}
 			flow.Dependencies = append(flow.Dependencies, d)
+		}
+		if step.SourceAPIRequestID == nil {
+			var source string
+			if r.db.QueryRow(`SELECT source_id FROM resource_source_links WHERE owner_kind='flow_step' AND owner_id=?`, step.ID).Scan(&source) == nil {
+				step.SourceStatus = "detached"
+			}
 		}
 		if step.SourceAPIRequestID != nil {
 			step.SourceStatus = "deleted"

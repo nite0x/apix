@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apix/apix/runtime/internal/journal"
 	"github.com/gin-gonic/gin"
 )
 
@@ -418,6 +419,9 @@ func TestEditAndDeleteDefinitionRoutes(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM local_service_logs WHERE service_id=?`, d.ID).Scan(&before); err != nil || before == 0 {
 		t.Fatalf("missing test logs: %d %v", before, err)
 	}
+	if err := s.ArchiveDefinition(ctx, d.ID); err != nil {
+		t.Fatal(err)
+	}
 	if response := remove(); response.Code != 200 {
 		t.Fatalf("delete response: %d %s", response.Code, response.Body.String())
 	}
@@ -447,6 +451,9 @@ func TestDeleteDefinitionPreservesExternalService(t *testing.T) {
 	}
 	if instance, err := s.Start(context.Background(), d.ID, "manual"); err != nil || instance.Owner != "external" {
 		t.Fatalf("external reuse: %+v %v", instance, err)
+	}
+	if err := s.ArchiveDefinition(context.Background(), d.ID); err != nil {
+		t.Fatal(err)
 	}
 	if err := s.DeleteDefinition(context.Background(), d.ID); err != nil {
 		t.Fatal(err)
@@ -490,6 +497,9 @@ func TestHistoricalLogsSurviveDefinitionRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.log(d.ID, "stdout", "retained evidence")
+	if err := s.ArchiveDefinition(ctx, d.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.DeleteDefinition(ctx, d.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -553,11 +563,81 @@ func TestArchivedLogSourcesAndCleanupPreviewExcludeNewLines(t *testing.T) {
 	if err != nil || len(lines) != 1 || lines[0].Message != "after preview" {
 		t.Fatal("preview deleted future evidence", lines, err)
 	}
+	if err := s.ArchiveDefinition(ctx, d.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.DeleteDefinition(ctx, d.ID); err != nil {
 		t.Fatal(err)
 	}
 	sources, err = s.LogSources(ctx)
 	if err != nil || sources[0].Name != "retired" || !sources[0].Deleted {
 		t.Fatal("lost historical identity", sources, err)
+	}
+}
+
+func TestRuntimeLogQueryAndCleanupPreserveServiceOutputAndOperationResults(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	history, err := journal.New(db, t.TempDir()+"/runtime.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer history.Close()
+	s, err := New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	history.Append("request.failed", "run", "", map[string]any{"status": "failed", "name": "lookup failure"})
+	s.log("service", "stdout", "keep service output")
+	entries, count, err := s.QueryLogs(ctx, LogQuery{Source: "runtime", Text: "lookup", Level: "error"})
+	if err != nil || count != 1 || entries[0].SourceName != "Apix 运行事件" {
+		t.Fatal(entries, count, err)
+	}
+	operation, err := history.Begin(ctx, "retained result")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := history.Finish(operation, map[string]any{"retained": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	s.Routes(router.Group("/api"))
+	call := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		if res.Code != 200 {
+			t.Fatal(res.Code, res.Body.String())
+		}
+		return res
+	}
+	preview := call("/api/service-logs/cleanup-preview", fmt.Sprintf(`{"source":"runtime","before":%q}`, time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)))
+	var plan struct {
+		Token string `json:"token"`
+	}
+	json.Unmarshal(preview.Body.Bytes(), &plan)
+	history.Append("runtime.recent", "run", "", map[string]any{"name": "after preview"})
+	call("/api/service-logs/cleanup", fmt.Sprintf(`{"token":%q}`, plan.Token))
+	_, count, err = s.QueryLogs(ctx, LogQuery{Source: "runtime", Text: "lookup"})
+	if err != nil || count != 0 {
+		t.Fatal("old runtime event remains", count, err)
+	}
+	_, count, err = s.QueryLogs(ctx, LogQuery{Source: "runtime", Text: "after preview"})
+	if err != nil || count != 1 {
+		t.Fatal("deleted future runtime event", count, err)
+	}
+	logs, err := s.Logs(ctx, "service", 0)
+	if err != nil || len(logs) != 1 {
+		t.Fatal("deleted service output", logs, err)
+	}
+	if _, err := history.Get(ctx, operation); err != nil {
+		t.Fatal("deleted operation result", err)
 	}
 }

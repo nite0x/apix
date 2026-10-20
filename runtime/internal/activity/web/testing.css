@@ -91,3 +91,7 @@ body:has(.testing-editor[open]){overflow:hidden}
 .lifecycle-dialog code,.lifecycle-dialog pre{overflow-wrap:anywhere;white-space:pre-wrap;max-width:100%}
 .lifecycle-dialog label{display:flex;flex-direction:column;gap:6px;min-width:0}
 .lifecycle-dialog input,.lifecycle-dialog select{max-width:100%;min-width:0}
+
+.lifecycle-dialog label.test-attempt{display:flex;flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap}
+.lifecycle-dialog input[type=checkbox]{width:16px;min-width:16px;height:16px;padding:0;align-self:flex-start}
+.testing-case-list .fw-text-button{font-size:14px;font-weight:600}

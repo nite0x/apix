@@ -234,6 +234,8 @@ func TestMVPToolsStructuredResultsAndAssertions(t *testing.T) {
 func TestDeleteDatabaseConnectionThroughMCP(t *testing.T) {
 	c := setupMVP(t)
 	c.call(t, "save_database_connection", map[string]any{"connection": map[string]any{"id": "delete-me", "name": "test", "host": "localhost", "database": "test", "username": "tester"}}, false)
+	c.call(t, "delete_database_connection", map[string]any{"connection_id": "delete-me"}, true)
+	c.call(t, "apply_resource_lifecycle", map[string]any{"items": []any{map[string]any{"kind": "database", "id": "delete-me", "action": "archive"}}}, false)
 	deleted := result(t, c.call(t, "delete_database_connection", map[string]any{"connection_id": "delete-me"}, false))
 	if deleted["deleted"] != true {
 		t.Fatalf("delete result: %#v", deleted)
@@ -409,4 +411,30 @@ func TestMVPServiceFlowCancellationCleansProcess(t *testing.T) {
 	if len(logs) == 0 {
 		t.Fatal("service logs missing")
 	}
+}
+
+func TestLifecycleToolsUseSameArchivePurgeAndRetentionProtections(t *testing.T) {
+	c := setupMVP(t)
+	saved := c.call(t, "save_test_case", map[string]any{"test_case": map[string]any{"name": "managed case", "request": map[string]any{"method": "GET", "url": "http://127.0.0.1:1"}}}, false)
+	id := saved["id"].(string)
+	listed := c.call(t, "list_resource_lifecycle", map[string]any{"kind": "test_case"}, false)
+	if len(listed["items"].([]any)) != 1 {
+		t.Fatal(listed)
+	}
+	c.call(t, "preview_resource_purge", map[string]any{"kind": "test_case", "id": id}, true)
+	operations := map[string]any{"items": []any{map[string]any{"kind": "test_case", "id": id, "action": "archive"}, map[string]any{"kind": "test_case", "id": "missing", "action": "archive"}}}
+	results := c.call(t, "apply_resource_lifecycle", operations, false)["items"].([]any)
+	if results[0].(map[string]any)["status"] != "succeeded" || results[1].(map[string]any)["status"] != "failed" {
+		t.Fatal(results)
+	}
+	batch := c.call(t, "begin_test_batch", map[string]any{"name": "archived case blocked"}, false)
+	c.call(t, "run_test_case", map[string]any{"batch_id": batch["id"], "case_id": id}, true)
+	preview := c.call(t, "preview_resource_purge", map[string]any{"kind": "test_case", "id": id}, false)
+	c.call(t, "apply_resource_lifecycle", map[string]any{"items": []any{map[string]any{"kind": "test_case", "id": id, "action": "purge", "token": preview["token"]}}}, false)
+	c.call(t, "get_test_case", map[string]any{"case_id": id}, true)
+	policy := c.call(t, "get_retention_policy", map[string]any{}, false)
+	if policy["enabled"] != false {
+		t.Fatal("auto cleanup enabled by default", policy)
+	}
+	c.call(t, "preview_retention_policy", map[string]any{"days": 30}, false)
 }

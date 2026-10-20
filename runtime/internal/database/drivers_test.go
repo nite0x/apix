@@ -40,9 +40,11 @@ func TestDatabaseDriverSettingsAndMigration(t *testing.T) {
 				t.Fatalf("PostgreSQL config lost fields: %v", err)
 			}
 			item.SSLMode = "require"
-			if _, err := s.PutConnection(ctx, *item); err != nil {
+			updated, err := s.PutConnection(ctx, *item)
+			if err != nil {
 				t.Fatal(err)
 			}
+			item = updated
 		}
 		// Legacy callers that omit the new fields must preserve driver, SSL and password.
 		update := *item

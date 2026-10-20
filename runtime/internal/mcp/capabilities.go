@@ -105,20 +105,21 @@ func numberArg(args map[string]any, key string) (int64, error) {
 
 func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Service, services *localservice.Service, history *journal.Store) {
 	s.registerTestTools(http, history)
-	connection := object(map[string]any{"id": str(), "name": str(), "type": enum("mysql", "postgresql", "hologres"), "host": str(), "port": integer(), "database": str(), "username": str(), "password": str(), "ssl_mode": enum("disable", "prefer", "require", "verify-full")}, "name", "host", "database", "username")
+	s.registerLifecycleTools(http)
+	connection := object(map[string]any{"id": str(), "edit_version": integer(), "name": str(), "type": enum("mysql", "postgresql", "hologres"), "host": str(), "port": integer(), "database": str(), "username": str(), "password": str(), "ssl_mode": enum("disable", "prefer", "require", "verify-full")}, "name", "host", "database", "username")
 	sqlCommand := object(map[string]any{"batch_id": str(), "connection_id": str(), "mode": enum("query", "exec"), "sql": str(), "params": array(map[string]any{}), "timeout_ms": integer(), "max_rows": integer()}, "connection_id", "mode", "sql")
-	service := object(map[string]any{"id": str(), "name": str(), "work_dir": str(), "command": str(), "args": array(str()), "health_url": str(), "startup_timeout_ms": integer()}, "name", "work_dir", "command", "health_url")
+	service := object(map[string]any{"id": str(), "edit_version": integer(), "name": str(), "work_dir": str(), "command": str(), "args": array(str()), "health_url": str(), "startup_timeout_ms": integer()}, "name", "work_dir", "command", "health_url")
 	add := func(name, desc string, schema map[string]any, record bool, handler toolHandler) {
 		s.addCapability(name, desc, schema, history, record, handler)
 	}
-	add("save_database_connection", "Save a MySQL, PostgreSQL or Hologres connection. New connections default to mysql; omitted type preserves the existing driver on updates. Default ports: mysql 3306, postgresql 5432, hologres 80. PostgreSQL/Hologres ssl_mode defaults to prefer. Passwords are encrypted locally and never returned. Omit password on updates to preserve it; use an empty string for an empty password.", object(map[string]any{"connection": connection}, "connection"), true, func(ctx context.Context, a map[string]any) (any, error) {
+	add("save_database_connection", "Save a MySQL, PostgreSQL or Hologres connection. New connections default to mysql; omitted type preserves the existing driver on updates. Default ports: mysql 3306, postgresql 5432, hologres 80. PostgreSQL/Hologres ssl_mode defaults to prefer. Passwords are encrypted locally and never returned. Include edit_version from the current connection to detect concurrent edits. Omit password on updates to preserve it; use an empty string for an empty password.", object(map[string]any{"connection": connection}, "connection"), true, func(ctx context.Context, a map[string]any) (any, error) {
 		var c database.ConnectionInput
 		if err := decode(a["connection"], &c); err != nil {
 			return nil, err
 		}
 		return db.SaveConnection(ctx, c)
 	})
-	add("list_database_connections", "List saved MySQL connection IDs without credentials.", object(map[string]any{}), false, func(ctx context.Context, a map[string]any) (any, error) {
+	add("list_database_connections", "List active MySQL, PostgreSQL and Hologres connection IDs and edit_version without credentials.", object(map[string]any{}), false, func(ctx context.Context, a map[string]any) (any, error) {
 		v, err := db.ListConnections(ctx)
 		return map[string]any{"items": v}, err
 	})
@@ -126,7 +127,7 @@ func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Se
 		err := db.TestConnection(ctx, textArg(a, "connection_id"))
 		return map[string]any{"connected": err == nil}, err
 	})
-	add("delete_database_connection", "Remove a saved connection from Apix. Does not delete the remote database or its data. Flows referencing this connection must be updated before running again.", object(map[string]any{"connection_id": str()}, "connection_id"), true, func(ctx context.Context, a map[string]any) (any, error) {
+	add("delete_database_connection", "Permanently remove an archived connection from Apix; first archive via apply_resource_lifecycle. Refuses all definition references and running use. Preserves SQL history and remote database data.", object(map[string]any{"connection_id": str()}, "connection_id"), true, func(ctx context.Context, a map[string]any) (any, error) {
 		err := db.DeleteConnection(ctx, textArg(a, "connection_id"))
 		return map[string]any{"deleted": err == nil}, err
 	})
@@ -140,7 +141,7 @@ func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Se
 		}
 		return db.Execute(ctx, c)
 	})
-	add("save_service", "Save a local service. command is an executable; args are separate arguments. health_url must become healthy before startup succeeds.", object(map[string]any{"service": service}, "service"), true, func(ctx context.Context, a map[string]any) (any, error) {
+	add("save_service", "Save a local service. command is an executable; args are separate arguments. health_url must become healthy before startup succeeds. Include edit_version when updating to detect concurrent edits.", object(map[string]any{"service": service}, "service"), true, func(ctx context.Context, a map[string]any) (any, error) {
 		var d localservice.Definition
 		if err := decode(a["service"], &d); err != nil {
 			return nil, err

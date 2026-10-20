@@ -187,6 +187,7 @@ func Run(_ []string) error {
 	aiinstall.New("http://" + listener.Addr().String() + "/mcp").Routes(r)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go httpService.RunRetentionWorker(ctx)
 	server := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- server.Serve(listener) }()

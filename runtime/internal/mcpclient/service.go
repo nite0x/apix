@@ -323,9 +323,9 @@ func (s *Service) Discover(ctx context.Context, id string) (*Discovery, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.discoverServer(ctx, v)
+	return s.discoverServer(ctx, v, true)
 }
-func (s *Service) discoverServer(ctx context.Context, v *Server) (*Discovery, error) {
+func (s *Service) discoverServer(ctx context.Context, v *Server, persist bool) (*Discovery, error) {
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(v.TimeoutSeconds)*time.Second)
 	defer cancel()
@@ -342,8 +342,10 @@ func (s *Service) discoverServer(ctx context.Context, v *Server) (*Discovery, er
 	if err != nil {
 		return nil, err
 	}
-	if _, err = s.db.Exec(`INSERT INTO mcp_discoveries(server_id,discovered_at,tools) VALUES(?,?,?) ON CONFLICT(server_id) DO UPDATE SET discovered_at=excluded.discovered_at,tools=excluded.tools`, v.ID, time.Now().UTC().Format(time.RFC3339Nano), string(raw)); err != nil {
-		return nil, err
+	if persist {
+		if _, err = s.db.Exec(`INSERT INTO mcp_discoveries(server_id,discovered_at,tools) VALUES(?,?,?) ON CONFLICT(server_id) DO UPDATE SET discovered_at=excluded.discovered_at,tools=excluded.tools`, v.ID, time.Now().UTC().Format(time.RFC3339Nano), string(raw)); err != nil {
+			return nil, err
+		}
 	}
 	return &Discovery{ServerName: info.ServerInfo.Name, ProtocolVersion: info.ProtocolVersion, Tools: tools, DurationMS: time.Since(started).Milliseconds()}, nil
 }
@@ -509,7 +511,7 @@ func (s *Service) Restore(ctx context.Context, id, name string) (*Server, error)
 	}
 	var before string
 	_ = s.db.QueryRow(`SELECT tools FROM mcp_discoveries WHERE server_id=?`, id).Scan(&before)
-	discovery, err := s.discoverServer(ctx, v)
+	discovery, err := s.discoverServer(ctx, v, false)
 	if err != nil {
 		return nil, err
 	}
@@ -536,6 +538,9 @@ func (s *Service) Restore(ctx context.Context, id, name string) (*Server, error)
 		return nil, ErrConflict
 	}
 	current, _ := json.Marshal(discovery.Tools)
+	if _, err := tx.Exec(`INSERT INTO mcp_discoveries(server_id,discovered_at,tools) VALUES(?,?,?) ON CONFLICT(server_id) DO UPDATE SET discovered_at=excluded.discovered_at,tools=excluded.tools`, id, time.Now().UTC().Format(time.RFC3339Nano), string(current)); err != nil {
+		return nil, err
+	}
 	// A rediscovered schema requires explicit review, never silently rewrite a case.
 	if before != string(current) {
 		var exists int

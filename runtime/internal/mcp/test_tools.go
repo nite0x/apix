@@ -38,7 +38,7 @@ func (s *Server) registerTestTools(http *httpapi.HTTPService, history *journal.S
 		}
 		return http.SaveTestCase(item)
 	})
-	add("list_test_cases", "List up to 500 saved HTTP, MCP or command test cases for reuse.", project, func(ctx context.Context, a map[string]any) (any, error) {
+	add("list_test_cases", "List all active saved HTTP, MCP or command test cases for reuse; use list_resource_lifecycle to list archived cases.", project, func(ctx context.Context, a map[string]any) (any, error) {
 		items, err := http.ListTestCases(textArg(a, "project_id"))
 		return map[string]any{"items": items}, err
 	})

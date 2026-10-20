@@ -97,6 +97,9 @@ func References(db *sql.DB, kind, id string) ([]Reference, error) {
 		}
 	}
 	if kind == "request" && Exists(db, "test_cases") {
+		if err := collect(`SELECT 'draft',id,name,'','',status<>'active',0 FROM api_working_copies WHERE api_request_id=?`, id); err != nil {
+			return nil, err
+		}
 		if err := collect(`SELECT 'test_case',id,name,'','',archived,0 FROM test_cases WHERE api_request_id=?`, id); err != nil {
 			return nil, err
 		}

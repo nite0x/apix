@@ -98,6 +98,9 @@ func (r *repository) listCollectionsState(projectID, state string) ([]APICollect
 }
 
 func (r *repository) createCollection(item *APICollection) error {
+	if lifecycle.Archived(r.db, "collection", item.ID) {
+		return fmt.Errorf("%w: 该 ID 已彻底删除，请创建新 ID", lifecycle.ErrProtected)
+	}
 	if item.ID == "" {
 		item.ID = uuid.NewString()
 	}
@@ -212,6 +215,9 @@ func (r *repository) createRequest(item *APIRequest) error {
 	gate := lifecycle.For(r.db)
 	gate.Lock()
 	defer gate.Unlock()
+	if lifecycle.Archived(r.db, "request", item.ID) {
+		return fmt.Errorf("%w: 该 ID 已彻底删除，请创建新 ID", lifecycle.ErrProtected)
+	}
 	var active int
 	if err := r.db.QueryRow(`SELECT count(*) FROM api_collections WHERE id=? AND status='active'`, item.CollectionID).Scan(&active); err != nil {
 		return err

@@ -438,7 +438,7 @@ func migrateIndependentTests(db *sql.DB) error {
 			return err
 		}
 	}
-	if _, err = tx.Exec("UPDATE schema_metadata SET version=7,updated_at=datetime('now') WHERE name='http_domain'"); err != nil {
+	if _, err = tx.Exec("UPDATE schema_metadata SET version=?,updated_at=datetime('now') WHERE name='http_domain'", httpSchemaVersion); err != nil {
 		return err
 	}
 	return tx.Commit()

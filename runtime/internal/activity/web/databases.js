@@ -1,4 +1,4 @@
-import {openArchived,showReferences,lifecycleButton} from './lifecycle-ui.js';
+import {openArchived,showReferences,lifecycleButton,openBulkManager} from './lifecycle-ui.js';
 import { setupWorkspaceTabs } from './workspace-tabs.js';
 
 import { executionBatchLink } from './execution-batch.js';
@@ -20,6 +20,7 @@ let historyLoading = false;
 let historyKey = null;
 let resultRevision = 0;
 let editing = false;
+let editVersion=0;
 let credentialsRequired=false;
 let editorType = 'mysql';
 let sqlRunning = false;
@@ -325,7 +326,7 @@ function updateDriverFields(changePort = false) {
   $('database-driver-hint').textContent = type === 'mysql' ? '默认端口 3306，SQL 使用 ? 绑定参数。' : type === 'hologres' ? '使用 PostgreSQL 协议，默认端口 80。SQL 使用 $1、$2 绑定参数；VPC 地址需要本机网络可达。' : '默认端口 5432，SQL 使用 $1、$2 绑定参数。';
 }
 function openEditor(connection = null) {
-  editing = !!connection;credentialsRequired=Boolean(connection?.credentials_cleared);
+  editing = !!connection;editVersion=connection?.edit_version||0;credentialsRequired=Boolean(connection?.credentials_cleared);
   draftID = connection?.id || crypto.randomUUID();
   $('database-form').reset();
   $('database-editor-title').textContent = editing ? '编辑数据库连接' : '新增数据库连接';
@@ -347,7 +348,7 @@ $('database-editor').addEventListener('close', () => $('database-form').reset())
 $('database-form').addEventListener('submit', async event => {
   event.preventDefault(); if (saving) return;
   const connection = {
-    id: draftID, name: $('database-name').value.trim(), host: $('database-host').value.trim(),
+    id: draftID,edit_version:editVersion, name: $('database-name').value.trim(), host: $('database-host').value.trim(),
     type: $('database-type').value,
     port: Number($('database-port').value), database: $('database-schema').value.trim(),
     username: $('database-username').value.trim(),
@@ -473,3 +474,5 @@ $('sql-form').addEventListener('submit', async event => {
 updateSQLHint();
 
 const databaseSearch=node('input');databaseSearch.type='search';databaseSearch.setAttribute('aria-label','搜索数据库连接');databaseSearch.placeholder='名称、类型、主机或库名';const databaseType=node('select');databaseType.setAttribute('aria-label','数据库类型');for(const [value,label] of [['','全部类型'],['mysql','MySQL'],['postgresql','PostgreSQL'],['hologres','Hologres']])databaseType.add(new window.Option(label,value));databaseSearch.oninput=render;databaseType.onchange=render;$('database-add').parentElement.append(databaseSearch,databaseType,lifecycleButton('已归档连接',()=>openArchived('database',refreshDatabases)));
+
+$('database-add').parentElement.append(lifecycleButton('批量管理',()=>openBulkManager('database',refreshDatabases)));

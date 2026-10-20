@@ -1,4 +1,4 @@
-import {openArchived,showReferences,lifecycleButton} from './lifecycle-ui.js';
+import {openArchived,showReferences,lifecycleButton,openBulkManager} from './lifecycle-ui.js';
 const $ = id => document.getElementById(id);
 const dialog = $('service-editor');
 const form = $('service-form');
@@ -7,6 +7,7 @@ let draftID = null;
 let savedSignature = '';
 let opener = null;
 let editing = false;
+let editVersion=0;
 let loading = false;
 let loadController = null;
 const deleteDialog = $('service-delete');
@@ -38,7 +39,7 @@ function setLoading(value) {
 
 function openEditor(trigger, edit) {
   opener = trigger; editing = edit; savedSignature = '';
-  form.reset(); notice('service-form-error');
+  form.reset();editVersion=0; notice('service-form-error');
   $('service-editor-title').textContent = edit ? '编辑服务' : '新增服务';
   $('service-save').textContent = edit ? '保存修改' : '仅保存';
   $('service-save').classList.toggle('primary', edit);
@@ -59,7 +60,7 @@ export async function openServiceEditor(id, trigger) {
   try {
     const { definition: d } = await api(`/${encodeURIComponent(id)}`, undefined, 'GET', controller.signal);
     if (controller.signal.aborted || !dialog.open) return;
-    $('service-name').value = d.name; $('service-work-dir').value = d.work_dir;
+    editVersion=d.edit_version||0;$('service-name').value = d.name; $('service-work-dir').value = d.work_dir;
     $('service-command').value = d.command; $('service-args').value = (d.args || []).join('\n');
     $('service-health-url').value = d.health_url; $('service-timeout').value = d.startup_timeout_ms / 1000;
     notice('service-form-error'); setLoading(false); $('service-name').focus();
@@ -115,7 +116,7 @@ form.addEventListener('submit', async event => {
   event.preventDefault(); if (saving || loading) return;
   const start = !editing && event.submitter?.id !== 'service-save';
   const definition = {
-    id: draftID, name: $('service-name').value.trim(), work_dir: $('service-work-dir').value.trim(),
+    id: draftID,edit_version:editVersion, name: $('service-name').value.trim(), work_dir: $('service-work-dir').value.trim(),
     command: $('service-command').value.trim(), args: $('service-args').value.split(/\r?\n/).filter(line => line.trim() !== ''),
     health_url: $('service-health-url').value.trim(), startup_timeout_ms: Number($('service-timeout').value) * 1000,
   };
@@ -127,9 +128,9 @@ form.addEventListener('submit', async event => {
   for (const id of ['service-editor-close', 'service-editor-cancel', 'service-save', 'service-save-start']) $(id).disabled = true;
   form.setAttribute('aria-busy', 'true'); $('service-save-start').textContent = start ? '启动中…' : '保存并启动';
   notice('service-form-error'); notice('service-editor-feedback');
-  const signature = JSON.stringify(definition);
+  const signature = JSON.stringify({...definition,edit_version:0});
   try {
-    if (savedSignature !== signature) { await api('', definition, 'PUT'); savedSignature = signature; changed(); }
+    if (savedSignature !== signature) { const saved=await api('', definition, 'PUT');editVersion=saved.edit_version||0; savedSignature = signature; changed(); }
     if (start) {
       const result = await api(`/${encodeURIComponent(draftID)}/start`, { owner: 'manual' }, 'POST');
       notice('service-editor-feedback', result.started ? `“${definition.name}”已启动。` : `“${definition.name}”已复用已有运行实例。`);
@@ -145,3 +146,5 @@ form.addEventListener('submit', async event => {
 });
 
 $('service-add').parentElement.append(lifecycleButton('已归档服务',()=>openArchived('service',()=>changed())));
+
+$('service-add').parentElement.append(lifecycleButton('批量管理',()=>openBulkManager('service',()=>changed())));

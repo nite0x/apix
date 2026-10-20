@@ -48,12 +48,6 @@ func (s *Service) migrateDriverSettings() error {
 
 // Called under s.mu so connection updates and secret access are serialized.
 func (s *Service) connectionCredentials(ctx context.Context, id string) (Connection, string, error) {
-	if err := lifecycle.Active(s.store, "database", id); err != nil {
-		return Connection{}, "", err
-	}
-	if lifecycle.CredentialsCleared(s.store, id) {
-		return Connection{}, "", fmt.Errorf("%w: 凭据已清除，请重新填写密码", ErrInvalid)
-	}
 	var item Connection
 	var encrypted []byte
 	err := s.store.QueryRowContext(ctx, `SELECT c.id,c.name,COALESCE(d.host,''),COALESCE(d.port,0),COALESCE(d.database_name,''),COALESCE(d.username,''),COALESCE(d.driver_type,'mysql'),COALESCE(d.ssl_mode,''),d.password_encrypted
@@ -63,6 +57,12 @@ func (s *Service) connectionCredentials(ctx context.Context, id string) (Connect
 	}
 	if err != nil {
 		return item, "", err
+	}
+	if err := lifecycle.Active(s.store, "database", id); err != nil {
+		return Connection{}, "", err
+	}
+	if lifecycle.CredentialsCleared(s.store, id) {
+		return Connection{}, "", fmt.Errorf("%w: 凭据已清除，请重新填写密码", ErrInvalid)
 	}
 	if item.Host == "" || len(encrypted) == 0 {
 		return item, "", fmt.Errorf("%w: direct connection settings are missing", ErrInvalid)

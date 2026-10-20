@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"github.com/apix/apix/runtime/internal/lifecycle"
@@ -28,6 +29,8 @@ func (s *HTTPService) Routes(r gin.IRouter) {
 		}
 		c.JSON(200, items)
 	})
+	s.retentionRoutes(r)
+	s.bulkLifecycleRoutes(r)
 	s.recordManagementRoutes(r)
 	s.collectionRoutes(r)
 	s.requestRoutes(r)
@@ -424,11 +427,15 @@ func writeBadRequest(c *gin.Context, err error) {
 	c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 }
 func writeAPIError(c *gin.Context, err error) {
+	if errors.Is(err, errInvalidTest) || errors.Is(err, errValidation) {
+		writeBadRequest(c, err)
+		return
+	}
 	if errors.Is(err, lifecycle.ErrProtected) {
 		c.JSON(409, gin.H{"error": err.Error()})
 		return
 	}
-	if errors.Is(err, errNotFound) {
+	if errors.Is(err, errNotFound) || errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}

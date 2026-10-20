@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apix/apix/runtime/internal/lifecycle"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -29,7 +30,12 @@ type StoredLog struct {
 }
 
 func (s *Service) LogSources(ctx context.Context) ([]LogSource, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT l.service_id,COALESCE(json_extract(d.data,'$.name'),m.name,l.service_id),COALESCE(m.archived,0),d.id IS NULL,count(*) FROM local_service_logs l LEFT JOIN local_service_definitions d ON d.id=l.service_id LEFT JOIN resource_lifecycle m ON m.kind='service' AND m.id=l.service_id GROUP BY l.service_id ORDER BY 2`)
+	query := `SELECT l.service_id,COALESCE(json_extract(d.data,'$.name'),m.name,l.service_id),COALESCE(m.archived,0),d.id IS NULL,count(*) FROM local_service_logs l LEFT JOIN local_service_definitions d ON d.id=l.service_id LEFT JOIN resource_lifecycle m ON m.kind='service' AND m.id=l.service_id GROUP BY l.service_id`
+	if lifecycle.Exists(s.db, "runtime_events") {
+		query += ` UNION ALL SELECT 'runtime','Apix 运行事件',0,0,count(*) FROM runtime_events`
+	}
+	query += ` ORDER BY 2`
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -43,6 +49,13 @@ func (s *Service) LogSources(ctx context.Context) ([]LogSource, error) {
 		out = append(out, v)
 	}
 	return out, rows.Err()
+}
+func (s *Service) storedLogSQL() string {
+	query := `SELECT sequence,time,stream,message,service_id FROM local_service_logs`
+	if lifecycle.Exists(s.db, "runtime_events") {
+		query += ` UNION ALL SELECT sequence,time,CASE WHEN json_extract(payload,'$.status') IN ('failed','error') OR instr(type,'error')>0 THEN 'error' ELSE 'info' END,type||' '||payload,'runtime' FROM runtime_events`
+	}
+	return query
 }
 func logRange(q LogQuery) (string, []any, error) {
 	where := "1=1"
@@ -65,7 +78,7 @@ func logRange(q LogQuery) (string, []any, error) {
 		args = append(args, q.Text)
 	}
 	if q.Level != "" {
-		if q.Level != "stdout" && q.Level != "stderr" && q.Level != "manager" {
+		if q.Level != "stdout" && q.Level != "stderr" && q.Level != "manager" && q.Level != "info" && q.Level != "error" {
 			return "", nil, fmt.Errorf("未知日志级别")
 		}
 		where += " AND l.stream=?"
@@ -79,7 +92,8 @@ func (s *Service) QueryLogs(ctx context.Context, q LogQuery) ([]StoredLog, int, 
 		return nil, 0, err
 	}
 	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM local_service_logs l WHERE `+where, args...).Scan(&count); err != nil {
+	dataSQL := s.storedLogSQL()
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM (`+dataSQL+`) l WHERE `+where, args...).Scan(&count); err != nil {
 		return nil, 0, err
 	}
 	if q.Limit <= 0 || q.Limit > 200 {
@@ -89,7 +103,7 @@ func (s *Service) QueryLogs(ctx context.Context, q LogQuery) ([]StoredLog, int, 
 		q.Offset = 0
 	}
 	args = append(args, q.Limit, q.Offset)
-	rows, err := s.db.QueryContext(ctx, `SELECT l.sequence,l.time,l.stream,l.message,l.service_id,COALESCE(json_extract(d.data,'$.name'),m.name,l.service_id) FROM local_service_logs l LEFT JOIN local_service_definitions d ON d.id=l.service_id LEFT JOIN resource_lifecycle m ON m.kind='service' AND m.id=l.service_id WHERE `+where+` ORDER BY l.sequence DESC LIMIT ? OFFSET ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT l.sequence,l.time,l.stream,l.message,l.service_id,CASE WHEN l.service_id='runtime' THEN 'Apix 运行事件' ELSE COALESCE(json_extract(d.data,'$.name'),m.name,l.service_id) END FROM (`+dataSQL+`) l LEFT JOIN local_service_definitions d ON d.id=l.service_id LEFT JOIN resource_lifecycle m ON m.kind='service' AND m.id=l.service_id WHERE `+where+` ORDER BY julianday(l.time) DESC,l.sequence DESC,l.service_id LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -146,7 +160,7 @@ func (s *Service) logManagementRoutes(r gin.IRouter) {
 		}
 		var count int
 		var max int64
-		if err := s.db.QueryRow(`SELECT count(*),COALESCE(max(sequence),0) FROM local_service_logs l WHERE `+where, args...).Scan(&count, &max); err != nil {
+		if err := s.db.QueryRow(`SELECT count(*),COALESCE(max(sequence),0) FROM (`+s.storedLogSQL()+`) l WHERE `+where, args...).Scan(&count, &max); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
@@ -167,6 +181,7 @@ func (s *Service) logManagementRoutes(r gin.IRouter) {
 		}
 		var source, after, before, expires string
 		var max int64
+		dataSQL := s.storedLogSQL()
 		tx, err := s.db.Begin()
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
@@ -183,7 +198,11 @@ func (s *Service) logManagementRoutes(r gin.IRouter) {
 			return
 		}
 		args = append(args, max)
-		result, err := tx.Exec(`DELETE FROM local_service_logs AS l WHERE `+where+` AND l.sequence<=?`, args...)
+		deleteSQL := `DELETE FROM local_service_logs AS l WHERE ` + where + ` AND l.sequence<=?`
+		if source == "runtime" {
+			deleteSQL = `DELETE FROM runtime_events WHERE sequence IN(SELECT l.sequence FROM (` + dataSQL + `) l WHERE ` + where + ` AND l.sequence<=?)`
+		}
+		result, err := tx.Exec(deleteSQL, args...)
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return

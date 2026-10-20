@@ -16,9 +16,9 @@ import (
 )
 
 type RecordQuery struct {
-	Hidden                             bool
-	Query, Type, Status, After, Before string
-	Offset, Limit                      int
+	Hidden                                            bool
+	Query, Type, ExecutionType, Status, After, Before string
+	Offset, Limit                                     int
 }
 type RecordPage struct {
 	Items  []TestBatch `json:"items"`
@@ -58,6 +58,24 @@ func (s *HTTPService) recordState(b *TestBatch) {
 	_ = s.db.QueryRow(`SELECT hidden,pinned FROM execution_lifecycle WHERE id=?`, b.ID).Scan(&b.Hidden, &b.IsPinned)
 }
 func (s *HTTPService) ListRecords(project string, q RecordQuery) (*RecordPage, error) {
+	var after, before time.Time
+	var parseErr error
+	if q.After != "" {
+		after, parseErr = time.Parse(time.RFC3339Nano, q.After)
+		if parseErr != nil {
+			return nil, invalidTest("开始时间需为 RFC3339 格式")
+		}
+	}
+	if q.Before != "" {
+		before, parseErr = time.Parse(time.RFC3339Nano, q.Before)
+		if parseErr != nil {
+			return nil, invalidTest("结束时间需为 RFC3339 格式")
+		}
+	}
+	if !after.IsZero() && !before.IsZero() && after.After(before) {
+		return nil, invalidTest("开始时间不能晚于结束时间")
+	}
+
 	items, err := s.listAllTestBatches(project)
 	if err != nil {
 		return nil, err
@@ -68,8 +86,25 @@ func (s *HTTPService) ListRecords(project string, q RecordQuery) (*RecordPage, e
 		if b.Hidden != q.Hidden || q.Type != "" && q.Type != "all" && q.Type != b.Source && !(q.Type == "collection" && b.Source == "") || q.Status != "" && q.Status != b.Status {
 			continue
 		}
-		if q.After != "" && b.CreatedAt.Format(time.RFC3339Nano) < q.After || q.Before != "" && b.CreatedAt.Format(time.RFC3339Nano) > q.Before {
+		if !after.IsZero() && b.CreatedAt.Before(after) || !before.IsZero() && b.CreatedAt.After(before) {
 			continue
+		}
+		if q.ExecutionType != "" {
+			if q.ExecutionType != "http" && q.ExecutionType != "sql" && q.ExecutionType != "mcp" && q.ExecutionType != "command" && q.ExecutionType != "service" {
+				return nil, invalidTest("未知执行类型")
+			}
+			var found int
+			if b.Source == "flow" {
+				err = s.db.QueryRow(`SELECT count(*) FROM flow_run_steps WHERE flow_run_id=? AND type=?`, b.ID, q.ExecutionType).Scan(&found)
+			} else {
+				err = s.db.QueryRow(`SELECT count(*) FROM test_case_runs WHERE batch_id=? AND type=?`, b.ID, q.ExecutionType).Scan(&found)
+			}
+			if err != nil {
+				return nil, err
+			}
+			if found == 0 {
+				continue
+			}
 		}
 		if q.Query != "" {
 			var found int
@@ -115,7 +150,7 @@ func (s *HTTPService) SetRecordState(id string, hidden, pinned *bool) error {
 	if err != nil {
 		return err
 	}
-	if hidden != nil && (b.Status == "running" || b.Counts.Running > 0 || b.FinishedAt == nil) {
+	if hidden != nil && (b.Status == "running" || b.Counts.Running > 0 || b.FinishedAt == nil || s.flow.services != nil && s.flow.services.OwnerBusy(b.ID)) {
 		return fmt.Errorf("%w: 执行或清理尚未完成，不能隐藏", lifecycle.ErrProtected)
 	}
 	if hidden != nil {
@@ -135,7 +170,7 @@ func (s *HTTPService) planCleanup(id string) (*cleanupPlan, *TestBatch, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if b.Status == "running" || b.Counts.Running > 0 || b.FinishedAt == nil || b.IsPinned {
+	if b.Status == "running" || b.Counts.Running > 0 || b.FinishedAt == nil || b.IsPinned || s.flow.services != nil && s.flow.services.OwnerBusy(b.ID) {
 		return nil, nil, fmt.Errorf("%w: 执行/清理未完成或整组已固定", lifecycle.ErrProtected)
 	}
 	p := &cleanupPlan{BatchID: id, Source: b.Source, API: []string{}, SQL: []int64{}}
@@ -218,6 +253,9 @@ func (s *HTTPService) CleanupRecord(token string) error {
 	gate := lifecycle.For(s.db)
 	gate.Lock()
 	defer gate.Unlock()
+	return s.cleanupRecordLocked(token)
+}
+func (s *HTTPService) cleanupRecordLocked(token string) error {
 	var raw, expires string
 	if err := s.db.QueryRow(`SELECT plan,expires_at FROM cleanup_previews WHERE token=?`, token).Scan(&raw, &expires); err != nil {
 		return err
@@ -277,7 +315,7 @@ func (s *HTTPService) CleanupRecord(token string) error {
 }
 func (s *HTTPService) recordManagementRoutes(r gin.IRouter) {
 	r.GET("/execution-records", func(c *gin.Context) {
-		q := RecordQuery{Hidden: c.Query("hidden") == "true", Query: c.Query("q"), Type: c.Query("type"), Status: c.Query("status"), After: c.Query("after"), Before: c.Query("before")}
+		q := RecordQuery{Hidden: c.Query("hidden") == "true", Query: c.Query("q"), Type: c.Query("type"), ExecutionType: c.Query("execution_type"), Status: c.Query("status"), After: c.Query("after"), Before: c.Query("before")}
 		q.Limit, _ = strconv.Atoi(c.Query("limit"))
 		q.Offset, _ = strconv.Atoi(c.Query("offset"))
 		page, err := s.ListRecords(c.Query("project_id"), q)

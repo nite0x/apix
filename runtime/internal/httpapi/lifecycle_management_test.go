@@ -64,7 +64,8 @@ func TestConnectionArchivesKeepIdentityCredentialsAndEnforceReferences(t *testin
 	if err := db.TestConnection(ctx, conn.ID); err == nil {
 		t.Fatal("cleared credentials executed")
 	}
-	if _, err := db.SaveConnection(ctx, database.ConnectionInput{Connection: *conn, Password: &password}); err != nil {
+	current, _ := db.ListConnections(ctx)
+	if _, err := db.SaveConnection(ctx, database.ConnectionInput{Connection: current[0], Password: &password}); err != nil {
 		t.Fatal(err)
 	}
 	services, err := localservice.New(s.db)

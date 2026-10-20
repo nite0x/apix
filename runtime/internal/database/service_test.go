@@ -228,6 +228,9 @@ func TestEncryptedPasswordsSurviveRestartAndUpdates(t *testing.T) {
 	if err != nil || cfg.Passwd != "" {
 		t.Fatalf("empty password was not saved: %v", err)
 	}
+	if err := s.ArchiveConnection(ctx, "direct"); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.DeleteConnection(ctx, "direct"); err != nil {
 		t.Fatal(err)
 	}

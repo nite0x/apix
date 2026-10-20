@@ -22,6 +22,7 @@ import (
 )
 
 type Definition struct {
+	EditVersion      int64    `json:"edit_version"`
 	Archived         bool     `json:"archived"`
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
@@ -123,6 +124,17 @@ func (s *Service) PutDefinition(ctx context.Context, d Definition) (*Definition,
 	if p := s.running[d.ID]; p != nil && (p.instance.Status == "starting" || p.instance.Status == "running" || p.instance.Status == "stopping" || p.instance.Status == "cleanup_failed") {
 		return nil, errors.New("stop service before changing its definition")
 	}
+	current, loadErr := s.definition(ctx, d.ID)
+	if loadErr == nil {
+		if d.EditVersion > 0 && d.EditVersion != current.EditVersion {
+			return nil, fmt.Errorf("%w: 服务配置已在其他窗口修改，请保留输入并重新读取", lifecycle.ErrProtected)
+		}
+		d.EditVersion = current.EditVersion + 1
+	} else if errors.Is(loadErr, sql.ErrNoRows) {
+		d.EditVersion = 1
+	} else {
+		return nil, loadErr
+	}
 	data, err := json.Marshal(d)
 	if err != nil {
 		return nil, err
@@ -152,6 +164,12 @@ func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
 	}
 	d, err := s.definition(ctx, id)
 	if err != nil {
+		return err
+	}
+	if !d.Archived {
+		return fmt.Errorf("%w: 请先归档服务配置，再从已归档列表彻底删除", lifecycle.ErrProtected)
+	}
+	if err := lifecycle.PurgeReferences(s.db, "service", id); err != nil {
 		return err
 	}
 	if err := lifecycle.Mark(s.db, "service", id, d.Name, true); err != nil {
@@ -196,6 +214,9 @@ func (s *Service) ListArchivedDefinitions(ctx context.Context, archived bool) ([
 		if err := json.Unmarshal([]byte(raw), &d); err != nil {
 			return nil, err
 		}
+		if d.EditVersion == 0 {
+			d.EditVersion = 1
+		}
 		d.Archived = archived
 		result = append(result, d)
 	}
@@ -209,6 +230,9 @@ func (s *Service) definition(ctx context.Context, id string) (Definition, error)
 		return d, err
 	}
 	err = json.Unmarshal([]byte(raw), &d)
+	if d.EditVersion == 0 {
+		d.EditVersion = 1
+	}
 	d.Archived = lifecycle.Archived(s.db, "service", id)
 	return d, err
 }
@@ -558,6 +582,14 @@ func (s *Service) ArchiveDefinition(ctx context.Context, id string) error {
 	if p := s.running[id]; p != nil && (p.instance.Status == "starting" || p.instance.Status == "running" || p.instance.Status == "stopping" || p.instance.Status == "cleanup_failed") {
 		return fmt.Errorf("%w: 请先停止服务或完成进程清理", lifecycle.ErrProtected)
 	}
+	d.EditVersion++
+	raw, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE local_service_definitions SET data=? WHERE id=?`, string(raw), id); err != nil {
+		return err
+	}
 	return lifecycle.Mark(s.db, "service", id, d.Name, true)
 }
 func (s *Service) RestoreDefinition(ctx context.Context, id, name string) (*Definition, error) {
@@ -582,6 +614,7 @@ func (s *Service) RestoreDefinition(ctx context.Context, id, name string) (*Defi
 		return nil, fmt.Errorf("%w: 名称冲突，请改名后恢复", lifecycle.ErrProtected)
 	}
 	d.Archived = false
+	d.EditVersion++
 	raw, err := json.Marshal(d)
 	if err != nil {
 		return nil, err
@@ -598,4 +631,17 @@ func (s *Service) RestoreDefinition(ctx context.Context, id, name string) (*Defi
 		return nil, err
 	}
 	return &d, tx.Commit()
+}
+
+// OwnerBusy includes failed process cleanup even after the run published its
+// terminal result. The owner must release its actual process tree first.
+func (s *Service) OwnerBusy(owner string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.running {
+		if p.instance.Owner == owner && (p.instance.Status == "starting" || p.instance.Status == "running" || p.instance.Status == "stopping" || p.instance.Status == "cleanup_failed") {
+			return true
+		}
+	}
+	return false
 }

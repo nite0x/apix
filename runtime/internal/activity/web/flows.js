@@ -1,3 +1,4 @@
+import {openBulkManager,lifecycleButton} from './lifecycle-ui.js';
 import { availableOutputs, copyFlowSteps, failurePolicy, isFinally, orderedSteps, outputReference, sourceChoices, activeStatus, blankStep, display, endpoint, requestURL, statusNames, uniqueName, validateDefinition } from './flow-model.js';
 import { openRequestDetail } from './request-detail.js';
 import { revealExecutionStep } from './execution-batch.js';
@@ -34,7 +35,7 @@ function setLocation() {
   const record = state.flow ? state.mode === 'run' : recordsView();
   const query = new URLSearchParams();
   if (state.flow) query.set('type', 'flow');
-  if (state.flow) query.set('id', state.flow.id);
+  if (state.flow?.id) query.set('id', state.flow.id);
   if (state.run && state.mode === 'run') query.set('run', state.run.id);
   if (state.mode === 'run' && targetStep && state.run?.steps?.some(step => step.id === targetStep)) query.set('step', targetStep);
   history.replaceState(null, '', `${record ? '/execution-records' : '/flows'}${query.size ? '?' + query : ''}`);
@@ -94,7 +95,7 @@ export async function activateFlows() {
       const record = await api(`/flow-runs/${encodeURIComponent(run)}`);
       if (token !== selection || !state.visible) return;
       id = record.flow_id;
-      if (!id) { setError('这条运行记录已没有关联的流程，可在集合测试记录中查看步骤快照。'); return; }
+      if (!id) { await openHistoricalRun(run,record); return; }
     } catch (error) { setError(`无法读取运行记录：${errorText(error)}`); return; }
   }
   if (id && state.flow?.id !== id) { await openFlow(id, run); return; }
@@ -132,7 +133,7 @@ async function openFlow(id, runID) {
     setLocation(); renderWorkspace();
     void loadContext(id);
     if (runID) await openRun(runID);
-  } catch (error) { setError(`无法打开流程：${errorText(error)}`); }
+  } catch (error) { if(runID&&error.status===404){await openHistoricalRun(runID);return;} setError(`无法打开流程：${errorText(error)}`); }
 }
 async function loadContext(id) {
   const items = await Promise.allSettled([api(`/flows/${encodeURIComponent(id)}/runs`), api('/database/connections'), api('/services')]);
@@ -191,17 +192,18 @@ function renderWorkspace() {
   title.querySelector('input').readOnly = state.mode === 'run' || Boolean(flow.archived_at);
   const actions = el('div', 'fw-toolbar-actions'); const save = el('span', 'fw-save-state'); save.dataset.saveState = '';
   actions.append(save, button('另存副本', 'button small', saveCopy), button('保存', 'button small', () => void saveFlow()), button(state.starting ? '准备运行…' : '▶ 运行流程', 'button primary', runFlow)); actions.lastChild.disabled = state.starting;
-  if(flow.archived_at){for(const b of actions.querySelectorAll('button'))if(b.textContent!=='另存副本')b.disabled=true;actions.append(button('恢复流程','button',()=>changeArchive(flow,false)));}else actions.append(button('归档流程','button small',()=>changeArchive(flow,true)));
+  if(flow.deleted){actions.replaceChildren(el('span','fw-hint','原流程已彻底删除，历史快照独立保留。'));}else if(flow.archived_at){for(const b of actions.querySelectorAll('button'))if(b.textContent!=='另存副本')b.disabled=true;actions.append(button('恢复流程','button',()=>changeArchive(flow,false)));}else actions.append(button('归档流程','button small',()=>changeArchive(flow,true)));
   toolbar.append(title, actions); fragment.append(toolbar);
   const workspace = el('div', 'fw-studio'); const canvas = el('div', 'fw-canvas');
   const modebar = el('div', 'fw-modebar'); const modes = el('div', 'fw-segment');
   modes.append(button('流程编排', state.mode === 'edit' ? 'selected' : '', () => { state.mode = 'edit'; setLocation(); renderWorkspace(); }), button('执行结果', state.mode === 'run' ? 'selected' : '', () => { if (!state.run) { state.rail = 'history'; renderRail(); return; } state.mode = 'run'; setLocation(); renderWorkspace(); }));
+  if(flow.deleted)modes.querySelector('button').disabled=true;
   modebar.append(modes, el('span', 'fw-hint', state.mode === 'edit' ? '顺序执行 · 修改自动保存' : state.run ? `定义快照 v${state.run.flow_version}` : '从右侧选择运行记录')); canvas.append(modebar);
   if (state.mode === 'run' && state.run) renderRun(canvas); else renderSteps(canvas);
   const rail = el('aside', 'fw-rail'); rail.setAttribute('aria-label', '流程上下文'); rail.dataset.flowRail = ''; workspace.append(canvas, rail); if(flow.archived_at&&state.mode!=='run'){canvas.querySelectorAll('input,button,textarea,select').forEach(node=>{node.disabled=true;});canvas.prepend(el('p','fw-message','流程已归档，可查看定义和历史；恢复后才能编辑或运行。'));} fragment.append(workspace); root.replaceChildren(fragment); saveLabel(); renderRail();
 }
 function renderLibrary(fragment) {
-  const header = el('div', 'fw-library-heading'); header.append(el('div', '', `多步流程 · ${state.flows.length}`), button('＋ 新建多步流程', 'button primary', createFlow)); fragment.append(header);
+  const header = el('div', 'fw-library-heading'); header.append(el('div', '', `多步流程 · ${state.flows.length}`), button('＋ 新建多步流程', 'button primary', createFlow),lifecycleButton('批量管理',()=>openBulkManager('flow',refreshFlows))); fragment.append(header);
   const filters=el('div','testing-actions');filters.append(input(state.query,'搜索流程',value=>{state.query=value;renderWorkspace();const control=root.querySelector('[aria-label="搜索流程"]');control?.focus();control?.setSelectionRange(value.length,value.length);},{placeholder:'搜索全部流程名称或说明'}),button(state.archived?'返回有效流程':'已归档流程','button',async()=>{state.archived=!state.archived;await refreshFlows();}));fragment.append(filters);
   const grid = el('div', 'fw-library');
   for (const flow of state.flows.filter(item=>`${item.name} ${item.description}`.toLowerCase().includes(state.query.toLowerCase()))) {
@@ -545,3 +547,5 @@ window.addEventListener('beforeunload', event => { if (state.dirty || state.savi
 window.addEventListener('keydown', event => { if (state.visible && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void saveFlow(); } });
 
 function changeArchive(flow,archive){const content=el('div');const restoreName=input(flow.name,'恢复流程名称',()=>{},{max:120});if(!archive)content.append(field('恢复流程名称',restoreName));content.append(el('p','',archive?'归档后禁止新运行，已开始的运行继续完成，历史记录保留。':'恢复前会检查每个步骤的依赖。'));showDialog(archive?'归档流程':'恢复流程',flow.name,content,archive?'确认归档':'确认恢复',async()=>{if(!(await leaveFlows()))throw new Error('请先保存当前修改。');await api(`/flows/${encodeURIComponent(flow.id)}${archive?'':'/restore'}`,{method:archive?'DELETE':'POST',...(!archive?{body:{name:restoreName.value}}:{})});state.flow=await api(`/flows/${encodeURIComponent(flow.id)}`);await refreshFlows();});}
+
+async function openHistoricalRun(id,loaded=null){try{const run=loaded||await api(`/flow-runs/${encodeURIComponent(id)}`);state.flow={id:null,name:run.flow_name_snapshot,deleted:true,archived_at:run.finished_at||run.created_at,steps:[],variables:[],settings:{}};state.run=run;state.history=[run];state.mode='run';state.dirty=false;state.error='';setLocation();renderWorkspace();await pollRun();}catch(error){setError(`无法读取运行快照：${errorText(error)}`);}}

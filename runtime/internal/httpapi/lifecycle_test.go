@@ -90,7 +90,7 @@ func TestFlowArchiveAndDependencyProtectionIncludeDisabledAndRunningSnapshots(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DeleteConnection(ctx, conn.ID); !errors.Is(err, lifecycle.ErrProtected) {
+	if err := db.ArchiveConnection(ctx, conn.ID); !errors.Is(err, lifecycle.ErrProtected) {
 		t.Fatalf("disabled reference unprotected: %v", err)
 	}
 	if err := s.repo.archiveFlow(flow.ID); err != nil {
@@ -102,14 +102,14 @@ func TestFlowArchiveAndDependencyProtectionIncludeDisabledAndRunningSnapshots(t 
 	if _, err := s.repo.updateFlow(flow, flow.EditVersion); err == nil {
 		t.Fatal("archived flow editable")
 	}
-	if err := db.DeleteConnection(ctx, conn.ID); err != nil {
+	if err := db.ArchiveConnection(ctx, conn.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.repo.restoreFlow(flow.ID); !errors.Is(err, lifecycle.ErrProtected) {
 		t.Fatalf("missing restore dependency: %v", err)
 	}
 	// A queued run still reserves future dependencies after its source is archived.
-	if _, err := db.PutConnection(ctx, *conn); err != nil {
+	if err := db.RestoreConnection(ctx, conn.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.repo.restoreFlow(flow.ID); err != nil {
@@ -126,13 +126,13 @@ func TestFlowArchiveAndDependencyProtectionIncludeDisabledAndRunningSnapshots(t 
 		t.Fatal(err)
 	}
 	s.repo.archiveFlow(flow.ID)
-	if err := db.DeleteConnection(ctx, conn.ID); !errors.Is(err, lifecycle.ErrProtected) {
+	if err := db.ArchiveConnection(ctx, conn.ID); !errors.Is(err, lifecycle.ErrProtected) {
 		t.Fatalf("future step unprotected: %v", err)
 	}
 	if err := s.repo.finishFlowRun(run.ID, "cancelled", "test", "test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DeleteConnection(ctx, conn.ID); err != nil {
+	if err := db.ArchiveConnection(ctx, conn.ID); err != nil {
 		t.Fatal(err)
 	}
 }
