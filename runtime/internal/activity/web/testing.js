@@ -175,7 +175,7 @@ function renderAttempt(run) {
   details.classList.toggle('execution-target', run.id === targetStep);
   const title = el('summary'); const chevron = el('span', 'test-attempt-chevron'); chevron.setAttribute('aria-hidden', 'true'); title.append(chevron, pill(run.status), el('strong', '', run.name), el('small', '', `${clock(run.started_at)}${run.case_version ? ` · 用例 v${run.case_version}` : ' · 临时用例'} · #${run.id.slice(0, 8)}`));
   const body = el('div', 'test-attempt-body'); const request = run.request_snapshot;
-  const snapshot = el('section', 'test-attempt-section'); snapshot.append(el('h4', 'test-section-title', '请求快照'), el('pre', 'detail-code', display(run.type === 'command' ? run.command_request_snapshot : run.type === 'mcp' ? run.mcp_request_snapshot : { method: request.method, url: request.url, query_params: request.query_params, headers: request.headers, body: request.body }))); body.append(snapshot);
+  const snapshot = el('section', 'test-attempt-section'); snapshot.append(el('h4', 'test-section-title', run.type === 'command' ? '命令执行快照' : run.type === 'mcp' ? 'MCP 调用快照' : 'HTTP 请求快照'), el('pre', 'detail-code', display(run.type === 'command' ? run.command_request_snapshot : run.type === 'mcp' ? run.mcp_request_snapshot : { method: request.method, url: request.url, query_params: request.query_params, headers: request.headers, body: request.body }))); body.append(snapshot);
   const assertions = run.assertions || [];
   const results = el('section', 'test-attempt-section'); const resultHeading = el('h4', 'test-section-title', '断言结果');
   const passed = assertions.filter(assertion => assertion.passed).length;
@@ -191,7 +191,7 @@ function renderAttempt(run) {
   if (run.expected_status && !assertions.length) results.append(el('p', '', `预期 HTTP ${run.expected_status}`));
   body.append(results);
   if (run.error_message) body.append(el('p', 'response-error', run.error_message));
-  if (run.status === 'unverified') body.append(el('p', '', '本次请求没有设置预期断言，因此保留为“未验证”。'));
+  if (run.status === 'unverified') body.append(el('p', '', '本次执行没有设置预期断言，因此保留为“未验证”。'));
   const actions = el('div', 'testing-actions test-attempt-actions');
   if (run.api_run_id) actions.append(button('请求与响应详情', event => openRequestDetail(run.api_run_id, event.currentTarget)));
   else if (run.finished_at && run.type !== 'mcp' && run.type !== 'command') body.append(el('p', '', '本次执行没有可用的请求详情。'));

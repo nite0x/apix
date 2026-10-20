@@ -95,6 +95,12 @@ records its version.
 - **运行流程** opens run cards with request/response details, timing, assertion
   results, and extracted variables. **运行记录** in the right panel reopens
   historical Flow runs. Editing a Flow never changes an existing run snapshot.
+  Execution details follow the step type: HTTP shows requests and responses;
+  SQL shows the statement, bound parameters, returned rows or affected row count;
+  service steps show the operation, saved status, PID, ownership, and whether a
+  service was started or reused. SQL parameters are saved after substitution
+  with sensitive values masked; older records may still contain placeholders.
+  Service results describe the operation at execution time, before later cleanup.
 
 The Web page uses the Runtime that serves it; no separate frontend dev server
 is needed. Rebuild and restart the Runtime after changing embedded Web assets.

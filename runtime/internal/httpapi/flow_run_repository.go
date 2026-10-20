@@ -277,6 +277,11 @@ func (r *repository) setFlowRunStepStatus(stepRunID, status string, apiRunID *st
 	return err
 }
 
+func (r *repository) setFlowRunStepSQLSnapshot(id string, input any) error {
+	_, err := r.db.Exec(`UPDATE flow_run_steps SET sql_snapshot=? WHERE id=?`, marshalJSON(input), id)
+	return err
+}
+
 func (r *repository) setFlowRunStepResult(id string, result any, assertions []AssertionResult) error {
 	if assertions == nil {
 		assertions = []AssertionResult{}
