@@ -66,6 +66,7 @@ func Routes(r gin.IRouter, db *sql.DB, services *localservice.Service, history *
 	r.GET("/requests", servePage)
 	r.GET("/databases", servePage)
 	r.GET("/flows", servePage)
+	r.GET("/execution-records", servePage)
 	r.GET("/tests", servePage)
 	r.GET("/test-collections", servePage)
 	r.GET("/mcp-tools", servePage)
@@ -75,7 +76,7 @@ func Routes(r gin.IRouter, db *sql.DB, services *localservice.Service, history *
 	web, _ := fs.Sub(assets, "web")
 	r.GET("/activity/assets/:name", func(c *gin.Context) {
 		name := c.Param("name")
-		if name != "execution-batch.js" && name != "command-tools.js" && name != "command-tools.css" && name != "mcp-tools.js" && name != "mcp-tools.css" && name != "ai-tools.js" && name != "ai-tools.css" && name != "request-api.js" && name != "request-library.js" && name != "request-history.js" && name != "workspace-tabs.js" && name != "app.js" && name != "request-detail.js" && name != "service-detail.js" && name != "databases.js" && name != "style.css" && name != "desktop.css" && name != "services.css" && name != "flows.js" && name != "flow-model.js" && name != "flows.css" && name != "testing.js" && name != "testing.css" && name != "manual-request.js" && name != "manual-request.css" && name != "service-editor.js" && name != "manual-tools.css" {
+		if name != "execution-history.js" && name != "execution-history.css" && name != "execution-batch.js" && name != "command-tools.js" && name != "command-tools.css" && name != "mcp-tools.js" && name != "mcp-tools.css" && name != "ai-tools.js" && name != "ai-tools.css" && name != "request-api.js" && name != "request-library.js" && name != "request-history.js" && name != "workspace-tabs.js" && name != "app.js" && name != "request-detail.js" && name != "service-detail.js" && name != "databases.js" && name != "style.css" && name != "desktop.css" && name != "services.css" && name != "flows.js" && name != "flow-model.js" && name != "flows.css" && name != "testing.js" && name != "testing.css" && name != "manual-request.js" && name != "manual-request.css" && name != "service-editor.js" && name != "manual-tools.css" {
 			c.Status(404)
 			return
 		}

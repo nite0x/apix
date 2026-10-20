@@ -3,6 +3,7 @@ package localservice
 import (
 	"database/sql"
 	"errors"
+	"github.com/apix/apix/runtime/internal/executionrecord"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
@@ -44,7 +45,8 @@ func (s *Service) Routes(r gin.IRouter) {
 		action := action
 		g.POST("/:id/"+action, func(c *gin.Context) {
 			var input struct {
-				Owner string `json:"owner"`
+				Owner   string `json:"owner"`
+				BatchID string `json:"batch_id"`
 			}
 			if c.Request.ContentLength != 0 {
 				if e := c.ShouldBindJSON(&input); e != nil {
@@ -52,12 +54,13 @@ func (s *Service) Routes(r gin.IRouter) {
 					return
 				}
 			}
+			ctx := executionrecord.WithBatch(c.Request.Context(), input.BatchID)
 			var v *Instance
 			var e error
 			if action == "start" {
-				v, e = s.Start(c.Request.Context(), c.Param("id"), input.Owner)
+				v, e = s.Start(ctx, c.Param("id"), input.Owner)
 			} else {
-				v, e = s.Stop(c.Request.Context(), c.Param("id"), input.Owner)
+				v, e = s.Stop(ctx, c.Param("id"), input.Owner)
 			}
 			respond(c, v, e)
 		})

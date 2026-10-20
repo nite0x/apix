@@ -1,5 +1,5 @@
 // Switch visibility only: drafts, results and in-flight work stay mounted.
-export function setupWorkspaceTabs(id) {
+export function setupWorkspaceTabs(id, onSelect) {
   const tabs = [...document.getElementById(id).querySelectorAll('[role="tab"]')];
   function select(tab) {
     for (const control of tabs) {
@@ -8,6 +8,7 @@ export function setupWorkspaceTabs(id) {
       control.tabIndex = selected ? 0 : -1;
       document.getElementById(control.getAttribute('aria-controls')).hidden = !selected;
     }
+    onSelect?.(tab);
   }
   for (const tab of tabs) {
     tab.addEventListener('click', () => select(tab));

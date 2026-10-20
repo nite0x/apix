@@ -103,6 +103,7 @@ type APIRun struct {
 }
 
 type RunCommand struct {
+	BatchID       string
 	ProjectID     string
 	APIRequestID  string
 	WorkingCopyID string

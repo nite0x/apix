@@ -227,6 +227,7 @@ func (s *HTTPService) runRoutes(r gin.IRouter) {
 	g := r.Group("/runs")
 	g.POST("", func(c *gin.Context) {
 		var body struct {
+			BatchID       string `json:"batch_id"`
 			ProjectID     string `json:"project_id"`
 			APIRequestID  string `json:"api_request_id"`
 			WorkingCopyID string `json:"working_copy_id"`
@@ -240,7 +241,7 @@ func (s *HTTPService) runRoutes(r gin.IRouter) {
 			writeBadRequest(c, errors.New("provide exactly one of api_request_id or working_copy_id"))
 			return
 		}
-		run, err := s.execution.Run(c.Request.Context(), RunCommand{ProjectID: body.ProjectID, APIRequestID: body.APIRequestID,
+		run, err := s.execution.Run(c.Request.Context(), RunCommand{BatchID: body.BatchID, ProjectID: body.ProjectID, APIRequestID: body.APIRequestID,
 			WorkingCopyID: body.WorkingCopyID, EnvironmentID: body.EnvironmentID, TriggerType: "manual"}, core.NewVariables())
 		if run == nil {
 			writeAPIError(c, err)

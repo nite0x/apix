@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apix/apix/runtime/internal/executionrecord"
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 )
@@ -54,6 +55,7 @@ func (input *ConnectionInput) UnmarshalJSON(data []byte) error {
 }
 
 type Command struct {
+	BatchID      string `json:"batch_id,omitempty"`
 	ConnectionID string `json:"connection_id"`
 	Mode         string `json:"mode"`
 	SQL          string `json:"sql"`
@@ -78,6 +80,7 @@ type poolEntry struct {
 }
 
 type Service struct {
+	record  executionrecord.Recorder
 	store   *sql.DB
 	mu      sync.Mutex
 	pools   map[string]poolEntry
@@ -332,9 +335,18 @@ func (s *Service) TestConnection(ctx context.Context, id string) error {
 	return db.PingContext(ctx)
 }
 
+func (s *Service) SetExecutionRecorder(record executionrecord.Recorder) { s.record = record }
+
 func (s *Service) Execute(ctx context.Context, cmd Command) (result *Result, err error) {
 	if err := validate(&cmd); err != nil {
 		return nil, err
+	}
+	if s.record != nil && !executionrecord.Skipped(ctx) {
+		finish, e := s.record(ctx, "sql", "SQL · "+cmd.ConnectionID, cmd.BatchID, cmd)
+		if e != nil {
+			return nil, e
+		}
+		defer func() { err = errors.Join(err, finish(result, err)) }()
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(cmd.TimeoutMS)*time.Millisecond)
 	defer cancel()

@@ -8,11 +8,13 @@ import (
 
 	"github.com/apix/apix/runtime/internal/core"
 	"github.com/apix/apix/runtime/internal/database"
+	"github.com/apix/apix/runtime/internal/executionrecord"
 )
 
 var errFlowAssertion = errors.New("assertion failed")
 
 func (fs *flowService) executeStep(ctx context.Context, run *FlowRun, step *FlowRunStep, config FlowStepConfig, vars *core.Variables) (*APIRun, any, []AssertionResult, error) {
+	ctx = executionrecord.Skip(ctx)
 	switch step.Type {
 	case "", "http":
 		envID := ""

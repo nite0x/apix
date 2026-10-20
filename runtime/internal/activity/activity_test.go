@@ -63,13 +63,13 @@ func TestReadOnlyMonitorHistoryCursorsAndEmbeddedAssets(t *testing.T) {
 	if page.Code != 200 || !strings.Contains(page.Body.String(), "实时日志") || page.Header().Get("Content-Security-Policy") == "" {
 		t.Fatalf("page=%d", page.Code)
 	}
-	for _, path := range []string{"/", "/activity", "/services", "/requests", "/databases", "/flows", "/flows?id=example", "/tests", "/tests?batch=example", "/test-collections", "/test-collections?tab=records&batch=example", "/logs", "/logs?source=svc", "/ai-tools"} {
+	for _, path := range []string{"/", "/activity", "/services", "/requests", "/databases", "/flows", "/flows?id=example", "/execution-records", "/execution-records?batch=example", "/execution-records?run=example", "/tests", "/tests?batch=example", "/test-collections", "/test-collections?tab=records&batch=example", "/logs", "/logs?source=svc", "/ai-tools"} {
 		w := get(path)
 		if w.Code != 200 || !strings.Contains(w.Body.String(), `aria-label="主导航"`) || w.Header().Get("Content-Security-Policy") == "" {
 			t.Fatalf("page route %s: %d", path, w.Code)
 		}
 	}
-	for _, path := range []string{"/activity/assets/execution-batch.js", "/activity/assets/ai-tools.js", "/activity/assets/ai-tools.css", "/activity/assets/request-api.js", "/activity/assets/request-library.js", "/activity/assets/request-history.js", "/activity/assets/app.js", "/activity/assets/workspace-tabs.js", "/activity/assets/request-detail.js", "/activity/assets/service-detail.js", "/activity/assets/databases.js", "/activity/assets/style.css", "/activity/assets/desktop.css", "/activity/assets/services.css", "/activity/assets/flows.js", "/activity/assets/flow-model.js", "/activity/assets/flows.css", "/activity/assets/testing.js", "/activity/assets/testing.css", "/activity/assets/manual-request.js", "/activity/assets/manual-request.css", "/activity/assets/service-editor.js", "/activity/assets/manual-tools.css"} {
+	for _, path := range []string{"/activity/assets/execution-history.js", "/activity/assets/execution-history.css", "/activity/assets/execution-batch.js", "/activity/assets/ai-tools.js", "/activity/assets/ai-tools.css", "/activity/assets/request-api.js", "/activity/assets/request-library.js", "/activity/assets/request-history.js", "/activity/assets/app.js", "/activity/assets/workspace-tabs.js", "/activity/assets/request-detail.js", "/activity/assets/service-detail.js", "/activity/assets/databases.js", "/activity/assets/style.css", "/activity/assets/desktop.css", "/activity/assets/services.css", "/activity/assets/flows.js", "/activity/assets/flow-model.js", "/activity/assets/flows.css", "/activity/assets/testing.js", "/activity/assets/testing.css", "/activity/assets/manual-request.js", "/activity/assets/manual-request.css", "/activity/assets/service-editor.js", "/activity/assets/manual-tools.css"} {
 		if w := get(path); w.Code != 200 {
 			t.Fatalf("missing embedded asset %s", path)
 		}

@@ -24,6 +24,7 @@ test('MCP workspace discovers tools, preserves drafts, prevents duplicate calls,
     } else if (path === '/api/test-cases' && options.method === 'POST') { result = { ...input, id: 'case-1', edit_version: 1 }; savedCases.push(result); }
     else if (path === '/api/test-cases') result = savedCases;
     else if (path === '/api/test-batches' && options.method === 'POST') result = { ...batch, status: 'running' };
+    else if (path === '/api/flows') result = [];
     else if (path === '/api/test-batches') result = [batch];
     else if (path.endsWith('/runs')) {
       await new Promise(resolve => { releaseCall = resolve; });
@@ -57,10 +58,10 @@ test('MCP workspace discovers tools, preserves drafts, prevents duplicate calls,
   failDiscovery = false; click('测试连接并获取工具'); await tick(); assert.match(document.querySelector('[data-mcp-feedback]').textContent, /连接成功/);
   history.replaceState(null, '', '/tests?tab=cases');
   const testing = await import('./web/testing.js'); await testing.activateTesting();
-  assert.match(document.querySelector('#testing-workspace').textContent, /MCP · get_order/);
-  click('编辑', '#testing-workspace'); await tick(); assert.equal(document.querySelector('dialog[open] [aria-label="工具名称"]').value, 'get_order'); click('关闭 ×', 'dialog[open]');
-  click('执行记录', '#testing-workspace'); await tick();
+  assert.equal(document.querySelector('.test-cases'), null);
+  history.replaceState(null, '', '/execution-records'); await testing.activateTesting(); await tick();
   assert.match(document.querySelector('.test-endpoint').textContent, /MCP .*get_order/);
   assert.match(document.querySelector('.test-attempt-body').textContent, /MCP 返回结果/); assert.equal(document.querySelectorAll('#testing-workspace script').length, 0);
+  click('另存为用例', '#testing-workspace'); await tick(); assert.equal(document.querySelector('dialog[open] [aria-label="工具名称"]').value, 'get_order'); click('关闭 ×', 'dialog[open]');
   testing.deactivateTesting(); dom.window.close();
 });

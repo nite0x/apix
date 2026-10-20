@@ -87,6 +87,7 @@ func New() *HTTPService {
 func (s *HTTPService) initRepositories() {
 	s.repo = newRepository(s.db)
 	s.execution = newExecutionService(s.repo)
+	s.execution.record = s.RecordExecution
 	s.flow = newFlowService(s.repo, s.execution)
 }
 

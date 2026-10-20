@@ -18,6 +18,24 @@ func writeTestError(c *gin.Context, err error) {
 
 func (s *HTTPService) testRoutes(r gin.IRouter) {
 	s.commandRoutes(r)
+	r.GET("/test-runs", func(c *gin.Context) {
+		items, err := s.ListTestRuns(c.Query("project_id"), c.Query("type"))
+		if err != nil {
+			writeTestError(c, err)
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.JSON(200, items)
+	})
+	r.GET("/test-runs/:id", func(c *gin.Context) {
+		item, err := s.GetTestRun(c.Param("id"))
+		if err != nil {
+			writeTestError(c, err)
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.JSON(200, item)
+	})
 	b := r.Group("/test-batches")
 	b.GET("", func(c *gin.Context) {
 		items, err := s.ListTestBatches(c.Query("project_id"))
@@ -153,6 +171,9 @@ func (s *HTTPService) RunInlineTest(ctx context.Context, args map[string]any, ru
 	request := RequestData{Method: in.Method, URL: in.URL, Body: in.Body}
 	for name, value := range in.Headers {
 		request.Headers = append(request.Headers, KeyValue{Name: name, Value: value, Enabled: true})
+	}
+	if in.CaseName == "" {
+		in.CaseName = in.Method + " " + redactRequestURL(in.URL)
 	}
 	return s.RunTest(ctx, RunTestInput{BatchID: in.BatchID, TestCase: &TestCase{Name: in.CaseName, Request: request, ExpectedStatus: in.ExpectedStatus, Assertions: in.Assertions}}, runner)
 }

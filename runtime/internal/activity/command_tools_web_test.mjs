@@ -25,6 +25,7 @@ test('command workspace validates arguments, executes once, retains drafts, and 
       if (failSave) return { status: 400, ok: false, json: async () => ({ error: 'save failed' }) };
       value = { ...input, id: 'command-case', edit_version: 1 }; cases.push(value);
     } else if (path === '/api/test-cases') value = cases;
+    else if (path === '/api/flows') value = [];
     else if (path === '/api/test-batches') value = [batch];
     else if (path.startsWith('/api/test-batches/')) value = batch;
     else value = {};
@@ -44,9 +45,8 @@ test('command workspace validates arguments, executes once, retains drafts, and 
   failSave = true; click('保存测试用例'); await tick(); assert.match(document.querySelector('[data-command-notice]').textContent, /save failed/); assert.equal(document.querySelector('[aria-label="执行程序"]').value, 'python3');
   failSave = false; click('保存测试用例'); await tick(); assert.equal(cases[0].type, 'command'); assert.deepEqual(cases[0].command_request.args, ['-']); assert.equal(cases[0].expected_exit_code, 0);
   history.replaceState(null, '', '/tests?tab=cases'); const testing = await import('./web/testing.js'); await testing.activateTesting();
-  assert.match(document.querySelector('#testing-workspace').textContent, /命令行 · python3/);
-  click('编辑', '#testing-workspace'); fill('标准输入 / 脚本正文', 'print("edited draft")', 'dialog[open]'); await testing.refreshTesting(); assert.equal(document.querySelector('dialog[open] [aria-label="标准输入 / 脚本正文"]').value, 'print("edited draft")'); click('关闭 ×', 'dialog[open]');
-  click('执行记录', '#testing-workspace'); await tick(); assert.match(document.querySelector('.test-endpoint').textContent, /命令行 python3/); assert.match(document.querySelector('.test-attempt-body').textContent, /命令执行结果 · 退出码 0/); assert.equal(document.querySelectorAll('#testing-workspace script').length, 0);
-  click('另存为用例', '#testing-workspace'); assert.equal(document.querySelector('dialog[open] [aria-label="执行程序"]').value, 'python3'); click('关闭 ×', 'dialog[open]');
+  assert.equal(document.querySelector('.test-cases'), null);
+  history.replaceState(null, '', '/execution-records'); await testing.activateTesting(); await tick(); assert.match(document.querySelector('.test-endpoint').textContent, /命令行 python3/); assert.match(document.querySelector('.test-attempt-body').textContent, /命令执行结果 · 退出码 0/); assert.equal(document.querySelectorAll('#testing-workspace script').length, 0);
+  click('另存为用例', '#testing-workspace'); assert.equal(document.querySelector('dialog[open] [aria-label="执行程序"]').value, 'python3'); fill('标准输入 / 脚本正文', 'print("edited draft")', 'dialog[open]'); await testing.refreshTesting(); assert.equal(document.querySelector('dialog[open] [aria-label="标准输入 / 脚本正文"]').value, 'print("edited draft")'); click('关闭 ×', 'dialog[open]');
   testing.deactivateTesting(); dom.window.close();
 });

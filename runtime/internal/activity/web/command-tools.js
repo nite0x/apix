@@ -1,5 +1,6 @@
 import { executionBatchLink } from './execution-batch.js';
-
+import { attachExecutionHistory } from './execution-history.js';
+let executionHistory = null;
 const root = document.getElementById('command-workspace');
 let mounted = false;
 let working = false;
@@ -62,6 +63,7 @@ function mount() {
   const saved = el('a', 'button', '已保存用例'); saved.href = '/tests?tab=cases'; saved.dataset.route = ''; actions.append(saved);
   const message = el('div', 'detail-alert'); message.dataset.commandNotice = ''; message.hidden = true; form.append(actions, message); panel.append(form);
   const output = el('section', 'panel command-result-panel'); output.append(el('div', 'panel-heading')); output.firstChild.append(el('h2', '', '本次执行结果')); const result = el('div', 'command-result'); result.dataset.commandResult = ''; result.setAttribute('aria-live', 'polite'); result.append(el('p', '', '执行后在这里查看 stdout、stderr、退出码与断言。')); output.append(result); layout.append(panel, output); root.replaceChildren(layout);
+  executionHistory = attachExecutionHistory(root, 'command', '命令执行');
   form.addEventListener('submit', async event => {
     event.preventDefault(); if (working) return; let input; try { input = pageFields.read(); } catch (error) { notice(error.message, true); return; }
     working = true; form.querySelectorAll('button,input,select,textarea').forEach(n => { n.disabled = true; }); notice(''); result.setAttribute('aria-busy', 'true');
@@ -74,6 +76,7 @@ function mount() {
 }
 export async function refreshCommands() {
   mount(); if (!root) return;
+  void executionHistory.refresh();
   if (!environment) { try { environment = await api('/commands/environment'); } catch (error) { notice(error.message, true); return; } }
   root.querySelector('[data-command-environment]').textContent = `执行环境 ${environment.platform} · Runtime 工作目录 ${environment.work_dir} · 每个输出流最多保留 256 KB`;
 }

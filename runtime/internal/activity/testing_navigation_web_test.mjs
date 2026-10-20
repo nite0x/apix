@@ -6,7 +6,7 @@ import { blankStep } from './web/flow-model.js';
 
 const tick = async () => { for (let i = 0; i < 16; i++) await new Promise(resolve => setImmediate(resolve)); };
 
-test('unified testing preserves legacy links, flow save guards and execution routing across all three views', async t => {
+test('separate flow and execution record pages preserve deep links, navigation state and drafts', async t => {
   const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/flows?id=flow-1&run=flow-run-1' });
   dom.window.matchMedia = () => ({ matches: false, addEventListener() {} });
   dom.window.scrollTo = () => {};
@@ -19,6 +19,8 @@ test('unified testing preserves legacy links, flow save guards and execution rou
   const flow = { id: 'flow-1', name: '订单业务验证', description: '', variables: [], settings: { stop_on_error: true, request_timeout_ms: 60000 }, steps: [step], edit_version: 1, updated_at: new Date().toISOString() };
   const run = { id: 'flow-run-1', flow_id: flow.id, flow_name_snapshot: flow.name, flow_version: 1, total_steps: 1, status: 'succeeded', created_at: new Date().toISOString(), started_at: new Date().toISOString(), finished_at: new Date().toISOString(), steps: [] };
   const batch = { id: 'batch-1', name: '参数回归', status: 'running', created_at: new Date().toISOString(), counts: { total: 1, passed: 1, failed: 0, errors: 0, unverified: 0, running: 0 }, runs: [{ id: 'attempt-1', name: '正常参数', status: 'passed', request_snapshot: { method: 'GET', url: 'http://localhost/health' }, assertions: [], started_at: new Date().toISOString() }] };
+  const flowBatch = { ...batch, id: run.id, source: 'flow', name: flow.name, status: 'completed' };
+  const saved = { id: 'case-1', name: '健康检查', request: { method: 'GET', url: 'http://localhost/health' }, assertions: [], edit_version: 1 };
   const writes = []; let conflict = false; let recordFailure = false;
   const result = (body, status = 200) => ({ ok: status < 400, status, json: async () => structuredClone(body) });
   globalThis.fetch = async (path, options = {}) => {
@@ -36,72 +38,85 @@ test('unified testing preserves legacy links, flow save guards and execution rou
       return result([run]);
     }
     if (path.startsWith('/api/flow-runs/')) return result({ ...run, id: path.split('/').at(-1) });
-    if (path === '/api/test-batches') return result([batch]);
+    if (path === '/api/test-batches') return recordFailure ? result({ error: 'history unavailable' }, 500) : result([batch, flowBatch]);
+    if (path === '/api/test-batches/' + flowBatch.id) return result(flowBatch);
+    if (path === '/api/test-cases') return result([saved]);
     if (path === '/api/test-batches/batch-1') return result(batch);
     if (path === '/api/test-cases' || path === '/api/database/connections' || path === '/api/services') return result([]);
     throw new Error('Unexpected request: ' + path);
   };
   const click = async text => {
-    const button = [...document.querySelectorAll('#testing-workspace button')].find(node => node.textContent === text && !node.closest('[hidden]'));
+    const button = ['流程', '执行记录'].includes(text) ? document.querySelector('.page-nav a[aria-label="' + text + '"]') : [...document.querySelectorAll('#testing-workspace button')].find(node => node.textContent === text && !node.closest('[hidden]'));
     assert.ok(button, text); button.click(); await tick();
   };
-  const selected = key => document.querySelector('[data-test-tab="' + key + '"]').getAttribute('aria-selected');
+  const selected = key => document.querySelector('.page-nav a[aria-label="' + (key === 'records' ? '执行记录' : '流程') + '"]').getAttribute('aria-current') === 'page' ? 'true' : 'false';
   const flows = await import('./web/flows.js');
   const testing = await import('./web/testing.js');
   try {
     await import('./web/app.js'); await tick();
-    assert.equal(location.pathname, '/tests');
+    assert.equal(location.pathname, '/execution-records');
     assert.equal(new URLSearchParams(location.search).get('run'), run.id);
-    assert.equal(document.title, 'Apix · 测试');
-    assert.equal(document.querySelector('.page-nav a[aria-label="测试"]').getAttribute('aria-current'), 'page');
-    assert.equal(document.querySelector('.page-nav a[href="/flows"]'), null);
+    assert.equal(document.title, 'Apix · 执行记录');
+    assert.equal(document.querySelectorAll('[data-test-tab]').length, 0);
+    assert.equal(document.querySelectorAll('.page-nav a[href="/flows"]').length, 1);
+    assert.equal(document.querySelectorAll('.page-nav a[href="/execution-records"]').length, 1);
+    assert.equal(document.querySelector('[data-testing-type]'), null);
+    assert.equal(document.querySelector('[data-test-tab="batches"]'), null);
+    assert.equal(document.querySelector('.page-nav a[href="/test-collections"]'), null);
     assert.equal(selected('records'), 'true');
-    assert.equal(document.getElementById('flow-workspace').hidden, false);
+    assert.ok(document.querySelector('.fw-run-summary'));
     assert.equal(writes.length, 0);
 
     await click('流程编排');
-    assert.equal(selected('cases'), 'true');
-    history.pushState(null, '', '/flows?id=flow-1&run=flow-run-1'); window.dispatchEvent(new window.PopStateEvent('popstate')); await tick();
-    assert.equal(selected('records'), 'true');
-    assert.ok(document.querySelector('.fw-run-summary'));
-    await click('流程编排');
     const name = document.querySelector('[aria-label="流程名称"]'); name.value = '保留的业务草稿'; name.dispatchEvent(new window.Event('input'));
-    conflict = true;
-    const typeFilter = document.querySelector('[data-testing-type]');
-    typeFilter.value = 'single'; typeFilter.dispatchEvent(new window.Event('change')); await tick();
-    assert.equal(typeFilter.value, 'flow');
-    await click('测试批次');
+    conflict = true; await click('执行记录');
     assert.equal(selected('cases'), 'true');
-    assert.equal(new URLSearchParams(location.search).get('tab'), 'cases');
     assert.equal(document.querySelector('[aria-label="流程名称"]').value, '保留的业务草稿');
     assert.match(document.querySelector('[data-flow-message]').textContent, /另存副本/);
-    conflict = false; await click('测试批次');
-    assert.equal(selected('batches'), 'true');
+    conflict = false; await click('执行记录');
+    assert.equal(selected('records'), 'true');
     assert.equal(flow.name, '保留的业务草稿');
     assert.equal(document.getElementById('flow-workspace').hidden, true);
-    assert.equal(document.querySelector('.test-attempt'), null);
-    await click('查看执行记录 →');
-    assert.equal(selected('records'), 'true');
     assert.ok(document.querySelector('.test-attempt'));
-    assert.equal(new URLSearchParams(location.search).get('batch'), batch.id);
+    const records = [...document.querySelectorAll('.testing-batch')];
+    assert.equal(records.length, 2);
+    assert.match(records[0].textContent, /集合测试.*参数回归/);
+    assert.match(records[1].textContent, /多步流程.*订单业务验证/);
+    assert.ok([...document.querySelectorAll('.testing-detail button')].some(node => node.textContent === '结束批次'));
+    assert.equal([...document.querySelectorAll('.testing-detail button')].some(node => node.textContent === '查看测试批次'), false);
+    assert.equal([...document.querySelectorAll('.testing-detail button')].some(node => node.textContent === '查看执行记录 →'), false);
 
-    const type = document.querySelector('[data-testing-type]');
-    assert.equal(type.getAttribute('aria-label'), '记录类型');
-    assert.equal(type.options[1].textContent, '业务流程记录');
-    type.value = 'flow'; type.dispatchEvent(new window.Event('change')); await tick();
-    assert.match(document.querySelector('.testing-flow-records').textContent, /订单业务验证/);
-    await click('查看执行结果');
+    const resultFilter = document.querySelector('[aria-label="筛选测试结果"]');
+    resultFilter.value = 'failed'; resultFilter.dispatchEvent(new window.Event('change'));
+    assert.match(document.querySelector('.testing-detail').textContent, /没有符合筛选条件的结果/);
+    const allResults = document.querySelector('[aria-label="筛选测试结果"]'); allResults.value = 'all'; allResults.dispatchEvent(new window.Event('change'));
+    document.querySelector('.test-attempt summary').click();
+    assert.equal(document.querySelector('.test-attempt').open, true);
+    assert.match(document.querySelector('.test-attempt-body').textContent, /请求快照.*断言结果/s);
+
+    document.querySelectorAll('.testing-batch')[1].click(); await tick();
+    assert.equal(new URLSearchParams(location.search).get('batch'), flowBatch.id);
+    assert.equal([...document.querySelectorAll('.testing-detail button')].some(node => node.textContent === '结束批次'), false);
+    document.querySelector('.testing-detail a').click(); await tick();
     assert.equal(new URLSearchParams(location.search).get('run'), run.id);
-    assert.equal(selected('records'), 'true');
+    assert.ok(document.querySelector('.fw-run-summary'));
     await click('← 执行记录');
+    assert.equal(selected('records'), 'true');
+    assert.equal(document.getElementById('flow-workspace').hidden, true);
+    assert.ok(document.querySelector('.test-attempt'));
     recordFailure = true; await testing.refreshTesting();
-    assert.match(document.querySelector('[data-flow-message]').textContent, /history unavailable/);
+    assert.match(document.querySelector('[data-testing-message]').textContent, /history unavailable/);
     recordFailure = false; await testing.refreshTesting();
-    assert.ok(document.querySelector('.testing-flow-records .test-case-row'));
-    assert.equal(document.querySelector('[data-flow-message]').hidden, true);
+    assert.equal(document.querySelector('[data-testing-message]').hidden, true);
 
-    await click('测试用例');
+    await click('流程');
+    assert.equal(selected('cases'), 'true');
+    assert.ok(document.querySelector('.fw-library-card'));
+    assert.equal(document.querySelector('.test-cases'), null);
+    assert.equal(document.querySelector('[data-case-action]'), null);
+    assert.equal(document.querySelector('[data-testing-type]'), null);
     await click(document.querySelector('.fw-library-card').textContent);
+    assert.equal(document.querySelector('[data-testing-content]').hidden, true);
     await click('▶ 运行流程');
     assert.equal(selected('records'), 'true');
     assert.equal(new URLSearchParams(location.search).get('run'), 'flow-run-2');
@@ -109,49 +124,40 @@ test('unified testing preserves legacy links, flow save guards and execution rou
     assert.equal(launch.path, '/api/flows/flow-1/runs');
     assert.equal('batch_id' in launch.body, false);
 
-    history.pushState(null, '', '/tests?batch=batch-1'); window.dispatchEvent(new window.PopStateEvent('popstate')); await tick();
-    assert.equal(selected('records'), 'true'); assert.ok(document.querySelector('.test-attempt'));
-    history.pushState(null, '', '/tests'); window.dispatchEvent(new window.PopStateEvent('popstate')); await tick();
+    for (const url of ['/tests?batch=batch-1', '/tests?tab=batches&batch=batch-1', '/test-collections?tab=cases&type=flow&batch=batch-1', '/flows?tab=batches&type=single&batch=batch-1']) {
+      history.pushState(null, '', url); window.dispatchEvent(new window.PopStateEvent('popstate')); await tick();
+      assert.equal(location.pathname, '/execution-records');
+      assert.equal(selected('records'), 'true');
+      assert.equal(new URLSearchParams(location.search).get('batch'), batch.id);
+      assert.equal(document.getElementById('flow-workspace').hidden, true);
+      assert.ok(document.querySelector('.test-attempt'));
+      assert.equal(document.querySelector('[data-testing-type]'), null);
+    }
+    for (const url of ['/flows?tab=records&type=single', '/flows?tab=records&type=flow']) {
+      history.pushState(null, '', url); window.dispatchEvent(new window.PopStateEvent('popstate')); await tick();
+      assert.equal(document.querySelectorAll('.testing-batch').length, 2);
+    }
+    document.querySelector('.page-nav a[aria-label="流程"]').click(); await tick();
     assert.equal(selected('cases'), 'true');
-    assert.equal(document.querySelector('[data-testing-type]').value, 'single');
-    assert.equal(document.querySelector('[data-testing-type]').getAttribute('aria-label'), '用例类型');
-    const tab = document.querySelector('[data-test-tab="cases"]');
-    tab.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await tick();
-    assert.equal(selected('batches'), 'true');
-    document.querySelector('.page-nav a[aria-label="测试集合"]').click(); await tick();
-    assert.equal(location.pathname, '/test-collections');
-    assert.equal(document.title, 'Apix · 测试集合');
-    assert.equal(selected('records'), 'true');
-    assert.equal(document.querySelectorAll('.page-nav a[aria-current="page"]').length, 1);
-    assert.equal(document.querySelector('.page-nav a[aria-current="page"]').getAttribute('aria-label'), '测试集合');
-    assert.ok(document.querySelector('.testing-batches').textContent.includes(batch.name));
-    assert.ok(document.querySelector('.test-attempt'));
-    const resultFilter = document.querySelector('[aria-label="筛选测试结果"]');
-    resultFilter.value = 'failed'; resultFilter.dispatchEvent(new window.Event('change'));
-    assert.match(document.querySelector('.testing-detail').textContent, /没有符合筛选条件的结果/);
-    const allResults = document.querySelector('[aria-label="筛选测试结果"]');
-    allResults.value = 'all'; allResults.dispatchEvent(new window.Event('change'));
-    document.querySelector('.test-attempt summary').click();
-    assert.equal(document.querySelector('.test-attempt').open, true);
-    assert.match(document.querySelector('.test-attempt-body').textContent, /请求快照.*断言结果/s);
-    assert.equal(document.querySelector('.page-heading').hidden, true);
+    assert.ok(document.querySelector('.fw-library-card'));
+    assert.equal(document.querySelector('.test-cases'), null);
+    assert.equal(document.querySelector('[data-case-action]'), null);
+    assert.equal(location.pathname, '/flows');
+    assert.equal(document.title, 'Apix · 流程');
     assert.equal(document.querySelector('.testing-toolbar').hidden, true);
-    assert.equal(document.querySelector('[data-testing-types]').hidden, true);
-    assert.equal(document.querySelector('[data-testing-hint]').hidden, true);
+    await click('执行记录');
+    assert.equal(location.pathname, '/execution-records');
+    assert.equal(document.title, 'Apix · 执行记录');
+    assert.equal(document.querySelectorAll('.page-nav a[aria-current="page"]').length, 1);
     assert.equal(document.querySelector('#testing-view-panel').getAttribute('role'), 'region');
-    document.querySelector('.testing-detail a[data-route]').click(); await tick();
-    assert.equal(location.pathname, '/tests');
-    assert.equal(selected('batches'), 'true');
-    assert.equal(document.querySelector('.page-heading').hidden, false);
-    assert.equal(document.querySelector('.testing-toolbar').hidden, false);
-    history.pushState(null, '', '/test-collections?tab=cases&type=flow&batch=batch-1'); window.dispatchEvent(new window.PopStateEvent('popstate')); await tick();
+    // Direct page loads and browser history select the matching page without tab parameters.
+    history.pushState(null, '', '/execution-records?batch=batch-1'); window.dispatchEvent(new window.PopStateEvent('popstate')); await tick();
     assert.equal(selected('records'), 'true');
-    assert.equal(document.getElementById('flow-workspace').hidden, true);
     assert.ok(document.querySelector('.test-attempt'));
-    document.querySelector('.page-nav a[aria-label="测试"]').click(); await tick();
-    assert.equal(location.pathname, '/tests');
+    history.pushState(null, '', '/flows?id=flow-1'); window.dispatchEvent(new window.PopStateEvent('popstate')); await tick();
     assert.equal(selected('cases'), 'true');
-    assert.equal(document.querySelector('.page-nav a[aria-current="page"]').getAttribute('aria-label'), '测试');
+    assert.equal(document.title, 'Apix · 流程');
+    assert.ok(document.querySelector('[aria-label="流程名称"]'));
   } finally {
     testing.deactivateTesting(); flows.deactivateFlows(); dom.window.close();
   }

@@ -59,6 +59,7 @@ type TestCounts struct {
 // Batch lifecycle is explicit. A completed batch may contain failing cases;
 // counts describe the test outcome independently of lifecycle state.
 type TestBatch struct {
+	Source     string        `json:"source,omitempty"`
 	ID         string        `json:"id"`
 	ProjectID  string        `json:"project_id"`
 	Name       string        `json:"name"`
@@ -70,6 +71,7 @@ type TestBatch struct {
 }
 
 type TestCaseRun struct {
+	ExecutionData
 	Type string `json:"type"`
 	MCPRunData
 	CommandRunData

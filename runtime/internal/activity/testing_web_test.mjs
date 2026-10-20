@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 
-test('API testing groups input variants, preserves case drafts during polling, and runs selected saved cases', async () => {
+test('execution records group input variants, preserve snapshot drafts and retry a saved case without a case bank', async () => {
   const require = createRequire(import.meta.url);
   const { JSDOM } = require('jsdom');
   const dom = new JSDOM(await readFile(new URL('./web/index.html', import.meta.url), 'utf8'), { url: 'http://localhost/tests?tab=records' });
@@ -16,9 +16,9 @@ test('API testing groups input variants, preserves case drafts during polling, a
     { id: 'r2', name: '缺少邮箱', request_snapshot: { method: 'POST', url: 'http://localhost/users', body: '{}' }, assertions: [{ kind: 'status', expected: 400, actual: 500, passed: false }], assertion_definitions: [], status: 'failed', started_at: new Date().toISOString() },
   ] };
   const saved = { id: 'case-1', name: '正常邮箱', edit_version: 1, request: batch.runs[0].request_snapshot, assertions: [], expected_status: 201 };
-  const writes = [];
+  const writes = []; const reads = [];
   globalThis.fetch = async (path, options = {}) => {
-    let body = [];
+    let body = []; if (!options.method) reads.push(path);
     if (options.method) {
       const input = options.body ? JSON.parse(options.body) : {}; writes.push({ path, method: options.method, input });
       if (path === '/api/test-cases') { Object.assign(saved, input, { id: 'case-1', edit_version: 1 }); body = saved; }
@@ -38,18 +38,19 @@ test('API testing groups input variants, preserves case drafts during polling, a
   assert.equal(document.querySelectorAll('.test-endpoint').length, 1);
   assert.match(document.querySelector('.testing-summary').textContent, /通过 1.*失败 1/);
   assert.match(document.querySelector('#testing-workspace').textContent, /缺少邮箱/);
-  click('测试用例'); await tick();
-  click('＋ 新建用例');
-  document.querySelector('.testing-case-choice').click(); set('用例名称', '缺少用户名'); set('请求地址', 'http://localhost/users'); set('预期状态码', '400');
+  click('另存为用例'); set('用例名称', '缺少用户名'); set('请求地址', 'http://localhost/users'); set('预期状态码', '400');
   await module.refreshTesting();
   assert.equal(document.querySelector('[aria-label="用例名称"]').value, '缺少用户名');
   document.querySelector('.testing-editor form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await tick();
   const write = writes.find(item => item.path === '/api/test-cases'); assert.ok(write); assert.equal(write.input.expected_status, 400);
-  click('测试用例'); await tick();
-  document.querySelector('.testing-pick').click();
-  click('运行所选用例');
+  click('重试用例');
   document.querySelector('.testing-editor form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await tick();
   assert.ok(writes.some(item => item.path === '/api/test-batches/new-batch/runs' && item.input.case_id === 'case-1'));
   assert.ok(writes.some(item => item.path.endsWith('/new-batch/finish')));
+  history.replaceState(null, '', '/flows'); await module.activateTesting(); await tick();
+  assert.equal(document.querySelector('.test-cases'), null);
+  assert.equal(document.querySelector('[data-case-action]'), null);
+  assert.equal(reads.includes('/api/test-cases'), false);
+  assert.equal(writes.some(item => item.method === 'DELETE'), false);
   module.deactivateTesting(); dom.window.close();
 });

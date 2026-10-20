@@ -287,41 +287,33 @@ func (s *HTTPService) ListTestBatches(project string) ([]TestBatch, error) {
 		}
 		items = append(items, *item)
 	}
-	return items, rows.Err()
-}
-func (s *HTTPService) GetTestBatch(id string) (*TestBatch, error) {
-	b, err := scanTestBatch(s.db.QueryRow(`SELECT `+batchColumns+` FROM test_batches b WHERE b.id=?`, id))
+	err = rows.Err()
+	rows.Close()
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`SELECT id,batch_id,case_id,case_version,name,request_snapshot,expected_status,assertion_definitions,assertions,api_run_id,status,error_message,started_at,finished_at,type,mcp_data,command_data FROM test_case_runs WHERE batch_id=? ORDER BY started_at,id`, id)
+	return s.appendFlowBatches(project, items)
+}
+func (s *HTTPService) GetTestBatch(id string) (*TestBatch, error) {
+	b, err := scanTestBatch(s.db.QueryRow(`SELECT `+batchColumns+` FROM test_batches b WHERE b.id=?`, id))
+	if errors.Is(err, errNotFound) {
+		return s.getFlowBatch(id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(`SELECT id,batch_id,case_id,case_version,name,request_snapshot,expected_status,assertion_definitions,assertions,api_run_id,status,error_message,started_at,finished_at,type,mcp_data,command_data,execution_data FROM test_case_runs WHERE batch_id=? ORDER BY started_at,id`, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	b.Runs = []TestCaseRun{}
 	for rows.Next() {
-		var r TestCaseRun
-		var request, defs, results, mcpData, commandData string
-		if err := rows.Scan(&r.ID, &r.BatchID, &r.CaseID, &r.CaseVersion, &r.Name, &request, &r.ExpectedStatus, &defs, &results, &r.APIRunID, &r.Status, &r.ErrorMessage, &r.StartedAt, &r.FinishedAt, &r.Type, &mcpData, &commandData); err != nil {
+		r, err := scanTestRun(rows)
+		if err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal([]byte(commandData), &r.CommandRunData); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal([]byte(mcpData), &r.MCPRunData); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal([]byte(request), &r.RequestSnapshot); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal([]byte(defs), &r.AssertionDefinitions); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal([]byte(results), &r.Assertions); err != nil {
-			return nil, err
-		}
-		b.Runs = append(b.Runs, r)
+		b.Runs = append(b.Runs, *r)
 	}
 	return b, rows.Err()
 }
@@ -389,8 +381,47 @@ func migrateIndependentTests(db *sql.DB) error {
 			}
 		}
 	}
+	var executionColumn int
+	if err = tx.QueryRow("SELECT count(*) FROM pragma_table_info('test_case_runs') WHERE name='execution_data'").Scan(&executionColumn); err != nil {
+		return err
+	}
+	if executionColumn == 0 {
+		if _, err = tx.Exec("ALTER TABLE test_case_runs ADD COLUMN execution_data TEXT NOT NULL DEFAULT '{}'"); err != nil {
+			return err
+		}
+	}
 	if _, err = tx.Exec("UPDATE schema_metadata SET version=7,updated_at=datetime('now') WHERE name='http_domain'"); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func scanTestRun(row interface{ Scan(...any) error }) (*TestCaseRun, error) {
+	var r TestCaseRun
+	var request, defs, results, mcpData, commandData, executionData string
+	if err := row.Scan(&r.ID, &r.BatchID, &r.CaseID, &r.CaseVersion, &r.Name, &request, &r.ExpectedStatus, &defs, &results, &r.APIRunID, &r.Status, &r.ErrorMessage, &r.StartedAt, &r.FinishedAt, &r.Type, &mcpData, &commandData, &executionData); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errNotFound
+		}
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(executionData), &r.ExecutionData); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(commandData), &r.CommandRunData); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(mcpData), &r.MCPRunData); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(request), &r.RequestSnapshot); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(defs), &r.AssertionDefinitions); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(results), &r.Assertions); err != nil {
+		return nil, err
+	}
+	return &r, nil
 }

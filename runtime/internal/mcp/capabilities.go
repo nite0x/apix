@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/apix/apix/runtime/internal/database"
+	"github.com/apix/apix/runtime/internal/executionrecord"
 	"github.com/apix/apix/runtime/internal/httpapi"
 	"github.com/apix/apix/runtime/internal/journal"
 	"github.com/apix/apix/runtime/internal/localservice"
@@ -105,7 +106,7 @@ func numberArg(args map[string]any, key string) (int64, error) {
 func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Service, services *localservice.Service, history *journal.Store) {
 	s.registerTestTools(http, history)
 	connection := object(map[string]any{"id": str(), "name": str(), "type": enum("mysql", "postgresql", "hologres"), "host": str(), "port": integer(), "database": str(), "username": str(), "password": str(), "ssl_mode": enum("disable", "prefer", "require", "verify-full")}, "name", "host", "database", "username")
-	sqlCommand := object(map[string]any{"connection_id": str(), "mode": enum("query", "exec"), "sql": str(), "params": array(map[string]any{}), "timeout_ms": integer(), "max_rows": integer()}, "connection_id", "mode", "sql")
+	sqlCommand := object(map[string]any{"batch_id": str(), "connection_id": str(), "mode": enum("query", "exec"), "sql": str(), "params": array(map[string]any{}), "timeout_ms": integer(), "max_rows": integer()}, "connection_id", "mode", "sql")
 	service := object(map[string]any{"id": str(), "name": str(), "work_dir": str(), "command": str(), "args": array(str()), "health_url": str(), "startup_timeout_ms": integer()}, "name", "work_dir", "command", "health_url")
 	add := func(name, desc string, schema map[string]any, record bool, handler toolHandler) {
 		s.addCapability(name, desc, schema, history, record, handler)
@@ -129,10 +130,13 @@ func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Se
 		err := db.DeleteConnection(ctx, textArg(a, "connection_id"))
 		return map[string]any{"deleted": err == nil}, err
 	})
-	add("execute_sql", "Execute a parameterized statement using the saved connection type (MySQL, PostgreSQL or Hologres). query returns rows, exec returns rows_affected. Bind params with ? for MySQL, or native $1, $2 placeholders for PostgreSQL/Hologres. Truncated results have row_count=-1.", object(map[string]any{"command": sqlCommand}, "command"), true, func(ctx context.Context, a map[string]any) (any, error) {
+	add("execute_sql", "Execute a parameterized statement using the saved connection type (MySQL, PostgreSQL or Hologres). query returns rows, exec returns rows_affected. Bind params with ? for MySQL, or native $1, $2 placeholders for PostgreSQL/Hologres. Truncated results have row_count=-1.", object(map[string]any{"command": sqlCommand, "batch_id": str()}, "command"), true, func(ctx context.Context, a map[string]any) (any, error) {
 		var c database.Command
 		if err := decode(a["command"], &c); err != nil {
 			return nil, err
+		}
+		if id := textArg(a, "batch_id"); id != "" {
+			c.BatchID = id
 		}
 		return db.Execute(ctx, c)
 	})
@@ -148,10 +152,12 @@ func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Se
 		return map[string]any{"items": v}, err
 	})
 	serviceID := object(map[string]any{"service_id": str()}, "service_id")
-	add("start_service", "Reuse an already running saved service first, including healthy external services. Otherwise start it under manual ownership and wait for health. started=false means reused; ownership is preserved. Flow cleans up only processes it starts.", serviceID, true, func(ctx context.Context, a map[string]any) (any, error) {
+	add("start_service", "Reuse an already running saved service first, including healthy external services. Otherwise start it under manual ownership and wait for health. started=false means reused; ownership is preserved. Flow cleans up only processes it starts.", object(map[string]any{"service_id": str(), "batch_id": str()}, "service_id"), true, func(ctx context.Context, a map[string]any) (any, error) {
+		ctx = executionrecord.WithBatch(ctx, textArg(a, "batch_id"))
 		return services.Start(ctx, textArg(a, "service_id"), "manual")
 	})
-	add("stop_service", "Stop a manually started service and its process tree. Flow-owned services are stopped through cancel_flow_run or Flow service steps.", serviceID, true, func(ctx context.Context, a map[string]any) (any, error) {
+	add("stop_service", "Stop a manually started service and its process tree. Flow-owned services are stopped through cancel_flow_run or Flow service steps.", object(map[string]any{"service_id": str(), "batch_id": str()}, "service_id"), true, func(ctx context.Context, a map[string]any) (any, error) {
+		ctx = executionrecord.WithBatch(ctx, textArg(a, "batch_id"))
 		return services.Stop(ctx, textArg(a, "service_id"), "manual")
 	})
 	add("get_service_status", "Get managed service status and process ownership.", serviceID, false, func(ctx context.Context, a map[string]any) (any, error) {

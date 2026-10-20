@@ -62,7 +62,7 @@ test('execution links select the exact batch and expand HTTP, MCP, command and S
     assert.match(rows[2].textContent, /未关联批次/);
     links[0].click(); await tick();
     let target = document.getElementById(`test-attempt-${attempts[0].id}`);
-    assert.equal(location.pathname, '/test-collections');
+    assert.equal(location.pathname, '/execution-records');
     assert.match(document.querySelector('.testing-detail h2').textContent, /目标批次/);
     assert.equal(target.open, true);
     assert.equal(document.activeElement, target);

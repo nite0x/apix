@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/apix/apix/runtime/internal/core"
+	"github.com/apix/apix/runtime/internal/executionrecord"
 	"github.com/google/uuid"
 )
 
@@ -22,6 +23,7 @@ const maxStoredResponseBytes = 256 * 1024
 var errorURLPattern = regexp.MustCompile(`https?://[^\s"<>]+`)
 
 type executionService struct {
+	record executionrecord.Recorder
 	repo   *repository
 	client *http.Client
 }
@@ -30,7 +32,7 @@ func newExecutionService(repo *repository) *executionService {
 	return &executionService{repo: repo, client: &http.Client{Timeout: 60 * time.Second}}
 }
 
-func (s *executionService) Run(ctx context.Context, command RunCommand, vars *core.Variables) (*APIRun, error) {
+func (s *executionService) Run(ctx context.Context, command RunCommand, vars *core.Variables) (out *APIRun, executionErr error) {
 	projectID := command.ProjectID
 	if projectID == "" {
 		projectID = defaultProjectID
@@ -49,6 +51,13 @@ func (s *executionService) Run(ctx context.Context, command RunCommand, vars *co
 		return nil, fmt.Errorf("url is required")
 	}
 
+	if s.record != nil && command.TriggerType != "test" && !executionrecord.Skipped(ctx) {
+		finish, err := s.record(executionrecord.WithProject(ctx, projectID), "http", request.Method+" "+redactRequestURL(request.URL), command.BatchID, redactRequest(request))
+		if err != nil {
+			return nil, err
+		}
+		defer func() { executionErr = errors.Join(executionErr, finish(out, executionErr)) }()
+	}
 	actual := substituteRequest(request, vars)
 	snapshot := redactRequest(actual)
 	now := time.Now().UTC()

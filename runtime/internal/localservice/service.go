@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apix/apix/runtime/internal/executionrecord"
 	"github.com/google/uuid"
 )
 
@@ -49,6 +50,7 @@ type process struct {
 	stopping bool
 }
 type Service struct {
+	record   executionrecord.Recorder
 	db       *sql.DB
 	mu       sync.Mutex
 	running  map[string]*process
@@ -179,7 +181,23 @@ func ownerName(owner string) string {
 	}
 	return owner
 }
+func (s *Service) SetExecutionRecorder(record executionrecord.Recorder) { s.record = record }
+
+func (s *Service) recordAction(ctx context.Context, id, owner, action string, execute func(context.Context, string, string) (*Instance, error)) (result *Instance, err error) {
+	if s.record == nil || executionrecord.Skipped(ctx) || ownerName(owner) != "manual" {
+		return execute(ctx, id, owner)
+	}
+	finish, err := s.record(ctx, "service", action+" · "+id, "", map[string]any{"service_id": id, "action": action})
+	if err != nil {
+		return nil, err
+	}
+	result, err = execute(executionrecord.Skip(ctx), id, owner)
+	return result, errors.Join(err, finish(result, err))
+}
 func (s *Service) Start(ctx context.Context, id, owner string) (*Instance, error) {
+	return s.recordAction(ctx, id, owner, "start", s.start)
+}
+func (s *Service) start(ctx context.Context, id, owner string) (*Instance, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -361,6 +379,9 @@ func (s *Service) probe(ctx context.Context, address string) (healthy, available
 	return response.StatusCode >= 200 && response.StatusCode < 300, true
 }
 func (s *Service) Stop(ctx context.Context, id, owner string) (*Instance, error) {
+	return s.recordAction(ctx, id, owner, "stop", s.stop)
+}
+func (s *Service) stop(ctx context.Context, id, owner string) (*Instance, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	s.mu.Lock()

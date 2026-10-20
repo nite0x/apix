@@ -16,8 +16,12 @@ func (s *HTTPService) SetCapabilities(db *database.Service, services *localservi
 		s.flow.database = nil
 	} else {
 		s.flow.database = db
+		db.SetExecutionRecorder(s.RecordExecution)
 	}
 	s.flow.services = services
+	if services != nil {
+		services.SetExecutionRecorder(s.RecordExecution)
+	}
 }
 func (s *HTTPService) SetEventSink(sink func(string, string, string, any)) { s.flow.eventSink = sink }
 func (s *HTTPService) Close(ctx context.Context) error {

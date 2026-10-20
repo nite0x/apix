@@ -1,5 +1,6 @@
 import { executionBatchLink } from './execution-batch.js';
-
+import { attachExecutionHistory } from './execution-history.js';
+let executionHistory = null;
 const root = document.getElementById('mcp-workspace');
 const state = { servers: [], server: '', tools: [], discovery: null, tool: '', working: false, loading: false, generation: 0 };
 let mounted = false;
@@ -27,6 +28,7 @@ function mount() {
   const message = node('div', 'detail-alert'); message.dataset.mcpFeedback = ''; message.hidden = true; panel.append(message);
   const workspace = node('div', 'mcp-layout'); const tools = node('aside', 'panel mcp-tools'); tools.setAttribute('aria-label', 'MCP 工具列表'); tools.dataset.mcpTools = '';
   const editor = node('section', 'panel mcp-tool-editor'); editor.dataset.mcpToolEditor = ''; workspace.append(tools, editor); root.replaceChildren(panel, workspace); renderConnection(); renderTools();
+  executionHistory = attachExecutionHistory(root, 'mcp', '工具调用');
 }
 function clearTools() { state.generation++; state.tools = []; state.tool = ''; state.discovery = null; renderTools(); feedback(); }
 function renderConnection() {
@@ -39,7 +41,7 @@ function renderConnection() {
   root.querySelectorAll('.mcp-actions button').forEach(n => { n.disabled = state.working || !selected; });
 }
 export async function refreshMCP() {
-  mount(); if (state.loading || state.working) return; state.loading = true;
+  mount(); void executionHistory.refresh(); if (state.loading || state.working) return; state.loading = true;
   try { state.servers = await api('/mcp-servers'); if (!state.servers.some(s => s.id === state.server)) { state.server = state.servers[0]?.id || ''; clearTools(); } renderConnection(); }
   catch (error) { feedback(error.message, true); } finally { state.loading = false; }
 }
