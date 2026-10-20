@@ -39,6 +39,8 @@ The request history shows the most recent 200 runs. Search by method or URL, fil
 
 Flow supports ordered execution cards and explicit cleanup. Ordinary MCP session UI and pause-rule management UI remain deferred.
 
+Use **查看执行批次** in HTTP history/details, SQL history/details, or MCP and command execution results to open the owning batch or Flow run. The matching attempt or step expands and receives focus. Standalone executions show **未关联批次**. SQL ownership is recorded for new Flow executions; older SQL records without saved ownership keep their existing results but cannot be linked retroactively.
+
 ## Card-based Flow tests
 
 Open **测试 → 测试用例**, then set **用例类型** to **业务流程** in the Runtime Web workspace (`http://127.0.0.1:4317/tests?tab=cases&type=flow`). Legacy `/flows?id=…&run=…` links still open the corresponding editor or result.

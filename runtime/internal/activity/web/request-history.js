@@ -1,6 +1,7 @@
 import { requestAPI, requestError } from './request-api.js';
 import { openRequestDetail } from './request-detail.js';
 import { loadManualRequest } from './manual-request.js';
+import { executionBatchLink } from './execution-batch.js';
 
 const $ = id => document.getElementById(id);
 let runs = [], loading = false, pending = new Set(), version = 0, renderKey = '';
@@ -24,7 +25,7 @@ function render() {
     info.append(node('span', run.request_snapshot.method, `method ${run.request_snapshot.method.toLowerCase()}`), url);
     request.append(info);
     const reuse = node('td', null, 'history-reuse');
-    reuse.append(button('填入编辑器', `填入请求 ${run.id}`, () => loadManualRequest(run.id)));
+    reuse.append(executionBatchLink(run), button('填入编辑器', `填入请求 ${run.id}`, () => loadManualRequest(run.id)));
     const actions = node('td', null, 'history-actions');
     actions.append(button(run.is_pinned ? '取消固定' : '固定', `固定请求 ${run.id}`, () => mutate(run, async () => {
       await requestAPI(`/runs/${encodeURIComponent(run.id)}/pin`, { pinned: !run.is_pinned }, 'POST');

@@ -29,7 +29,7 @@ test('MCP workspace discovers tools, preserves drafts, prevents duplicate calls,
       await new Promise(resolve => { releaseCall = resolve; });
       const definition = input.test_case || savedCases[0];
       batch.runs.push({ id: 'run-1', type: 'mcp', name: definition.name, status: 'passed', request_snapshot: {}, mcp_request_snapshot: definition.mcp_request, mcp_result: { server: servers[0], response: { structuredContent: { status: '<script>attack()</script>' } } }, expected_is_error: false, assertions: [{ kind: 'isError', operator: 'equals', expected: false, actual: false, passed: true }], assertion_definitions: [], started_at: new Date().toISOString() });
-      result = { type: 'mcp', batch_id: batch.id, test_status: 'unverified', duration_ms: 15, mcp_result: batch.runs.at(-1).mcp_result };
+      result = { type: 'mcp', batch_id: batch.id, test_run_id: batch.runs.at(-1).id, test_status: 'unverified', duration_ms: 15, mcp_result: batch.runs.at(-1).mcp_result };
     } else if (path.startsWith('/api/test-batches/')) result = batch;
     else if (options.method === 'PUT') { Object.assign(servers[0], input, { edit_version: 2 }); result = servers[0]; }
     else result = {};
@@ -47,6 +47,7 @@ test('MCP workspace discovers tools, preserves drafts, prevents duplicate calls,
   click('执行工具'); await tick(); click('执行工具'); await tick();
   assert.equal(writes.filter(w => w.path.endsWith('/runs')).length, 1);
   releaseCall(); await tick(); assert.ok(writes.some(w => w.path.endsWith('/finish'))); assert.match(document.querySelector('.mcp-live-result').textContent, /未验证/);
+  const link = document.querySelector('.mcp-live-result a[data-route]'); assert.equal(link.textContent, '查看执行批次'); assert.equal(new URL(link.href).searchParams.get('batch'), batch.id); assert.equal(new URL(link.href).searchParams.get('step'), 'run-1');
   click('保存为测试用例'); await tick();
   fill('用例名称', 'order paid'); fill('MCP 断言（JSON 数组）', '[{"source":"structuredContent","path":"status","operator":"equals","expected":"paid"}]');
   click('保存用例', 'dialog[open]'); await tick(); assert.equal(savedCases[0].type, 'mcp'); assert.equal(savedCases[0].mcp_request.tool_name, 'get_order');

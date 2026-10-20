@@ -1,3 +1,5 @@
+import { executionBatchLink } from './execution-batch.js';
+
 const root = document.getElementById('command-workspace');
 let mounted = false;
 let working = false;
@@ -43,10 +45,10 @@ async function execute(value, variables, batchID) {
   try { return { batch, result: await api(`/test-batches/${encodeURIComponent(batch.id)}/runs`, { method: 'POST', body: { test_case: value, variables } }) }; }
   finally { if (!batchID) { try { await api(`/test-batches/${batch.id}/finish`, { method: 'POST' }); } catch (error) { notice(`批次尚未结束：${error.message}。可在测试记录中查看。`, true); } } }
 }
-function resultLink(batchID) { const link = el('a', 'button', '查看测试记录'); link.href = `/tests?batch=${encodeURIComponent(batchID)}`; link.dataset.route = ''; return link; }
+function resultLink(batchID, testRunID) { return executionBatchLink({ batch_id: batchID, test_run_id: testRunID }, 'button'); }
 function renderResult(out) {
   const result = out.result; const data = result.command_result || {}; const target = root.querySelector('[data-command-result]'); target.replaceChildren();
-  const labels = { passed: '通过', failed: '断言失败', error: '执行错误', unverified: '未验证' }; const heading = el('div', 'command-result-heading'); heading.append(el('span', `test-pill ${result.test_status}`, labels[result.test_status] || result.test_status), el('span', '', `退出码 ${data.exit_code ?? '—'} · ${result.duration_ms} ms`), resultLink(out.batch.id)); target.append(heading);
+  const labels = { passed: '通过', failed: '断言失败', error: '执行错误', unverified: '未验证' }; const heading = el('div', 'command-result-heading'); heading.append(el('span', `test-pill ${result.test_status}`, labels[result.test_status] || result.test_status), el('span', '', `退出码 ${data.exit_code ?? '—'} · ${result.duration_ms} ms`), resultLink(out.batch.id, result.test_run_id)); target.append(heading);
   if (result.test_error) target.append(el('p', 'response-error', result.test_error));
   for (const source of ['stdout', 'stderr']) { const section = el('section', 'command-output'); section.append(el('h3', '', source)); if (data[`${source}_truncated`]) section.append(el('p', 'response-error', '输出已截断，相关输出断言不能判为通过。')); section.append(el('pre', 'detail-code', data[source] || '（空）')); target.append(section); }
   const assertions = result.assertions || []; if (assertions.length) { target.append(el('h3', '', `断言结果 · ${assertions.filter(a => a.passed).length}/${assertions.length} 通过`)); for (const a of assertions) { const row = el('div', 'command-assertion'); row.append(el('span', `test-pill ${a.passed ? 'passed' : 'failed'}`, a.passed ? '通过' : '失败'), el('code', '', `${a.kind}${a.path ? `.${a.path}` : ''} ${a.operator}`), el('pre', 'detail-code', pretty({ expected: a.expected, actual: a.actual }))); target.append(row); } }

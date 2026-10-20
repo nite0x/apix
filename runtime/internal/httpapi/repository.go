@@ -536,10 +536,15 @@ func (r *repository) getRun(id string) (*APIRun, error) {
 		COALESCE(session_id,''), COALESCE(step_id,''), trigger_type, status, request_snapshot,
 		response_status, COALESCE(response_headers,'null'), COALESCE(response_body,'null'), COALESCE(response_size,0),
 		response_truncated, COALESCE(duration_ms,0), COALESCE(error_code,''), COALESCE(error_message,''),
-		is_pinned, started_at, finished_at, expires_at FROM api_runs WHERE id=?`, id).Scan(&run.ID, &run.ProjectID,
+		is_pinned, started_at, finished_at, expires_at,
+		COALESCE((SELECT id FROM test_batches WHERE id=api_runs.session_id),''),
+		COALESCE((SELECT id FROM test_case_runs WHERE batch_id=api_runs.session_id AND (api_run_id=api_runs.id OR id=api_runs.step_id) LIMIT 1),''),
+		COALESCE((SELECT id FROM flow_runs WHERE id=api_runs.session_id),''),
+		COALESCE((SELECT flow_id FROM flow_runs WHERE id=api_runs.session_id),'')
+		FROM api_runs WHERE id=?`, id).Scan(&run.ID, &run.ProjectID,
 		&apiID, &wcID, &envID, &run.SessionID, &run.StepID, &run.TriggerType, &run.Status, &snapshot,
 		&responseStatus, &headers, &body, &run.ResponseSize, &truncated, &run.DurationMS, &run.ErrorCode,
-		&run.ErrorMessage, &pinned, &run.StartedAt, &finished, &expires)
+		&run.ErrorMessage, &pinned, &run.StartedAt, &finished, &expires, &run.BatchID, &run.TestRunID, &run.FlowRunID, &run.FlowID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errNotFound
 	}
@@ -646,7 +651,12 @@ func (r *repository) listRunSummaries(projectID string, limit int) ([]APIRun, er
 		limit = 50
 	}
 	rows, err := r.db.Query(`SELECT id, request_snapshot, status, response_status,
-    COALESCE(duration_ms,0), started_at, is_pinned FROM api_runs WHERE project_id=?
+    COALESCE(duration_ms,0), started_at, is_pinned, COALESCE(step_id,''),
+    COALESCE((SELECT id FROM test_batches WHERE id=api_runs.session_id),''),
+    COALESCE((SELECT id FROM test_case_runs WHERE batch_id=api_runs.session_id AND (api_run_id=api_runs.id OR id=api_runs.step_id) LIMIT 1),''),
+    COALESCE((SELECT id FROM flow_runs WHERE id=api_runs.session_id),''),
+    COALESCE((SELECT flow_id FROM flow_runs WHERE id=api_runs.session_id),'')
+    FROM api_runs WHERE project_id=?
     ORDER BY started_at DESC,id DESC LIMIT ?`, projectID, limit)
 	if err != nil {
 		return nil, err
@@ -658,7 +668,8 @@ func (r *repository) listRunSummaries(projectID string, limit int) ([]APIRun, er
 		var snapshot string
 		var status sql.NullInt64
 		var pinned int
-		if err := rows.Scan(&item.ID, &snapshot, &item.Status, &status, &item.DurationMS, &item.StartedAt, &pinned); err != nil {
+		if err := rows.Scan(&item.ID, &snapshot, &item.Status, &status, &item.DurationMS, &item.StartedAt, &pinned,
+			&item.StepID, &item.BatchID, &item.TestRunID, &item.FlowRunID, &item.FlowID); err != nil {
 			return nil, err
 		}
 		var request struct {

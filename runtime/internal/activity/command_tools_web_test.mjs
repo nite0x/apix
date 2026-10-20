@@ -20,7 +20,7 @@ test('command workspace validates arguments, executes once, retains drafts, and 
       const item = input.test_case || cases[0]; const result = { exit_code: 0, stdout: '<script>attack()</script>', stderr: 'diagnostic', duration_ms: 15 };
       const assertions = [{ kind: 'exit_code', operator: 'equals', expected: 0, actual: 0, passed: true }];
       batch.runs = [{ id: 'command-run', type: 'command', name: item.name, command_request_snapshot: item.command_request, expected_exit_code: 0, command_result: result, request_snapshot: {}, status: 'passed', assertions, assertion_definitions: item.assertions || [], started_at: new Date().toISOString(), case_id: cases[0]?.id }];
-      value = { type: 'command', test_status: 'passed', command_result: result, assertions, duration_ms: 15, batch_id: batch.id };
+      value = { type: 'command', test_status: 'passed', command_result: result, assertions, duration_ms: 15, batch_id: batch.id, test_run_id: 'command-run' };
     } else if (path === '/api/test-cases' && options.method === 'POST') {
       if (failSave) return { status: 400, ok: false, json: async () => ({ error: 'save failed' }) };
       value = { ...input, id: 'command-case', edit_version: 1 }; cases.push(value);
@@ -39,6 +39,7 @@ test('command workspace validates arguments, executes once, retains drafts, and 
   fill('启动参数（JSON 数组）', '[123]'); click('执行命令'); await tick(); assert.match(document.querySelector('[data-command-notice]').textContent, /字符串 JSON 数组/); assert.equal(writes.length, 0);
   fill('启动参数（JSON 数组）', '["-"]'); click('执行命令'); await tick(); click('执行命令'); assert.equal(writes.filter(w => w.path.endsWith('/runs')).length, 1);
   releaseCall(); await tick(); assert.ok(writes.some(w => w.path.endsWith('/finish'))); assert.match(document.querySelector('[data-command-result]').textContent, /退出码 0.*15 ms/); assert.equal(document.querySelectorAll('[data-command-result] script').length, 0);
+  const link = document.querySelector('[data-command-result] a[data-route]'); assert.equal(link.textContent, '查看执行批次'); assert.equal(new URL(link.href).searchParams.get('batch'), batch.id); assert.equal(new URL(link.href).searchParams.get('step'), 'command-run');
   await module.refreshCommands(); assert.equal(document.querySelector('[aria-label="标准输入 / 脚本正文"]').value, 'print("done")');
   failSave = true; click('保存测试用例'); await tick(); assert.match(document.querySelector('[data-command-notice]').textContent, /save failed/); assert.equal(document.querySelector('[aria-label="执行程序"]').value, 'python3');
   failSave = false; click('保存测试用例'); await tick(); assert.equal(cases[0].type, 'command'); assert.deepEqual(cases[0].command_request.args, ['-']); assert.equal(cases[0].expected_exit_code, 0);

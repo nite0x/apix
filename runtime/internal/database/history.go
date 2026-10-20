@@ -12,6 +12,15 @@ import (
 
 var ErrExecutionNotFound = errors.New("SQL execution not found")
 
+// Flow execution supplies its durable IDs without changing the SQL command.
+type flowOrigin struct{ flowID, runID, stepID string }
+type flowOriginKey struct{}
+
+// WithFlowOrigin associates SQL history with the exact Flow run and step.
+func WithFlowOrigin(ctx context.Context, flowID, runID, stepID string) context.Context {
+	return context.WithValue(ctx, flowOriginKey{}, flowOrigin{flowID, runID, stepID})
+}
+
 // Execution keeps SQL history separate from runtime logs and database credentials.
 type Execution struct {
 	ID             int64           `json:"id"`
@@ -28,6 +37,9 @@ type Execution struct {
 	RowsAffected   int64           `json:"rows_affected"`
 	Truncated      bool            `json:"truncated"`
 	Error          string          `json:"error,omitempty"`
+	FlowID         string          `json:"flow_id,omitempty"`
+	FlowRunID      string          `json:"flow_run_id,omitempty"`
+	StepID         string          `json:"step_id,omitempty"`
 }
 
 func (s *Service) initHistory() error {
@@ -55,6 +67,17 @@ func (s *Service) initHistory() error {
 			return fmt.Errorf("migrate SQL execution results: %w", err)
 		}
 	}
+	for _, column := range []string{"flow_id", "flow_run_id", "step_id"} {
+		var exists int
+		if err := s.store.QueryRow(`SELECT count(*) FROM pragma_table_info('database_executions') WHERE name=?`, column).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			if _, err := s.store.Exec(`ALTER TABLE database_executions ADD COLUMN ` + column + ` TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate SQL execution origin: %w", err)
+			}
+		}
+	}
 	_, err := s.store.Exec(`UPDATE database_executions SET status='failed',finished_at=?,error='Runtime 重启，执行结果未确认' WHERE status='running'`, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
 }
@@ -68,9 +91,10 @@ func (s *Service) beginExecution(ctx context.Context, cmd Command, started time.
 	if err != nil {
 		return 0, fmt.Errorf("%w: SQL parameters cannot be encoded", ErrInvalid)
 	}
-	result, err := s.store.ExecContext(ctx, `INSERT INTO database_executions(connection_id,connection_name,mode,sql_text,params,status,started_at)
-		VALUES(?,COALESCE((SELECT name FROM database_connections WHERE id=?),?),?,?,?,'running',?)`,
-		cmd.ConnectionID, cmd.ConnectionID, cmd.ConnectionID, cmd.Mode, cmd.SQL, string(data), started.UTC().Format(time.RFC3339Nano))
+	origin, _ := ctx.Value(flowOriginKey{}).(flowOrigin)
+	result, err := s.store.ExecContext(ctx, `INSERT INTO database_executions(connection_id,connection_name,mode,sql_text,params,status,started_at,flow_id,flow_run_id,step_id)
+		VALUES(?,COALESCE((SELECT name FROM database_connections WHERE id=?),?),?,?,?,'running',?,?,?,?)`,
+		cmd.ConnectionID, cmd.ConnectionID, cmd.ConnectionID, cmd.Mode, cmd.SQL, string(data), started.UTC().Format(time.RFC3339Nano), origin.flowID, origin.runID, origin.stepID)
 	if err != nil {
 		return 0, fmt.Errorf("save SQL execution history: %w", err)
 	}
@@ -130,7 +154,7 @@ func (s *Service) GetExecutionResult(ctx context.Context, id int64) (*Result, er
 }
 
 func (s *Service) ListExecutions(ctx context.Context, connectionID string) ([]Execution, error) {
-	rows, err := s.store.QueryContext(ctx, `SELECT id,connection_id,connection_name,mode,sql_text,params,status,started_at,finished_at,duration_ms,row_count,rows_affected,truncated,error
+	rows, err := s.store.QueryContext(ctx, `SELECT id,connection_id,connection_name,mode,sql_text,params,status,started_at,finished_at,duration_ms,row_count,rows_affected,truncated,error,flow_id,flow_run_id,step_id
 		FROM database_executions WHERE (?='' OR connection_id=?) ORDER BY id DESC LIMIT 100`, connectionID, connectionID)
 	if err != nil {
 		return nil, err
@@ -140,7 +164,7 @@ func (s *Service) ListExecutions(ctx context.Context, connectionID string) ([]Ex
 	for rows.Next() {
 		var item Execution
 		var params, started, finished string
-		if err := rows.Scan(&item.ID, &item.ConnectionID, &item.ConnectionName, &item.Mode, &item.SQL, &params, &item.Status, &started, &finished, &item.DurationMS, &item.RowCount, &item.RowsAffected, &item.Truncated, &item.Error); err != nil {
+		if err := rows.Scan(&item.ID, &item.ConnectionID, &item.ConnectionName, &item.Mode, &item.SQL, &params, &item.Status, &started, &finished, &item.DurationMS, &item.RowCount, &item.RowsAffected, &item.Truncated, &item.Error, &item.FlowID, &item.FlowRunID, &item.StepID); err != nil {
 			return nil, err
 		}
 		item.Params = json.RawMessage(params)

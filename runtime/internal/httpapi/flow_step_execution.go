@@ -60,7 +60,11 @@ func (fs *flowService) executeStep(ctx context.Context, run *FlowRun, step *Flow
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		result, err := fs.database.Execute(ctx, command)
+		flowID := ""
+		if run.FlowID != nil {
+			flowID = *run.FlowID
+		}
+		result, err := fs.database.Execute(database.WithFlowOrigin(ctx, flowID, run.ID, step.ID), command)
 		var assertions []AssertionResult
 		if err == nil && config.ExpectedRows != nil {
 			passed := result != nil && !result.Truncated && result.RowCount == *config.ExpectedRows
