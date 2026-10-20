@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/apix/apix/runtime/internal/core"
 	"github.com/gin-gonic/gin"
@@ -19,6 +21,7 @@ func (s *HTTPService) Routes(r gin.IRouter) {
 	s.importRoutes(r)
 	s.flowRoutes(r)
 	s.flowRunRoutes(r)
+	s.testRoutes(r)
 }
 
 func (s *HTTPService) collectionRoutes(r gin.IRouter) {
@@ -252,7 +255,13 @@ func (s *HTTPService) runRoutes(r gin.IRouter) {
 	})
 	g.GET("", func(c *gin.Context) {
 		limit, _ := strconv.Atoi(c.Query("limit"))
-		items, err := s.repo.listRuns(valueOr(c.Query("project_id"), defaultProjectID), limit)
+		var items []APIRun
+		var err error
+		if c.Query("summary") == "true" {
+			items, err = s.repo.listRunSummaries(valueOr(c.Query("project_id"), defaultProjectID), limit)
+		} else {
+			items, err = s.repo.listRuns(valueOr(c.Query("project_id"), defaultProjectID), limit)
+		}
 		if err != nil {
 			writeAPIError(c, err)
 			return
@@ -265,6 +274,7 @@ func (s *HTTPService) runRoutes(r gin.IRouter) {
 			writeAPIError(c, err)
 			return
 		}
+		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, item)
 	})
 	g.POST("/:id/pin", func(c *gin.Context) {
@@ -307,7 +317,19 @@ func (s *HTTPService) importRoutes(r gin.IRouter) {
 		}
 		request := RequestData{Method: parsed.Method, URL: parsed.URL, Body: parsed.Body, BodyType: "none"}
 		if parsed.Body != "" {
-			request.BodyType = "json"
+			request.BodyType = "raw"
+			contentType := ""
+			for name, value := range parsed.Headers {
+				if strings.EqualFold(name, "Content-Type") {
+					contentType = strings.ToLower(value)
+				}
+			}
+			switch {
+			case strings.Contains(contentType, "json"), contentType == "" && json.Valid([]byte(parsed.Body)):
+				request.BodyType = "json"
+			case strings.Contains(contentType, "application/x-www-form-urlencoded"):
+				request.BodyType = "urlencoded"
+			}
 		}
 		for name, value := range parsed.Headers {
 			request.Headers = append(request.Headers, KeyValue{Name: name, Value: value, Enabled: true})

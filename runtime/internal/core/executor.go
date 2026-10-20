@@ -10,20 +10,21 @@ import (
 )
 
 type Executor struct {
-	sessions   *SessionManager
-	rules      *RuleEngine
-	hub        *Hub
-	store      Store
-	execute    func(context.Context, string, map[string]any, *Variables) (any, error)
-	extract    func(string, any) map[string]*Variable
-	pauseChans map[string]chan PauseResult
-	mu         sync.Mutex
+	sessions     *SessionManager
+	rules        *RuleEngine
+	events       *Events
+	store        Store
+	execute      func(context.Context, string, map[string]any, *Variables) (any, error)
+	extract      func(string, any) map[string]*Variable
+	pauseChans   map[string]chan PauseResult
+	mu           sync.Mutex
+	sessionLocks sync.Map
 }
 
 func NewExecutor(
 	sessions *SessionManager,
 	rules *RuleEngine,
-	hub *Hub,
+	events *Events,
 	store Store,
 	execute func(context.Context, string, map[string]any, *Variables) (any, error),
 	extract func(string, any) map[string]*Variable,
@@ -31,7 +32,7 @@ func NewExecutor(
 	return &Executor{
 		sessions:   sessions,
 		rules:      rules,
-		hub:        hub,
+		events:     events,
 		store:      store,
 		execute:    execute,
 		extract:    extract,
@@ -47,12 +48,18 @@ func (e *Executor) Execute(
 	tool string,
 	input map[string]any,
 ) (any, error) {
+	// A Session owns mutable step/variable state. Parallel AI calls in the
+	// same batch enter it serially; different batches remain independent.
+	lock, _ := e.sessionLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock.(*sync.Mutex).Lock()
+	defer lock.(*sync.Mutex).Unlock()
+	independentTest := input["test_run_id"] != nil
 
 	// 1. Get or create session
 	session, existed := e.sessions.Get(sessionID)
 	if !existed {
 		session = e.sessions.GetOrCreate(sessionID, task, "mcp")
-		e.hub.Push(session.ID, Event{
+		e.events.Publish(session.ID, Event{
 			Type:    EventSessionStart,
 			Payload: session,
 		})
@@ -73,7 +80,7 @@ func (e *Executor) Execute(
 	session.Steps = append(session.Steps, step)
 
 	// 3. Push step:start
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:    EventStepStart,
 		StepID:  step.ID,
 		Payload: step,
@@ -106,7 +113,7 @@ func (e *Executor) Execute(
 	// the authoritative run record without maintaining a second history model.
 	input["session_id"] = session.ID
 	input["step_id"] = step.ID
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:    EventStepStart,
 		StepID:  step.ID,
 		Payload: step,
@@ -124,7 +131,7 @@ func (e *Executor) Execute(
 	}
 
 	if err != nil {
-		return nil, e.failStep(session, step, err.Error())
+		return output, e.failStep(session, step, err.Error())
 	}
 
 	// 6. Check pause rules (after execution, e.g. 4xx)
@@ -137,13 +144,16 @@ func (e *Executor) Execute(
 
 	// 7. Extract variables
 	extractedVars := e.extract(tool, output)
+	if independentTest {
+		extractedVars = nil
+	}
 	for name, v := range extractedVars {
 		if v.Scope == "global" {
 			session.Variables.Global[name] = v
 		} else {
 			session.Variables.Session[name] = v
 		}
-		e.hub.Push(session.ID, Event{
+		e.events.Publish(session.ID, Event{
 			Type:    EventVarExtracted,
 			Payload: map[string]any{"name": name, "variable": v},
 		})
@@ -154,7 +164,7 @@ func (e *Executor) Execute(
 	if step.Output == nil {
 		step.Output = output
 	}
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:    EventStepDone,
 		StepID:  step.ID,
 		Payload: step,
@@ -165,6 +175,11 @@ func (e *Executor) Execute(
 }
 
 func runReference(output any) map[string]any {
+	if result, ok := output.(interface{ RunReference() string }); ok {
+		if id := result.RunReference(); id != "" {
+			return map[string]any{"api_run_id": id}
+		}
+	}
 	values, ok := output.(map[string]any)
 	if !ok {
 		return nil
@@ -194,7 +209,7 @@ func (e *Executor) pauseAndWait(ctx context.Context, session *Session, step *Ste
 	step.RuleID = ruleID
 	session.Status = SessionPaused
 
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:   EventStepPaused,
 		StepID: step.ID,
 		Payload: map[string]any{
@@ -214,6 +229,9 @@ func (e *Executor) pauseAndWait(ctx context.Context, session *Session, step *Ste
 
 // Resume is called by the REST API to unblock a paused step.
 func (e *Executor) Resume(stepID string, action string, modifiedInput any) error {
+	if action != "continue" && action != "skip" && action != "stop" {
+		return fmt.Errorf("invalid resume action %q", action)
+	}
 	e.mu.Lock()
 	ch, ok := e.pauseChans[stepID]
 	e.mu.Unlock()
@@ -221,15 +239,22 @@ func (e *Executor) Resume(stepID string, action string, modifiedInput any) error
 	if !ok {
 		return fmt.Errorf("step %s is not paused", stepID)
 	}
-	ch <- PauseResult{Action: action, ModifiedInput: modifiedInput}
+	select {
+	case ch <- PauseResult{Action: action, ModifiedInput: modifiedInput}:
+	default:
+		return fmt.Errorf("resume already pending for step %s", stepID)
+	}
 	return nil
 }
 
 func (e *Executor) failStep(session *Session, step *Step, errMsg string) error {
+	if values, ok := step.Input.(map[string]any); ok && values["test_run_id"] != nil {
+		step.Input = map[string]any{"test_run_id": values["test_run_id"]}
+	}
 	step.Status = StepError
 	step.Error = errMsg
 	session.Status = SessionError
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:    EventStepError,
 		StepID:  step.ID,
 		Payload: step,
@@ -241,7 +266,7 @@ func (e *Executor) failStep(session *Session, step *Step, errMsg string) error {
 func (e *Executor) skipStep(session *Session, step *Step) error {
 	step.Status = StepSkipped
 	session.Status = SessionRunning
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type:   EventStepSkipped,
 		StepID: step.ID,
 	})
@@ -250,7 +275,7 @@ func (e *Executor) skipStep(session *Session, step *Step) error {
 
 func (e *Executor) stopSession(session *Session) error {
 	session.Status = SessionStopped
-	e.hub.Push(session.ID, Event{
+	e.events.Publish(session.ID, Event{
 		Type: EventSessionStopped,
 	})
 	return fmt.Errorf("session stopped by user")
@@ -258,6 +283,23 @@ func (e *Executor) stopSession(session *Session) error {
 
 func (e *Executor) GetSessions() []*Session {
 	return e.sessions.List()
+}
+
+// CompleteSession closes the compatibility session after its explicit test
+// batch finishes; legacy clients should not show it as permanently running.
+func (e *Executor) CompleteSession(id string, failed bool) {
+	lock, _ := e.sessionLocks.LoadOrStore(id, &sync.Mutex{})
+	lock.(*sync.Mutex).Lock()
+	defer lock.(*sync.Mutex).Unlock()
+	if _, ok := e.sessions.Get(id); !ok {
+		return
+	}
+	status, event := SessionDone, EventSessionDone
+	if failed {
+		status, event = SessionError, EventSessionError
+	}
+	e.sessions.UpdateStatus(id, status)
+	e.events.Publish(id, Event{Type: event})
 }
 
 func (e *Executor) GetSession(id string) (*Session, bool) {

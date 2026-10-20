@@ -30,7 +30,7 @@ Examples:
 
 ```text
 feature/session-search
-fix/websocket-reconnect
+fix/activity-refresh
 docs/development-workflow
 refactor/runtime-router
 chore/update-tooling
@@ -42,7 +42,7 @@ Prefer Conventional Commit style:
 
 ```text
 feat: add session filtering
-fix: prevent duplicate websocket reconnects
+fix: prevent duplicate activity refreshes
 docs: add development workflow guide
 refactor: split runtime route handlers
 chore: update build tooling
@@ -82,11 +82,11 @@ git commit -m "feat: add session search input"
 Before merging, run the relevant checks:
 
 ```bash
-pnpm typecheck
-pnpm build:web
+pnpm check
+pnpm test
 ```
 
-If the change touches the desktop shell or runtime integration, also run:
+If the change affects embedded Web assets or release packaging, also run:
 
 ```bash
 pnpm build

@@ -1,0 +1,29 @@
+.manual-tool-form{padding:20px;display:grid;gap:16px}
+.manual-tool-form fieldset,fieldset.manual-tool-form{border:0;min-width:0;margin:0}
+.manual-tool-form fieldset{padding:0;display:grid;gap:16px}
+.manual-tool-form label{display:flex;flex-direction:column;gap:8px;font-size:12px;font-weight:600;min-width:0}
+.manual-tool-form input,.manual-tool-form select,.manual-tool-form textarea{width:100%;min-width:0;padding:10px 12px;border:1px solid #dfe5ea;border-radius:6px;background:#fff;color:#405969;font:12px/1.6 Consolas,'Microsoft YaHei',monospace}
+.manual-tool-form textarea{resize:vertical;min-height:65px}
+.manual-tool-form textarea:focus-visible{outline:3px solid #72c6b4;outline-offset:3px}
+.manual-tool-grid{display:grid;gap:16px}
+.sql-config{grid-template-columns:minmax(180px,2fr) minmax(160px,1.5fr) minmax(100px,1fr) minmax(110px,1fr)}
+.manual-tool-hint{font-size:11px;font-weight:400;color:var(--muted);line-height:1.8;max-width:none;overflow-wrap:anywhere}
+.manual-tool-actions{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.manual-tool-actions .primary,.service-editor .primary,.services-panel>.panel-heading .primary{background:var(--green);color:#fff;border-color:var(--green)}
+.manual-tool-form .detail-alert{margin:0}
+.sql-params-editor{font-size:12px;color:#536371}
+.sql-params-editor summary{cursor:pointer;margin-bottom:10px}
+.sql-live-result{padding:20px;border-top:1px solid var(--line);background:#fcfdfd}
+.sql-live-result h2{margin:0 0 14px;font-size:14px}
+#sql-live-result-content>.detail-note,#sql-live-result-content>.detail-alert{max-width:none;margin:0 0 12px}
+#sql-live-result-content>.detail-empty{margin:0;padding:20px;border:1px dashed var(--line);border-radius:6px;text-align:center}
+.sql-live-result .sql-result-scroll{max-height:400px}
+.sql-action{white-space:nowrap}
+.sql-action .text-button{display:block;margin:4px 0}
+.service-editor{width:min(720px,calc(100vw - 32px))}
+#service-form-error{margin:0 20px 20px}
+.service-config{grid-template-columns:minmax(0,1fr) 135px}
+.service-editor .manual-tool-form{gap:14px}
+.service-editor .manual-tool-form p{margin:0}
+@media(max-width:1100px){.sql-config{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.manual-tool-form,.sql-live-result{padding:16px}.manual-tool-actions{flex-wrap:wrap}.manual-tool-actions .primary{width:100%}.service-config{grid-template-columns:1fr}.manual-tool-form .manual-tool-grid{gap:12px}.service-editor .database-dialog-actions{flex-wrap:wrap}.service-editor .database-dialog-actions .primary{flex:1}}

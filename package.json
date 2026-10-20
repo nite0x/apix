@@ -3,24 +3,25 @@
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22.20.0"
+  },
   "scripts": {
-    "dev": "concurrently -k --names frontend,backend,tauri --prefix-colors cyan,green,magenta \"pnpm dev:frontend\" \"pnpm dev:backend\" \"pnpm dev:tauri\"",
-    "dev:browser": "concurrently -k --names frontend,backend,browser --prefix-colors cyan,green,yellow \"pnpm dev:frontend\" \"pnpm dev:backend\" \"node scripts/open-dev-browser.mjs\"",
-    "dev:frontend": "pnpm --filter @apix/desktop dev",
+    "dev": "pnpm dev:browser",
+    "dev:browser": "concurrently -k --names backend,browser --prefix-colors green,yellow \"pnpm dev:backend\" \"node scripts/open-dev-browser.mjs\"",
     "dev:backend": "node scripts/dev-runtime.mjs",
-    "dev:tauri": "pnpm build:sidecar && wait-on http://127.0.0.1:1420 tcp:127.0.0.1:4317 && pnpm --dir src-tauri tauri dev",
-    "dev:desktop": "pnpm dev",
-    "dev:web": "pnpm dev:frontend",
-    "dev:runtime": "pnpm dev:backend",
-    "build": "pnpm --dir src-tauri tauri build",
-    "build:web": "pnpm --dir apps/desktop build",
-    "build:sidecar": "node scripts/build-sidecar.mjs",
-    "typecheck": "pnpm --dir apps/desktop typecheck"
+    "check": "node scripts/check-web.mjs",
+    "test:web": "node --test runtime/internal/activity/*_web_test.mjs",
+    "test": "pnpm test:web && pnpm test:runtime",
+    "test:runtime": "cd runtime && go test ./...",
+    "build": "pnpm build:runtime",
+    "build:runtime": "node scripts/build-runtime.mjs",
+    "build:windows": "node scripts/build-windows.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
-    "typescript": "^5.7.2",
-    "wait-on": "^9.0.5"
+    "jsdom": "^29.1.1"
   }
 }

@@ -20,8 +20,7 @@ type SessionType string
 type SessionStatus string
 
 const (
-	SessionTypeAI     SessionType = "ai"
-	SessionTypeManual SessionType = "manual"
+	SessionTypeAI SessionType = "ai"
 
 	SessionRunning SessionStatus = "running"
 	SessionPaused  SessionStatus = "paused"
@@ -54,8 +53,6 @@ type StepStatus string
 
 const (
 	StepTypeRequest StepType = "request"
-	StepTypeThink   StepType = "think"
-	StepTypeManual  StepType = "manual"
 
 	StepPending StepStatus = "pending"
 	StepRunning StepStatus = "running"
@@ -112,7 +109,7 @@ type RuleMatch struct {
 	StatusRange string `json:"status_range,omitempty"`
 }
 
-// ── WebSocket Events ─────────────────────────────────
+// ── Runtime Events ─────────────────────────────────
 
 type EventType string
 
@@ -126,7 +123,6 @@ const (
 	EventStepError      EventType = "step:error"
 	EventStepPaused     EventType = "step:paused"
 	EventStepSkipped    EventType = "step:skipped"
-	EventThinkStart     EventType = "think:start"
 	EventVarExtracted   EventType = "var:extracted"
 )
 

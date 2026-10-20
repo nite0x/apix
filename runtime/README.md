@@ -5,15 +5,15 @@ Local Go runtime service for Apix.
 ## Development
 
 ```bash
-go run main.go
+go run .
 ```
 
 The service listens on `127.0.0.1:4317`.
 
 By default the runtime stores SQLite data in `apix.db` relative to the
 current working directory. Set `APIX_DB_PATH` to use an explicit database
-file path instead; the desktop app does this when it launches the bundled
-runtime sidecar.
+file path instead. The root development command sets the existing durable
+data directory; the standalone executable includes the Web workspace.
 
 ## Endpoints
 
@@ -31,8 +31,9 @@ runtime sidecar.
 - `GET /api/rules` — list rules
 - `PUT /api/rules` — update rules
 
-**Manual execution**
-- `POST /manual` — execute one direct HTTP request from the desktop UI
+**Workspace**
+- `GET /` — embedded Web workspace
+- `GET /requests` — manual requests, saved interfaces, and execution history
 
 **HTTP domain (v2)**
 - `GET /api/collections` — list collections
@@ -52,7 +53,10 @@ runtime sidecar.
 - `POST /api/runs` — execute a saved request or working copy
 - `GET /api/runs` — list recent runs
 - `GET /api/runs/:id` — get one run
+- `POST /api/runs/:id/pin` — pin or unpin a run
+- `DELETE /api/runs/:id` — delete a run
 - `POST /api/import/curl` — import curl into a working copy
 
-**WebSocket**
-- `GET /ws/logs` — live event stream
+**Execution events**
+- `GET /api/events?after=0` — persisted event metadata with a sequence cursor
+- `GET /api/activity` — workspace activity, recent requests, and service logs

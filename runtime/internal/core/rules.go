@@ -113,6 +113,10 @@ func (re *RuleEngine) matchHTTP(match RuleMatch, input map[string]any, env strin
 }
 
 func extractStatus(output any) (int, bool) {
+	if result, ok := output.(interface{ HTTPStatus() int }); ok {
+		status := result.HTTPStatus()
+		return status, status != 0
+	}
 	if m, ok := output.(map[string]any); ok {
 		if s, ok := m["status"]; ok {
 			switch v := s.(type) {

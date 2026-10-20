@@ -145,19 +145,31 @@ func (r *repository) listRequests(collectionID string) ([]APIRequest, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]APIRequest, 0)
+	ids := make([]string, 0)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// The runtime uses a single SQLite connection. Release it before loading
+	// each request, otherwise the nested query waits forever for this cursor.
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	out := make([]APIRequest, 0, len(ids))
+	for _, id := range ids {
 		item, err := r.getRequest(id)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, *item)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *repository) getRequest(id string) (*APIRequest, error) {
@@ -558,6 +570,11 @@ func (r *repository) getRun(id string) (*APIRun, error) {
 	_ = json.Unmarshal([]byte(snapshot), &run.RequestSnapshot)
 	_ = json.Unmarshal([]byte(headers), &run.ResponseHeaders)
 	_ = json.Unmarshal([]byte(body), &run.ResponseBody)
+	// Older snapshots may predate URL/form redaction; apply the same policy on read.
+	run.RequestSnapshot = redactRequest(run.RequestSnapshot)
+	run.ResponseHeaders = redactedJSONCopy(run.ResponseHeaders)
+	run.ResponseBody = redactedJSONCopy(run.ResponseBody)
+	run.ErrorMessage = redactExecutionError(run.ErrorMessage)
 	return &run, nil
 }
 
@@ -570,19 +587,29 @@ func (r *repository) listRuns(projectID string, limit int) ([]APIRun, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []APIRun
+	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	var out []APIRun
+	for _, id := range ids {
 		run, err := r.getRun(id)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, *run)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *repository) pinRun(id string, pinned bool) error {
@@ -611,4 +638,44 @@ func (r *repository) deleteRun(id string) error {
 		return errNotFound
 	}
 	return nil
+}
+
+// listRunSummaries reads only list metadata; response payloads are loaded on demand.
+func (r *repository) listRunSummaries(projectID string, limit int) ([]APIRun, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 50
+	}
+	rows, err := r.db.Query(`SELECT id, request_snapshot, status, response_status,
+    COALESCE(duration_ms,0), started_at, is_pinned FROM api_runs WHERE project_id=?
+    ORDER BY started_at DESC,id DESC LIMIT ?`, projectID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []APIRun{}
+	for rows.Next() {
+		var item APIRun
+		var snapshot string
+		var status sql.NullInt64
+		var pinned int
+		if err := rows.Scan(&item.ID, &snapshot, &item.Status, &status, &item.DurationMS, &item.StartedAt, &pinned); err != nil {
+			return nil, err
+		}
+		var request struct {
+			Method string `json:"method"`
+			URL    string `json:"url"`
+		}
+		if err := json.Unmarshal([]byte(snapshot), &request); err != nil {
+			return nil, err
+		}
+		item.ProjectID = projectID
+		item.RequestSnapshot = RequestData{Method: request.Method, URL: redactRequestURL(request.URL)}
+		item.IsPinned = pinned != 0
+		if status.Valid {
+			value := int(status.Int64)
+			item.ResponseStatus = &value
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }

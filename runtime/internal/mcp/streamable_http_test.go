@@ -24,16 +24,16 @@ func TestStreamableHTTPCallPersistsRunAndReturnsStructuredResult(t *testing.T) {
 	db := store.NewSQLiteStore(filepath.Join(t.TempDir(), "apix.db"))
 	t.Cleanup(func() { _ = db.DB().Close() })
 
-	hub := core.NewHub()
+	events := core.NewEvents(nil)
 	rules := core.NewRuleEngine(db)
 	sessions := core.NewSessionManager(db)
 	httpService := httpapi.New()
 	if err := httpService.MigrateSchema(db.DB()); err != nil {
 		t.Fatalf("migrate HTTP schema: %v", err)
 	}
-	httpService.SetHub(hub)
+
 	httpService.SetRuleEngine(rules)
-	executor := core.NewExecutor(sessions, rules, hub, db, httpService.Execute, httpService.ExtractVars)
+	executor := core.NewExecutor(sessions, rules, events, db, httpService.Execute, httpService.ExtractVars)
 	mcpServer := mcp.NewServer(executor)
 	mcpServer.RegisterHTTPTools(httpService)
 

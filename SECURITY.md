@@ -16,5 +16,5 @@ Security reports are especially useful for issues involving:
 - Local data exposure
 - Unsafe request execution
 - Secret handling
-- Desktop shell or sidecar process boundaries
+- Local runtime and managed service process boundaries
 - Dependency vulnerabilities with a practical exploit path

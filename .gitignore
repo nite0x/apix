@@ -1,8 +1,7 @@
 node_modules/
 dist/
-target/
-src-tauri/binaries/
-services/runtime/runtime
+release/
+/runtime/runtime
 
 .DS_Store
 .env
@@ -13,6 +12,7 @@ services/runtime/runtime
 *.db
 *.db-shm
 *.db-wal
+*.credentials.key
 
 # Editor & tools
 .idea/

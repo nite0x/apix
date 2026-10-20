@@ -11,7 +11,7 @@ import (
 	"github.com/mattn/go-shellwords"
 )
 
-// ParsedRequest is the normalized representation returned to the desktop UI.
+// ParsedRequest is the normalized representation returned to the request editor.
 type ParsedRequest struct {
 	Format  string            `json:"format"`
 	Method  string            `json:"method"`
