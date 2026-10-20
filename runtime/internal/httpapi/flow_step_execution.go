@@ -60,6 +60,9 @@ func (fs *flowService) executeStep(ctx context.Context, run *FlowRun, step *Flow
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		// Retain the actual bound input for the run record, including failures.
+		// The caller redacts a copy before persisting it.
+		step.SQLSnapshot = &command
 		result, err := fs.database.Execute(ctx, command)
 		var assertions []AssertionResult
 		if err == nil && config.ExpectedRows != nil {

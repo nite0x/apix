@@ -366,11 +366,17 @@ func (fs *flowService) runStep(ctx context.Context, run *FlowRun, rs FlowRunStep
 			stepCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMS)*time.Millisecond)
 			apiRun, rawResult, checks, execErr := fs.executeStep(stepCtx, run, &rs, resolved.Config, vars)
 			cancel()
+			if rs.Type == "sql" && rs.SQLSnapshot != nil {
+				input := flowSQLInputEvidence(*rs.SQLSnapshot, definition.SQL, snapshot.Variables, outputs)
+				if err := fs.repo.setFlowRunStepSQLSnapshot(rs.ID, input); err != nil {
+					fail("persistence_failed", err)
+				}
+			}
 			result, assertions = rawResult, checks
 			if apiRun != nil {
 				apiRunID = &apiRun.ID
 			}
-			if execErr != nil {
+			if execErr != nil && !outcome.persistenceFailed {
 				code := "step_failed"
 				if errors.Is(execErr, errFlowAssertion) {
 					code = "assertion_failed"

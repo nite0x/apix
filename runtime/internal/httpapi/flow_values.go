@@ -409,6 +409,38 @@ func redactFlowEvidence(value any, outputs flowOutputs) any {
 	return visit(copy)
 }
 
+// Keep the executed SQL and typed parameters without persisting sensitive
+// variables or changing the values sent to the database driver.
+func flowSQLInputEvidence(command database.Command, template *database.Command, variables []FlowVariableDefinition, outputs flowOutputs) any {
+	command.Params = append([]any(nil), command.Params...)
+	if template != nil {
+		for i, param := range template.Params {
+			if i >= len(command.Params) {
+				break
+			}
+			text, ok := param.(string)
+			if !ok {
+				continue
+			}
+			for _, token := range flowPlaceholder.FindAllStringSubmatch(text, -1) {
+				name := strings.TrimSpace(token[1])
+				secret := isSensitiveName(name) || outputs[name].Secret
+				for key, output := range outputs {
+					secret = secret || output.Secret && strings.HasSuffix(key, ".outputs."+name)
+				}
+				for _, variable := range variables {
+					secret = secret || variable.Name == name && variable.Secret
+				}
+				if secret {
+					command.Params[i] = "••••••"
+					break
+				}
+			}
+		}
+	}
+	return redactFlowEvidence(redactedJSONCopy(command), outputs)
+}
+
 func flowSQLEvidence(result any, extracted []FlowExtractedVariable) map[string]any {
 	evidence, _ := redactedJSONCopy(result).(map[string]any)
 	for _, variable := range extracted {

@@ -455,7 +455,7 @@ function renderRun(canvas) {
     if (phase !== lastPhase) { track.append(el('h3', 'fw-phase-title', phase === 'finally' ? '收尾步骤' : '执行步骤')); lastPhase = phase; }
     const card = el('article', `fw-step fw-run-step ${step.status}`); const open = state.open.has(step.id) || !state.tabs.has(step.id) && ['failed', 'paused'].includes(step.status);
     const head = button('', 'fw-result-toggle', () => { if (open) state.open.delete(step.id); else state.open.add(step.id); state.tabs.set(step.id, 'visited'); renderWorkspace(); }); head.setAttribute('aria-expanded', String(open));
-    const label = el('div', 'fw-step-summary'); label.append(el('strong', '', step.name_snapshot), el('small', 'fw-step-endpoint', step.type === 'sql' ? 'SQL' : step.type === 'service' ? 'SERVICE' : `${step.request_snapshot.method} ${step.request_snapshot.url}`));
+    const label = el('div', 'fw-step-summary'); label.append(el('strong', '', step.name_snapshot), el('small', 'fw-step-endpoint', step.type === 'sql' ? `SQL · ${step.sql_snapshot?.sql || '未保存 SQL'}` : step.type === 'service' ? `SERVICE · ${step.service_snapshot?.action === 'stop' ? '停止' : '启动或复用'} · ${step.service_snapshot?.service_id || '—'}` : `${step.request_snapshot?.method || 'HTTP'} ${step.request_snapshot?.url || ''}`));
     const elapsed = step.started_at && step.finished_at ? `${Math.max(0, Date.parse(step.finished_at) - Date.parse(step.started_at))} ms` : '—';
     head.append(el('span', 'fw-step-index', String(index + 1).padStart(2, '0')), label, el('span', `fw-status ${step.status}`, statusNames[step.status] || step.status), el('span', 'fw-hint', elapsed), el('span', 'fw-chevron', open ? '−' : '+')); card.append(head);
     if (open) renderStepResult(card, step); track.append(card);
@@ -474,7 +474,9 @@ function renderStepResult(card, step) {
     const outputs = section('输出变量 · 本次运行'); outputs.setAttribute('aria-label', '提取结果');
     for (const variable of step.result.extracted_variables) { const pair = el('div', 'fw-output'); pair.append(el('code', '', step.flow_step_id ? outputReference(step.flow_step_id, variable.name) : variable.name), el('span', '', variable.secret ? '••••••' : variable.value)); outputs.append(pair); } body.append(outputs);
   }
-  if (step.api_run_id) {
+  if (step.type === 'sql') renderSQLResult(body, step);
+  else if (step.type === 'service') renderServiceResult(body, step);
+  else if (step.api_run_id) {
     const apiRun = state.apiRuns.get(step.api_run_id); const response = section('请求与响应');
     if (apiRun) {
       response.append(el('div', 'fw-response-status', `HTTP ${apiRun.response_status ?? '—'} · ${apiRun.duration_ms ?? 0} ms`), el('div', 'fw-result-url', requestURL(apiRun.request_snapshot)), code(apiRun.response_body));
@@ -482,11 +484,70 @@ function renderStepResult(card, step) {
       if (apiRun.response_truncated) response.append(el('p', 'fw-hint', '响应内容较大，展示已保存的前 256 KB。'));
     } else response.append(el('p', 'fw-hint', state.apiErrors.has(step.api_run_id) ? '请求记录暂不可用，点击上方“刷新结果”重试。' : '正在载入请求记录…'));
     body.append(response);
+  } else if (!step.type || step.type === 'http') {
+    const request = section('HTTP 请求快照'); request.append(code(step.request_snapshot || {}), el('p', 'fw-hint', resultUnavailable(step))); body.append(request);
   } else if (step.result) {
     const { extracted_variables, ...operationResult } = step.result;
     if (Object.keys(operationResult).length) body.append(code(operationResult));
   }
   card.append(body);
+}
+
+function resultUnavailable(step) {
+  if (['pending', 'queued'].includes(step.status)) return '步骤尚未执行。';
+  if (['running', 'paused'].includes(step.status)) return '步骤正在执行或等待确认，完成后显示结果。';
+  if (['skipped', 'cancelled'].includes(step.status)) return '步骤已跳过或取消，没有保存执行结果。';
+  return '本次执行未保存结果，请查看执行错误；旧记录可能没有结果快照。';
+}
+function resultPairs(entries) {
+  const list = el('dl', 'fw-result-pairs');
+  for (const [label, value] of entries) list.append(el('dt', '', label), el('dd', '', value ?? '—'));
+  return list;
+}
+function renderSQLResult(body, step) {
+  const command = step.sql_snapshot;
+  const input = section('SQL 执行快照'); input.setAttribute('aria-label', 'SQL 执行快照');
+  if (command) {
+    input.append(resultPairs([['数据库连接', command.connection_id], ['操作类型', command.mode === 'exec' ? '执行语句' : '查询'], ['最大返回行数', command.max_rows || '默认']]), code(command.sql), el('h4', '', '绑定参数'), code(command.params || []));
+    input.append(el('p', 'fw-hint', 'SQL 与绑定参数按本次快照展示；旧记录可能保留变量引用，敏感值以脱敏内容显示。'));
+  } else input.append(el('p', 'fw-hint', '这条记录没有保存 SQL 输入快照。'));
+  const output = section(command?.mode === 'exec' ? 'SQL 执行结果' : 'SQL 查询结果'); output.setAttribute('aria-label', 'SQL 结果');
+  const result = step.result;
+  if (!result || !['rows', 'columns', 'row_count', 'rows_affected'].some(key => Object.hasOwn(result, key))) output.append(el('p', 'fw-hint', resultUnavailable(step)));
+  else {
+    output.append(resultPairs([[command?.mode === 'exec' ? '影响行数' : '返回行数', command?.mode === 'exec' ? result.rows_affected : result.truncated ? `已保存 ${(result.rows || []).length} 行（总行数未知）` : result.row_count], ['执行耗时', result.duration_ms == null ? '—' : `${result.duration_ms} ms`]]));
+    if (result.truncated) output.append(el('p', 'fw-message', '查询结果超过最大返回行数，以下只展示已保存的部分数据。'));
+    if (command?.mode !== 'exec') {
+      const rows = result.rows || [], columns = result.columns?.length ? result.columns : [...new Set(rows.flatMap(row => Object.keys(row)))];
+      if (columns.length) {
+        const wrap = el('div', 'fw-result-table'); const table = el('table'); table.setAttribute('aria-label', 'SQL 查询数据');
+        const caption = el('caption', '', 'SQL 查询数据'); const head = el('thead'), header = el('tr'), data = el('tbody');
+        for (const column of columns) { const cell = el('th', '', column); cell.scope = 'col'; header.append(cell); } head.append(header);
+        for (const row of rows) { const record = el('tr'); for (const column of columns) record.append(el('td', '', Object.hasOwn(row, column) ? row[column] === null ? 'NULL' : display(row[column]) : '—')); data.append(record); }
+        table.append(caption, head, data); wrap.append(table); output.append(wrap);
+      }
+      if (!rows.length) output.append(el('p', 'fw-hint', '查询完成，返回 0 行。'));
+    }
+  }
+  body.append(input, output);
+}
+function renderServiceResult(body, step) {
+  const command = step.service_snapshot;
+  const input = section('服务操作快照'); input.setAttribute('aria-label', '服务操作快照');
+  if (command) input.append(resultPairs([['服务 ID', command.service_id], ['操作', command.action === 'stop' ? '停止服务' : '启动或复用服务']]));
+  else input.append(el('p', 'fw-hint', '这条记录没有保存服务操作快照。'));
+  const output = section('服务操作结果'); output.setAttribute('aria-label', '服务操作结果');
+  const result = step.result;
+  if (!result || !Object.hasOwn(result, 'status')) output.append(el('p', 'fw-hint', resultUnavailable(step)));
+  else {
+    const statuses = { running: '运行中', starting: '启动中', stopping: '停止中', stopped: '已停止', failed: '异常', cleanup_failed: '清理失败' };
+    const owner = result.owner === 'external' ? '外部服务' : result.owner === 'manual' ? '手动启动' : result.owner;
+    output.append(resultPairs([['服务 ID', result.service_id || command?.service_id], ['操作后状态', statuses[result.status] || result.status], ['进程 PID', result.pid || '—'], ['归属', owner || '—']]));
+    if (command?.action === 'start' && result.status === 'running') output.append(el('p', 'fw-hint', result.started ? '本次执行启动了服务。' : '本次执行复用了已有服务。'));
+    if (command?.action === 'stop') output.append(el('p', 'fw-hint', result.status === 'stopped' ? '停止操作已完成。' : result.status === 'running' ? '服务仍在运行；复用的服务由原启动方管理。' : '停止操作未完成，请查看执行错误。'));
+    output.append(el('p', 'fw-hint', '以上为本次操作时保存的结果；流程收尾清理或后续操作可能已改变服务状态。'));
+  }
+  body.append(input, output);
 }
 window.addEventListener('beforeunload', event => { if (state.dirty || state.saving) { event.preventDefault(); event.returnValue = ''; } });
 window.addEventListener('keydown', event => { if (state.visible && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void saveFlow(); } });
