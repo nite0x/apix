@@ -81,6 +81,10 @@ type APIRun struct {
 	EnvironmentID     *string     `json:"environment_id,omitempty"`
 	SessionID         string      `json:"session_id,omitempty"`
 	StepID            string      `json:"step_id,omitempty"`
+	BatchID           string      `json:"batch_id,omitempty"`
+	TestRunID         string      `json:"test_run_id,omitempty"`
+	FlowRunID         string      `json:"flow_run_id,omitempty"`
+	FlowID            string      `json:"flow_id,omitempty"`
 	TriggerType       string      `json:"trigger_type"`
 	Status            string      `json:"status"`
 	RequestSnapshot   RequestData `json:"request_snapshot"`

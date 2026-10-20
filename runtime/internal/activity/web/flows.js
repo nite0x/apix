@@ -1,11 +1,13 @@
 import { availableOutputs, copyFlowSteps, failurePolicy, isFinally, orderedSteps, outputReference, sourceChoices, activeStatus, blankStep, display, endpoint, requestURL, statusNames, uniqueName, validateDefinition } from './flow-model.js';
 import { openRequestDetail } from './request-detail.js';
+import { revealExecutionStep } from './execution-batch.js';
 
 const root = document.getElementById('flow-workspace');
 const state = { flows: [], flow: null, run: null, history: [], recordFlow: '', recordHistory: [], databases: [], services: [], open: new Set(), tabs: new Map(), rail: 'variables', mode: 'edit', dirty: false, revision: 0, saving: null, saveTimer: null, pollTimer: null, visible: false, loading: false, starting: false, error: '', notice: '', apiRuns: new Map(), apiErrors: new Set(), pollBusy: false };
 let selection = 0;
 let recordSelection = 0;
 let dialog = null;
+let targetStep = '';
 
 function el(tag, cls, text) { const element = document.createElement(tag); if (cls) element.className = cls; if (text !== undefined) element.textContent = String(text); return element; }
 function button(text, cls, action, label) { const item = el('button', cls || 'button', text); item.type = 'button'; if (label) item.setAttribute('aria-label', label); item.addEventListener('click', action); return item; }
@@ -33,6 +35,7 @@ function setLocation() {
   const query = new URLSearchParams({ tab: state.flow ? state.mode === 'run' ? 'records' : 'cases' : recordsView() ? 'records' : 'cases', type: 'flow' });
   if (state.flow) query.set('id', state.flow.id);
   if (state.run && state.mode === 'run') query.set('run', state.run.id);
+  if (state.mode === 'run' && targetStep && state.run?.steps?.some(step => step.id === targetStep)) query.set('step', targetStep);
   const path = location.pathname === '/test-collections' ? '/test-collections' : '/tests';
   history.replaceState(null, '', `${path}?${query}`);
   window.dispatchEvent(new window.Event('testing-flow-location'));
@@ -82,6 +85,8 @@ export async function leaveFlows() { return !state.dirty || await saveFlow(); }
 export function deactivateFlows() { state.visible = false; selection++; clearTimeout(state.pollTimer); if (dialog?.open && !state.starting) dialog.close(); }
 export async function activateFlows() {
   state.visible = true;
+  targetStep = new URLSearchParams(location.search).get('step') || '';
+  if (targetStep) state.open.add(targetStep);
   const query = new URLSearchParams(location.search); const id = query.get('id'); const run = query.get('run');
   if (id && state.flow?.id !== id) { await openFlow(id, run); return; }
   if (id && run && state.run?.id !== run) { await openRun(run); return; }
@@ -89,6 +94,7 @@ export async function activateFlows() {
   if (!id && state.flow) { if (!(await leaveFlows())) { setLocation(); renderWorkspace(); return; } state.flow = null; state.run = null; }
   if (id && !run && state.mode === 'run') { state.mode = 'edit'; renderWorkspace(); }
   await refreshFlows(); if (state.run && activeStatus(state.run.status)) schedulePoll();
+  if (state.visible && targetStep) revealExecutionStep(`flow-run-step-${targetStep}`);
 }
 export async function refreshFlows() {
   if (state.loading) return; state.loading = true;
@@ -423,7 +429,7 @@ async function launch(variables, throwErrors = false) {
   finally { state.starting = false; renderWorkspace(); }
 }
 async function openRun(id) {
-  try { state.run = await api(`/flow-runs/${encodeURIComponent(id)}`); state.mode = 'run'; state.open.clear(); state.error = ''; setLocation(); renderWorkspace(); await pollRun(); schedulePoll(); }
+  try { state.run = await api(`/flow-runs/${encodeURIComponent(id)}`); state.mode = 'run'; state.open.clear(); if (targetStep) state.open.add(targetStep); state.error = ''; setLocation(); renderWorkspace(); await pollRun(); schedulePoll(); if (state.visible && targetStep) revealExecutionStep(`flow-run-step-${targetStep}`); }
   catch (error) { setError(`无法读取运行记录：${errorText(error)}`); }
 }
 function schedulePoll() { clearTimeout(state.pollTimer); if (state.visible && state.run && activeStatus(state.run.status)) state.pollTimer = setTimeout(async () => { await pollRun(); schedulePoll(); }, 1200); }
@@ -454,6 +460,8 @@ function renderRun(canvas) {
     const phase = step.phase || '';
     if (phase !== lastPhase) { track.append(el('h3', 'fw-phase-title', phase === 'finally' ? '收尾步骤' : '执行步骤')); lastPhase = phase; }
     const card = el('article', `fw-step fw-run-step ${step.status}`); const open = state.open.has(step.id) || !state.tabs.has(step.id) && ['failed', 'paused'].includes(step.status);
+    card.id = `flow-run-step-${step.id}`; card.tabIndex = -1;
+    card.classList.toggle('execution-target', step.id === targetStep);
     const head = button('', 'fw-result-toggle', () => { if (open) state.open.delete(step.id); else state.open.add(step.id); state.tabs.set(step.id, 'visited'); renderWorkspace(); }); head.setAttribute('aria-expanded', String(open));
     const label = el('div', 'fw-step-summary'); label.append(el('strong', '', step.name_snapshot), el('small', 'fw-step-endpoint', step.type === 'sql' ? 'SQL' : step.type === 'service' ? 'SERVICE' : `${step.request_snapshot.method} ${step.request_snapshot.url}`));
     const elapsed = step.started_at && step.finished_at ? `${Math.max(0, Date.parse(step.finished_at) - Date.parse(step.started_at))} ms` : '—';

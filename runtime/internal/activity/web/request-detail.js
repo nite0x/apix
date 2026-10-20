@@ -1,3 +1,5 @@
+import { executionBatchLink } from './execution-batch.js';
+
 const dialog = document.getElementById('request-detail');
 const content = document.getElementById('detail-content');
 const refreshButton = document.getElementById('detail-refresh');
@@ -63,6 +65,7 @@ function render(run) {
   const failed = ['failed', 'timed_out', 'cancelled'].includes(run.status) || run.response_status >= 400;
   result.append(el('strong', failed ? 'response-error' : run.status === 'running' ? 'response-pending' : 'response-ok', run.response_status ? `HTTP ${run.response_status}` : statusLabels[run.status] || run.status));
   result.append(el('span', 'subtle', `${run.status === 'running' ? '执行中' : `${run.duration_ms ?? 0} ms`} · ${triggerLabels[run.trigger_type] || run.trigger_type}`));
+  result.append(executionBatchLink(run));
   summary.append(result, el('div', 'detail-url', requestURL(request)));
   fragment.append(summary);
   if (run.error_code || run.error_message) {

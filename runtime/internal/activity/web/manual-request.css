@@ -49,6 +49,8 @@
 .history-actions{white-space:nowrap}.history-actions button+button{margin-left:10px}
 #request-history-panel .request-url{min-width:0;flex:1;text-align:left}
 #request-history-panel .history-reuse{white-space:nowrap}
+#request-history-panel .history-reuse>*{display:block;margin:0 0 6px}
+#request-history-panel .history-reuse>:last-child{margin-bottom:0}
 #collection-dialog input{width:100%;padding:10px;border:1px solid var(--line);border-radius:6px}
 @media(max-width:760px){.request-meta{grid-template-columns:1fr}.request-library-row{align-items:flex-start;flex-direction:column}.request-import{margin:0 16px 16px}.request-library-tools{padding:16px}.request-library-row .request-actions{width:100%}}
 

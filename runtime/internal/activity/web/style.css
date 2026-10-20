@@ -185,3 +185,6 @@ body.sidebar-collapsed { --sidebar-width: 72px; }
 
 /* Keep workspace status visible while the content scrolls. */
 .workspace .topbar { position: sticky; top: 0; z-index: 18; }
+
+.execution-target { outline: 2px solid var(--green, #16856c); outline-offset: 3px; scroll-margin-block: 24px; }
+.sql-action > a[data-route], .sql-action > .subtle { display:block; margin-bottom:7px; }

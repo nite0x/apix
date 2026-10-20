@@ -2,6 +2,7 @@ import { activateFlows, deactivateFlows, refreshFlows, leaveFlows } from './flow
 import { openCommandCaseEditor } from './command-tools.js';
 import { openMCPCaseEditor } from './mcp-tools.js';
 import { openRequestDetail } from './request-detail.js';
+import { revealExecutionStep } from './execution-batch.js';
 
 const root = document.getElementById('testing-workspace');
 const flowRoot = document.getElementById('flow-workspace');
@@ -9,6 +10,7 @@ const state = { type: 'single', viewRevision: 0, batches: [], cases: [], batch: 
 let mounted = false;
 let editor = null;
 let editorDirty = false;
+let targetStep = '';
 
 function el(tag, cls, text) { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = String(text); return node; }
 function button(text, action, cls = 'button') { const item = el('button', cls, text); item.type = 'button'; item.addEventListener('click', action); return item; }
@@ -38,6 +40,7 @@ function locationForBatch() {
   if (!state.active || isFlowView() || !['/tests', '/test-collections'].includes(location.pathname)) return;
   const query = new URLSearchParams({ tab: state.tab });
   if (state.batch && state.tab !== 'cases') query.set('batch', state.batch.id);
+  if (targetStep && state.batch?.runs?.some(run => run.id === targetStep)) query.set('step', targetStep);
   history.replaceState(null, '', `${testingPath()}?${query}`);
 }
 async function switchView(tab, type = state.type) {
@@ -168,6 +171,8 @@ function renderBatches(records = false) {
 }
 function renderAttempt(run) {
   const details = el('details', 'test-attempt'); details.open = state.open.has(run.id); details.addEventListener('toggle', () => { if (details.open) state.open.add(run.id); else state.open.delete(run.id); });
+  details.id = `test-attempt-${run.id}`; details.tabIndex = -1;
+  details.classList.toggle('execution-target', run.id === targetStep);
   const title = el('summary'); const chevron = el('span', 'test-attempt-chevron'); chevron.setAttribute('aria-hidden', 'true'); title.append(chevron, pill(run.status), el('strong', '', run.name), el('small', '', `${clock(run.started_at)}${run.case_version ? ` · 用例 v${run.case_version}` : ' · 临时用例'} · #${run.id.slice(0, 8)}`));
   const body = el('div', 'test-attempt-body'); const request = run.request_snapshot;
   const snapshot = el('section', 'test-attempt-section'); snapshot.append(el('h4', 'test-section-title', '请求快照'), el('pre', 'detail-code', display(run.type === 'command' ? run.command_request_snapshot : run.type === 'mcp' ? run.mcp_request_snapshot : { method: request.method, url: request.url, query_params: request.query_params, headers: request.headers, body: request.body }))); body.append(snapshot);
@@ -329,11 +334,15 @@ function openRunEditor(ids) {
 function openArchiveEditor(item) { const d = dialog('移除保存的用例'); d.content.append(el('p', '', `移除“${item.name}”？已有测试记录和断言结果会保留。`)); d.actions.append(button('取消', () => d.element.close()), button('移除用例', async () => { lockDialog(d, true); try { await api(`/test-cases/${item.id}`, { method: 'DELETE' }); d.element.close(); await refreshTesting(); } catch (error) { d.showError(error.message); } finally { lockDialog(d, false); } }, 'button danger')); }
 export async function activateTesting() {
   const revision = ++state.viewRevision; state.selection++;
+  targetStep = new URLSearchParams(location.search).get('step') || '';
+  if (targetStep) { state.open.add(targetStep); state.filter = 'all'; }
   state.active = true; mount(); readRoute(); state.signature = ''; render();
   const query = new URLSearchParams(location.search);
   if (!isFlowView() && query.get('batch') && query.get('batch') !== state.batch?.id) await selectBatch(query.get('batch'), state.tab);
   if (revision !== state.viewRevision || !state.active) return;
   await showView(); clearTimeout(state.timer);
+  if (revision !== state.viewRevision || !state.active) return;
+  if (targetStep && !isFlowView()) revealExecutionStep(`test-attempt-${targetStep}`);
   const poll = async () => { if (!state.active) return; if (!isFlowView()) await refreshTesting(); if (state.active) state.timer = setTimeout(poll, 1500); }; state.timer = setTimeout(poll, 1500);
 }
 export function deactivateTesting() { state.active = false; state.viewRevision++; state.selection++; clearTimeout(state.timer); deactivateFlows(); }

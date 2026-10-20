@@ -1,3 +1,5 @@
+import { executionBatchLink } from './execution-batch.js';
+
 const root = document.getElementById('mcp-workspace');
 const state = { servers: [], server: '', tools: [], discovery: null, tool: '', working: false, loading: false, generation: 0 };
 let mounted = false;
@@ -81,7 +83,7 @@ function renderTools() {
       batch = await api('/test-batches', { method: 'POST', body: { name: `MCP 调试 · ${tool.name}` } });
       const out = await api(`/test-batches/${batch.id}/runs`, { method: 'POST', body: { test_case: { type: 'mcp', name: tool.name, mcp_request: request, assertions: [] } } });
       result.replaceChildren(node('h3', '', `本次执行 · ${out.test_status === 'error' ? '执行错误' : '未验证'} · ${out.duration_ms} ms`), node('pre', 'detail-code', pretty(out.mcp_result)));
-      const link = node('a', 'button', '查看测试记录'); link.href = `/tests?batch=${encodeURIComponent(batch.id)}`; link.dataset.route = ''; result.append(link);
+      result.append(executionBatchLink({ batch_id: batch.id, test_run_id: out.test_run_id }, 'button'));
     } catch (error) { result.replaceChildren(node('p', 'response-error', error.message)); }
     finally { if (batch) { try { await api(`/test-batches/${batch.id}/finish`, { method: 'POST' }); } catch (error) { feedback(`批次尚未结束：${error.message}。可在测试记录中查看。`, true); } } state.working = false; renderConnection(); form.querySelectorAll('button,input,select,textarea').forEach(n => { n.disabled = false; }); }
   });

@@ -113,6 +113,42 @@ func TestSQLExecutionHistoryOutcomesAndRestart(t *testing.T) {
 	}
 }
 
+func TestSQLHistoryPreservesFlowOwnershipOnSuccessAndFailure(t *testing.T) {
+	s, metadata, id := historyService(t)
+	ctx := context.Background()
+	for _, runID := range []string{"flow-run-one", "flow-run-two"} {
+		origin := WithFlowOrigin(ctx, "flow", runID, "step-"+runID)
+		for _, statement := range []string{"SELECT 1 AS value", "SELECT * FROM absent_table"} {
+			_, _ = s.Execute(origin, Command{ConnectionID: id, Mode: "query", SQL: statement})
+		}
+	}
+	_, _ = s.Execute(ctx, Command{ConnectionID: id, Mode: "query", SQL: "SELECT 1 AS value"})
+	// Reinitializing also exercises the idempotent migration without deleting history.
+	if err := s.initHistory(); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.ListExecutions(ctx, id)
+	if err != nil || len(items) != 5 {
+		t.Fatalf("history: %+v %v", items, err)
+	}
+	if items[0].FlowRunID != "" || items[0].StepID != "" || items[0].FlowID != "" {
+		t.Fatal("standalone SQL was assigned an unrelated batch")
+	}
+	for i, item := range items[1:] {
+		runID := "flow-run-two"
+		if i >= 2 {
+			runID = "flow-run-one"
+		}
+		if item.FlowID != "flow" || item.FlowRunID != runID || item.StepID != "step-"+runID {
+			t.Fatalf("missing or incorrect SQL origin: %+v", item)
+		}
+	}
+	var count int
+	if err := metadata.QueryRow(`SELECT count(*) FROM database_executions`).Scan(&count); err != nil || count != 5 {
+		t.Fatalf("persisted history: %d %v", count, err)
+	}
+}
+
 func TestSQLHistoryRoutesAndLimit(t *testing.T) {
 	s, _, id := historyService(t)
 	gin.SetMode(gin.TestMode)

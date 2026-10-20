@@ -1,5 +1,7 @@
 import { setupWorkspaceTabs } from './workspace-tabs.js';
 
+import { executionBatchLink } from './execution-batch.js';
+
 const $ = id => document.getElementById(id);
 const pending = new Set();
 const feedback = new Map();
@@ -172,7 +174,7 @@ function renderHistory() {
     const view = node('button', 'text-button sql-result-button', item.status === 'succeeded' && item.mode === 'query' ? '查看结果' : '查看详情');
     view.type = 'button'; view.setAttribute('aria-haspopup', 'dialog'); view.setAttribute('aria-controls', 'sql-result');
     view.addEventListener('click', () => openSQLResult(item));
-    action.append(view);
+    action.append(executionBatchLink(item), view);
     const reuse = node('button', 'text-button sql-fill-button', '填入编辑器'); reuse.type = 'button';
     reuse.disabled = sqlRunning || item.status === 'running';
     reuse.addEventListener('click', () => fillSQL(item)); action.append(reuse);
@@ -236,6 +238,7 @@ function renderSQLResult(result, content = $('sql-result-content')) {
 async function openSQLResult(item) {
   const version = ++resultRevision;
   $('sql-result-context').textContent = `${item.connection_name} · ${new Date(item.started_at).toLocaleString('zh-CN', { hour12: false })}`;
+  $('sql-result-context').append(' · ', executionBatchLink(item));
   $('sql-result-statement').textContent = item.sql;
   $('sql-result-params').textContent = JSON.stringify(item.params || [], null, 2);
   $('sql-result-parameters').hidden = !item.params?.length;
