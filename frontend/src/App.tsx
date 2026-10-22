@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useActivity } from '@/lib/activity';
 import { DirtyProvider } from '@/lib/use-dirty';
 import { cn } from '@/lib/utils';
+import ServicesPage from '@/pages/services';
 import { ErrorAlert, PageHeader } from '@/components/shared';
 
 const navigation = [
@@ -33,4 +34,4 @@ function AppShell() {
 }
 function FoundationPage() { return <div className="stack"><PageHeader title="Apix 工作台" description="本地服务、接口与测试工作空间" /><Skeleton className="h-24 w-full" /></div>; }
 function RouteError() { return <main className="mx-auto max-w-3xl space-y-4 p-8"><PageHeader title="页面暂时无法加载" /><ErrorAlert error={useRouteError()} /><Button asChild><Link to="/">返回主页</Link></Button></main>; }
-export const router = createBrowserRouter([{ element: <AppShell />, errorElement: <RouteError />, children: [{ path: '*', element: <FoundationPage /> }] }]);
+export const router = createBrowserRouter([{ element: <AppShell />, errorElement: <RouteError />, children: [{ path: '/services', element: <ServicesPage /> }, { path: '*', element: <FoundationPage /> }] }]);

@@ -53,3 +53,7 @@ Foundation: `pnpm build:web` passed; API/dirty-navigation tests passed (5 assert
 - 2026-10-22: Use isolated feature modules during parallel implementation; shared component/API contracts are coordinated centrally. Retain all existing API semantics rather than inventing per-page operations absent from the backend.
 
 - Foundation: official `shadcn` CLI generated the local Radix-based components. Multiple editor dirty scopes are aggregated into one router blocker. Go dependencies downloaded successfully using the configured proxy; the older environment startup note about blocked downloads is stale.
+
+## Stage 3 — service vertical slice
+
+Implemented the service page, controlled RHF/Zod editor, canonical execution-environment checks, optimistic edit versions, save-only/save-and-start retry semantics, owner-aware controls, polled details/logs, and shared lifecycle dialogs. The route guard now uses a shadcn AlertDialog. Targeted tests: 16 passed across API, dirty-navigation, service and lifecycle suites. New assets remain staged alongside legacy entrypoints until the final cutover.
