@@ -59,7 +59,7 @@
         <a class="home-card" href="/ai-tools" data-route><span class="home-icon" aria-hidden="true">✦</span><h2>AI 工具</h2><p>将 Apix 一键安装到 Codex、Claude Code、Cursor、TRAE 等工具。</p><span class="home-link">连接 AI 工具 →</span></a>
       </section>
     </div>
-    <section data-page="services" class="panel services-panel page-panel" aria-labelledby="services-title" hidden><div class="panel-heading"><h2 id="services-title"><span class="section-icon">◫</span> 本地服务 <span class="subtle" id="service-total">—</span></h2><button id="service-add" class="button primary" type="button" aria-haspopup="dialog" aria-controls="service-editor">＋ 新增服务</button></div><div id="service-editor-feedback" class="database-notice" role="status" hidden></div><div id="services" class="service-list"><div class="empty">正在读取服务状态…</div></div><div class="panel-foot">填写启动配置，手动启停服务；自动复用健康地址上的已有实例</div></section>
+    <section data-page="services" class="panel services-panel page-panel" aria-labelledby="services-title" hidden><div class="panel-heading resource-heading"><h2 id="services-title"><span class="section-icon">◫</span> 本地服务 <span class="subtle" id="service-total">—</span></h2><div class="resource-toolbar"><div id="service-filters" class="resource-filters"></div><div class="resource-actions"><button id="service-add" class="button primary" type="button" aria-haspopup="dialog" aria-controls="service-editor">＋ 新增服务</button></div></div></div><div id="service-editor-feedback" class="database-notice" role="status" hidden></div><div id="services" class="service-list"><div class="empty">正在读取服务状态…</div></div><div class="panel-foot">填写启动配置，手动启停服务；自动复用健康地址上的已有实例</div></section>
     <div data-page="requests" class="manual-workspace" hidden>
       <div id="request-tabs" class="workspace-tabs" role="tablist" aria-label="接口工作区">
         <button id="request-manage-tab" type="button" role="tab" aria-selected="false" aria-controls="request-manage-panel" tabindex="-1">接口管理</button>
@@ -93,7 +93,7 @@
         <button id="sql-history-tab" type="button" role="tab" aria-selected="false" aria-controls="sql-history-panel" tabindex="-1">执行记录</button>
       </div>
     <section id="connections-panel" class="panel database-panel" role="tabpanel" aria-labelledby="connections-tab" tabindex="0" hidden>
-      <div class="panel-heading"><div class="database-section-heading"><h2 id="databases-title">数据库连接 <span id="database-total" class="subtle">—</span></h2><p>管理连接配置，测试数据库连通性。</p></div><button id="database-add" class="button primary" type="button" aria-haspopup="dialog" aria-controls="database-editor">＋ 新增连接</button></div>
+      <div class="panel-heading resource-heading"><div class="database-section-heading"><h2 id="databases-title">数据库连接 <span id="database-total" class="subtle">—</span></h2><p>管理连接配置，测试数据库连通性。</p></div><div class="resource-toolbar"><div id="database-filters" class="resource-filters"></div><div class="resource-actions"><button id="database-add" class="button primary" type="button" aria-haspopup="dialog" aria-controls="database-editor">＋ 新增连接</button></div></div></div>
       <div id="database-feedback" class="database-notice" role="status" hidden></div>
       <div id="databases" class="database-list" aria-live="polite"><div class="empty">正在读取数据库连接…</div></div>
     </section>

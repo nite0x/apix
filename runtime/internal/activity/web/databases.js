@@ -473,6 +473,6 @@ $('sql-form').addEventListener('submit', async event => {
 });
 updateSQLHint();
 
-const databaseSearch=node('input');databaseSearch.type='search';databaseSearch.setAttribute('aria-label','搜索数据库连接');databaseSearch.placeholder='名称、类型、主机或库名';const databaseType=node('select');databaseType.setAttribute('aria-label','数据库类型');for(const [value,label] of [['','全部类型'],['mysql','MySQL'],['postgresql','PostgreSQL'],['hologres','Hologres']])databaseType.add(new window.Option(label,value));databaseSearch.oninput=render;databaseType.onchange=render;$('database-add').parentElement.append(databaseSearch,databaseType,lifecycleButton('已归档连接',()=>openArchived('database',refreshDatabases)));
+const databaseSearch=node('input');databaseSearch.type='search';databaseSearch.setAttribute('aria-label','搜索数据库连接');databaseSearch.placeholder='名称、类型、主机或库名';const databaseType=node('select');databaseType.setAttribute('aria-label','数据库类型');for(const [value,label] of [['','全部类型'],['mysql','MySQL'],['postgresql','PostgreSQL'],['hologres','Hologres']])databaseType.add(new window.Option(label,value));databaseSearch.oninput=render;databaseType.onchange=render;$('database-filters').append(databaseSearch,databaseType);$('database-add').parentElement.append(lifecycleButton('已归档连接',()=>openArchived('database',refreshDatabases)));
 
 $('database-add').parentElement.append(lifecycleButton('批量管理',()=>openBulkManager('database',refreshDatabases)));

@@ -431,9 +431,11 @@ function savedCaseLink(id) {
 function renderCases() {
   const content=root.querySelector('[data-testing-content]');
   const focused=document.activeElement?.getAttribute('aria-label'); const cursor=document.activeElement?.selectionStart;
-  const panel=el('section','panel'); const head=el('div','panel-heading');head.append(el('h2','','已保存用例'),lifecycleButton('批量管理',()=>openBulkManager('test_case',refreshTesting)));
-  for(const [type,label] of [['http','HTTP'],['mcp','MCP'],['command','命令行']]) head.append(button(`新建 ${label} 用例`,()=>openCaseEditor({type})));
-  panel.append(head);const tools=el('div','testing-actions');
+  const panel=el('section','panel'); const head=el('div','panel-heading resource-heading');
+  const actions=el('div','resource-actions');actions.append(lifecycleButton('批量管理',()=>openBulkManager('test_case',refreshTesting)));
+  head.append(el('h2','','已保存用例'),actions);
+  for(const [type,label] of [['http','HTTP'],['mcp','MCP'],['command','命令行']]) actions.append(button(`新建 ${label} 用例`,()=>openCaseEditor({type})));
+  panel.append(head);const tools=el('div','resource-filters testing-case-tools');
   const list=el('div','testing-case-list');
   const search=searchInput('搜索已保存用例','搜索全部用例：名称、说明、请求目标',state.caseQuery,value=>{state.caseQuery=value;draw();});
   const type=el('select');type.setAttribute('aria-label','用例类型');for(const [value,label] of [['all','全部类型'],['http','HTTP'],['mcp','MCP'],['command','命令行']])type.add(new Option(label,value));type.value=state.caseType;type.onchange=()=>{state.caseType=type.value;draw();};

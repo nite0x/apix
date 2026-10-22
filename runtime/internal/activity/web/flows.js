@@ -204,7 +204,7 @@ function renderWorkspace() {
 }
 function renderLibrary(fragment) {
   const header = el('div', 'fw-library-heading'); header.append(el('div', '', `多步流程 · ${state.flows.length}`), button('＋ 新建多步流程', 'button primary', createFlow),lifecycleButton('批量管理',()=>openBulkManager('flow',refreshFlows))); fragment.append(header);
-  const filters=el('div','testing-actions');filters.append(input(state.query,'搜索流程',value=>{state.query=value;renderWorkspace();const control=root.querySelector('[aria-label="搜索流程"]');control?.focus();control?.setSelectionRange(value.length,value.length);},{placeholder:'搜索全部流程名称或说明'}),button(state.archived?'返回有效流程':'已归档流程','button',async()=>{state.archived=!state.archived;await refreshFlows();}));fragment.append(filters);
+  const filters=el('div','testing-actions fw-library-filters');filters.append(input(state.query,'搜索流程',value=>{state.query=value;renderWorkspace();const control=root.querySelector('[aria-label="搜索流程"]');control?.focus();control?.setSelectionRange(value.length,value.length);},{placeholder:'搜索全部流程名称或说明'}),button(state.archived?'返回有效流程':'已归档流程','button',async()=>{state.archived=!state.archived;await refreshFlows();}));fragment.append(filters);
   const grid = el('div', 'fw-library');
   for (const flow of state.flows.filter(item=>`${item.name} ${item.description}`.toLowerCase().includes(state.query.toLowerCase()))) {
     const card = button('', 'fw-library-card', () => void openFlow(flow.id));

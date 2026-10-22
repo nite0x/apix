@@ -107,7 +107,7 @@
   .workspace .home-links { gap: 14px; }
   .workspace .home-card { padding: 18px; }
   .workspace .home-icon { margin-bottom: 12px; }
-  .workspace .testing-toolbar { margin-bottom: 14px; }
+  .workspace .testing-toolbar { margin-bottom: 0; }
   .workspace .testing-layout, .workspace .command-layout, .workspace .mcp-layout { gap: 14px; }
   .workspace .testing-summary { padding: 12px 16px; }
   .workspace .command-result { padding: 16px; gap: 14px; }
@@ -129,3 +129,57 @@
   .workspace .page-heading { margin-bottom: 12px; }
   .workspace .page-panel .request-scroll { height: clamp(220px, calc(100dvh - 340px), 540px); }
 }
+
+
+/* Keep resource filters and management actions together at every width. */
+.resource-heading { flex-wrap: wrap; }
+.resource-heading > :first-child { min-width: 0; margin-right: auto; }
+.resource-toolbar, .resource-filters, .resource-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+.resource-toolbar { justify-content: flex-end; }
+.resource-filters input[type="search"] { width: 240px; max-width: 100%; }
+.resource-filters select { max-width: 100%; }
+.resource-filters :is(input, select), .resource-actions .button { min-height: 34px; }
+.resource-search { display: flex; min-width: 0; }
+.resource-search > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.heading-actions { flex-wrap: wrap; justify-content: flex-end; }
+.heading-actions .button { min-height: 34px; }
+.heading-actions .testing-toolbar { margin: 0; }
+.fw-library-heading { flex-wrap: wrap; }
+.fw-library-heading > :first-child { margin-right: auto; }
+
+@media (max-width: 1200px) {
+  .resource-toolbar { flex: 1 1 100%; justify-content: space-between; }
+  .page-heading:has(.testing-toolbar:not([hidden])) { flex-wrap: wrap; }
+  .page-heading:has(.testing-toolbar:not([hidden])) .heading-actions { width: 100%; }
+}
+@media (max-width: 760px) {
+  .resource-toolbar, .resource-filters, .resource-actions { width: 100%; }
+  .resource-filters > input[type="search"], .resource-search { flex: 1 1 100%; }
+  .resource-search input[type="search"] { width: 100%; }
+  .resource-filters select { flex: 1 1 120px; width: 0; }
+  .resource-actions .button { flex: 1 1 auto; }
+  .heading-actions .testing-toolbar { width: 100%; }
+  .heading-actions .testing-actions { width: 100%; justify-content: flex-end; }
+  .request-library-tools .history-pinned { width: auto; flex-direction: row; }
+}
+
+.testing-case-tools { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.testing-case-tools .testing-search { width: auto; flex: 1 1 240px; }
+.testing-case-tools .button { min-height: 34px; }
+.fw-library-filters { margin-bottom: 16px; }
+.fw-library-filters .fw-input { width: auto; flex: 1 1 240px; }
+.log-tools { flex-wrap: wrap; }

@@ -188,3 +188,23 @@ body.sidebar-collapsed { --sidebar-width: 72px; }
 
 .execution-target { outline: 2px solid var(--green, #16856c); outline-offset: 3px; scroll-margin-block: 24px; }
 .sql-action > a[data-route], .sql-action > .subtle { display:block; margin-bottom:7px; }
+
+/* Low-specificity defaults also cover controls added by workspace modules. */
+input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="color"])), select, textarea {
+  min-width: 0;
+  min-height: 34px;
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid #dfe5ea;
+  border-radius: 6px;
+  background: #fff;
+  color: #405969;
+  font: 12px/1.5 Inter, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+:where(input, textarea)::placeholder { color: #85939e; }
+:where(textarea) { resize: vertical; }
+:where(textarea):focus-visible { outline: 3px solid #72c6b4; outline-offset: 3px; }
+:where(input, select, textarea):disabled { background: #f5f7f9; color: var(--muted); cursor: default; }
+:where(input[type="checkbox"], input[type="radio"]) { accent-color: var(--green); }
+
+.search input { min-height: 0; padding: 0; border-radius: 0; }

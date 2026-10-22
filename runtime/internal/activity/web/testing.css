@@ -86,12 +86,18 @@ body:has(.testing-editor[open]){overflow:hidden}
 .testing-case-list .test-attempt{display:flex;flex-wrap:wrap;gap:12px;cursor:default;align-items:center}
 .testing-case-list .test-attempt>p{flex:1 1 220px;overflow-wrap:anywhere}
 .testing-case-list .testing-actions{flex-wrap:wrap}
-.lifecycle-dialog article.test-attempt{display:flex;flex-direction:column;align-items:stretch;gap:10px;cursor:default}
+.lifecycle-resource{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:14px 0;border-bottom:1px solid var(--line);font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.lifecycle-resource:last-child{border-bottom:0}
+.lifecycle-resource a{color:var(--green);text-decoration:none}
+.lifecycle-resource a:hover{text-decoration:underline}
 .lifecycle-dialog .testing-actions{display:flex;flex-wrap:wrap;gap:8px}
 .lifecycle-dialog code,.lifecycle-dialog pre{overflow-wrap:anywhere;white-space:pre-wrap;max-width:100%}
 .lifecycle-dialog label{display:flex;flex-direction:column;gap:6px;min-width:0}
 .lifecycle-dialog input,.lifecycle-dialog select{max-width:100%;min-width:0}
 
-.lifecycle-dialog label.test-attempt{display:flex;flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap}
-.lifecycle-dialog input[type=checkbox]{width:16px;min-width:16px;height:16px;padding:0;align-self:flex-start}
+.lifecycle-dialog label.lifecycle-resource{display:grid;grid-template-columns:16px minmax(0,1fr);align-items:start;gap:5px 10px}
+.lifecycle-dialog label.lifecycle-resource input{grid-row:1/3;align-self:start;margin-top:2px}
+.lifecycle-dialog label.lifecycle-resource p{grid-column:2}
+.testing-form input:is([type=checkbox],[type=radio]){width:16px;min-width:16px;height:16px;min-height:0;padding:0;margin:0;flex:none;align-self:center}
+.lifecycle-dialog label.lifecycle-check{flex-direction:row-reverse;align-items:center;justify-content:flex-end;gap:8px;font-weight:400}
 .testing-case-list .fw-text-button{font-size:14px;font-weight:600}
