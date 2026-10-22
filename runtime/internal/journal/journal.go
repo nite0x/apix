@@ -48,7 +48,9 @@ func New(db *sql.DB, path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db, file: f, logger: slog.New(slog.NewJSONHandler(io.MultiWriter(os.Stderr, f), nil))}
+	// Persist first: a desktop parent can disappear and close stderr while the
+	// sidecar is still recording its shutdown and cleaning managed resources.
+	s := &Store{db: db, file: f, logger: slog.New(slog.NewJSONHandler(io.MultiWriter(f, os.Stderr), nil))}
 	for _, stmt := range []string{
 		`CREATE TABLE IF NOT EXISTS runtime_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, run_id TEXT NOT NULL, step_id TEXT NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS idx_runtime_events_run ON runtime_events(run_id,sequence)`,

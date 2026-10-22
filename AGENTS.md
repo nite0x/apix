@@ -19,17 +19,21 @@
 
 - `runtime/internal/activity/web`：唯一 Web 工作台 UI，随 Go 构建内嵌。
 - `runtime`：Go 后端，管理本地数据并提供 REST、MCP 和日志服务。
-- `scripts`：开发启动、检查和独立程序打包脚本；Windows 桌面入口使用 Go + Microsoft Edge WebView2；不使用 Rust 工具链。
+- `src-tauri`：Tauri 2 桌面窗口、单实例和 Go sidecar 生命周期管理；桌面构建需要 Rust 1.90+ 及目标平台依赖。
+- `scripts`：开发启动、检查、Go sidecar 和独立后端打包脚本。
 
 以下命令均在当前项目根目录执行，除非另有注明：
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm dev:browser                   # 启动 Go 后端并打开内嵌工作台
+pnpm dev:desktop                   # 构建 Go sidecar 并启动 Tauri 桌面窗口
 pnpm check
 pnpm test:web                     # 工作台界面测试
 pnpm build:runtime
-pnpm build:windows                 # 构建 Windows 独立程序，按脚本要求准备工具链
+pnpm build:desktop                 # 在当前平台构建 Tauri 安装包
+pnpm build:windows                 # 在 Windows 使用 Rust MSVC 构建 NSIS 安装包
+pnpm test:sidecar                  # 先构建 sidecar，再验证握手、MCP 和退出清理
 cd runtime && go test ./...         # Go 测试
 ```
 
@@ -39,8 +43,8 @@ cd runtime && go test ./...         # Go 测试
 
 - Apix 工作台及后端：`http://127.0.0.1:4317/`；健康检查为 `/health`。
 - 启动前检查端口和已有进程，复用属于本项目的健康服务，避免重复启动或停止无关服务。
-- 本机默认开发数据库为 `~/.local/share/dev.apix.desktop/apix.db`，配套密钥为同目录下的 `apix.db.credentials.key`。验证时保留现有数据，不要误用 Windows 副本里的数据库或覆盖密钥。
+- 默认开发数据库按平台保留：macOS 为 `~/Library/Application Support/dev.apix.desktop/apix.db`，Linux 为 `~/.local/share/dev.apix.desktop/apix.db`，配套密钥为同目录下的 `apix.db.credentials.key`。验证时保留现有数据，不要误用 Windows 副本里的数据库或覆盖密钥。
 - 本项目中的外部业务服务配置可能指向 Windows Java 或 PowerShell 程序；这不代表它们已经迁到 Linux。没有用户明确要求时，不要启动这些外部服务来代替 Apix 自身的验证。
-- 默认使用 `pnpm dev:browser`，只访问 `http://127.0.0.1:4317/`。Web 资源内嵌在 Go 程序中，修改后需重启后端。Windows 打包使用与目标平台兼容的 Go 工具链，具体以项目脚本支持为准。
+- 默认使用 `pnpm dev:browser`，只访问 `http://127.0.0.1:4317/`。Web 资源内嵌在 Go 程序中，修改后需重启后端。桌面版默认使用回环端口 4319，由 Tauri 启动并在退出时清理 sidecar；APIX_ADDR=127.0.0.1:0 可用于隔离验证。Windows 安装包在 Windows 使用 Rust MSVC 构建，具体见 docs/DESKTOP.md。
 - 流程编排、会话人工处理及暂停规则的产品设计暂缓；保留现有执行行为，不因 UI 清理扩展或重写这些能力。
 - 保留已有未提交修改，不擅自提交、推送或重置工作区。

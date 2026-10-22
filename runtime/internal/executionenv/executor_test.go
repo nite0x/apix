@@ -45,7 +45,9 @@ func TestExecutorFixture(t *testing.T) {
 			os.Exit(3)
 		}
 		fmt.Fprintln(os.Stdout, command.Process.Pid)
-		select {}
+		// Keep the tree root alive while its child serves. A bare select{}
+		// triggers Go's deadlock detector before the child starts on macOS.
+		_ = command.Wait()
 	case "child":
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {

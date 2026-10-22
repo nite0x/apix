@@ -99,7 +99,11 @@ func helper(ctx context.Context, id string) (string, string, string, error) {
 	if err != nil {
 		return "", "", "", err
 	}
-	data, err := os.ReadFile(filepath.Join(filepath.Dir(exe), "executors", "linux-"+arch, "apix-executor"))
+	executorDir := os.Getenv("APIX_EXECUTOR_DIR")
+	if executorDir == "" {
+		executorDir = filepath.Join(filepath.Dir(exe), "executors")
+	}
+	data, err := os.ReadFile(filepath.Join(executorDir, "linux-"+arch, "apix-executor"))
 	if err != nil {
 		return "", "", "", fmt.Errorf("安装包缺少 Linux 执行助手，请重新安装 Apix：%w", err)
 	}

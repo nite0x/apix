@@ -16,13 +16,19 @@
     "test:web": "node --test runtime/internal/activity/*_web_test.mjs",
     "test": "pnpm test:web && pnpm test:runtime",
     "test:runtime": "cd runtime && go test ./...",
-    "build": "pnpm build:runtime",
+    "build": "pnpm build:desktop",
     "build:runtime": "node scripts/build-runtime.mjs",
     "build:windows": "node scripts/build-windows.mjs",
-    "test:windows-desktop": "node scripts/test-windows-desktop.mjs",
-    "test:windows-wsl": "node scripts/test-windows-wsl.mjs"
+    "test:windows-wsl": "node scripts/test-windows-wsl.mjs",
+    "dev:desktop": "tauri dev",
+    "tauri": "tauri",
+    "build:desktop": "tauri build",
+    "build:sidecar": "node scripts/build-sidecar.mjs",
+    "test:sidecar": "node scripts/test-sidecar.mjs",
+    "check:desktop": "cargo check --manifest-path src-tauri/Cargo.toml --locked"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "concurrently": "^9.2.1",
     "jsdom": "^29.1.1"
   }

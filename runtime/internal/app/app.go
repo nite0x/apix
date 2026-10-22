@@ -36,6 +36,16 @@ func Run(_ []string) error {
 	log.SetOutput(os.Stderr)
 	gin.DefaultWriter = os.Stderr
 	gin.DefaultErrorWriter = os.Stderr
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if os.Getenv("APIX_DESKTOP_SIDECAR") == "1" {
+		// A crashed shell closes its log pipes too. Treat broken stdout/stderr
+		// as write errors instead of terminating before managed-resource cleanup.
+		signal.Ignore(syscall.SIGPIPE)
+		// The desktop owns this process. EOF also handles a crashed parent on
+		// every platform, including Windows where SIGTERM is unavailable.
+		go watchDesktopControl(os.Stdin, stop)
+	}
 
 	// 1. Storage
 	dbPath := sqlitePath()
@@ -187,14 +197,18 @@ func Run(_ []string) error {
 		return err
 	}
 	aiinstall.New("http://" + listener.Addr().String() + "/mcp").Routes(r)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	go httpService.RunRetentionWorker(ctx)
 	server := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- server.Serve(listener) }()
 	history.Append("runtime.started", "", "", map[string]any{"address": listener.Addr().String(), "mcp": "/mcp"})
 	log.Printf("Activity monitor: http://%s/", listener.Addr().String())
+	if os.Getenv("APIX_DESKTOP_SIDECAR") == "1" {
+		if err := desktopReady(os.Stdout, listener.Addr().String()); err != nil {
+			_ = server.Close()
+			return fmt.Errorf("desktop readiness: %w", err)
+		}
+	}
 	select {
 	case <-ctx.Done():
 		shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)

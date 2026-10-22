@@ -7,6 +7,7 @@ Thanks for helping improve Apix.
 - Read the [development workflow](docs/development-workflow.md).
 - Install the repository toolchain with `mise trust` and `mise install`.
 - Install dependencies with `pnpm install`.
+- Desktop builds additionally require Rust 1.90+ and the [Tauri platform prerequisites](docs/DESKTOP.md).
 
 ## Local Checks
 

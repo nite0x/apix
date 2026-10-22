@@ -18,7 +18,7 @@ Apix is a local API debugging and testing workspace. A Go process serves the Web
 
 ## Development
 
-Use Ubuntu WSL in `/home/nite/projects/apix` with Linux Node.js 22.20+, pnpm 9.15+, and Go 1.23+. Optional mise versions are declared in `.mise.toml`.
+Use the current macOS, Linux, Windows or WSL workspace with Node.js 22.20+, pnpm 9.15+, and Go 1.23+. Desktop development additionally requires Rust 1.90+ and the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/). Optional mise versions are declared in `.mise.toml`.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -29,7 +29,7 @@ pnpm dev
 
 Web assets live in `runtime/internal/activity/web` and are embedded at Go build time. Restart the runtime after editing them.
 
-Development keeps the existing database at `~/.local/share/dev.apix.desktop/apix.db` and its adjacent credentials key. This data path is retained to preserve existing data. Set `APIX_DB_PATH` for an isolated database. Direct executable startup defaults to `apix.db` in the caller's directory.
+Development keeps the existing database and adjacent credentials key in `~/Library/Application Support/dev.apix.desktop/` on macOS, `$XDG_DATA_HOME/dev.apix.desktop/` (default `~/.local/share/`) on Linux, or `%LOCALAPPDATA%\dev.apix.desktop\` on Windows. Set `APIX_DB_PATH` for an isolated database. Direct executable startup defaults to `apix.db` in the caller's directory.
 
 ## Checks
 
@@ -42,22 +42,29 @@ pnpm build
 
 `pnpm check` checks Web and tooling JavaScript syntax. Web tests use Node's test runner and jsdom. Go tests cover the backend.
 
-## Standalone build
+## Desktop and standalone builds
 
 ```bash
-pnpm build
-pnpm build:windows
+pnpm dev:desktop                 # Tauri window + freshly built Go sidecar
+pnpm build                       # native Tauri installer (same as build:desktop)
+pnpm build:windows               # Windows only: NSIS installer with Rust MSVC
+pnpm build:runtime               # standalone Go backend in release/
+pnpm build:sidecar && pnpm test:sidecar
 ```
 
-The host build writes `apix-runtime` and the optional demo API to `release/`. The Windows build uses Linux Go and Python 3 to create `release/Apix_<version>_windows-x64.zip`. Its `Install.ps1` installs two standalone programs and creates an Apix desktop shortcut. The Go launcher runs the background server without a console and hosts the workspace in a native Microsoft Edge WebView2 window on port 4319. Reopening the shortcut activates the existing window. Microsoft Edge WebView2 Evergreen Runtime is required; the installer checks for it and provides the official download link when absent. See [Windows installation](docs/WINDOWS.md).
+Tauri 2 owns the desktop window and Go sidecar. The same Go binary serves the embedded workspace, REST and MCP; the desktop loads it after a readiness handshake. Reopening the app focuses the existing window. Closing the window or quitting gracefully stops the owned backend and its managed resources. For an always-on MCP runtime, run the standalone backend instead.
 
-On Windows, `start.ps1` keeps data and logs in the release's `data` directory unless configured explicitly. The optional demo API is for smoke tests and is not started with the workspace.
+Desktop MCP stays at `http://127.0.0.1:4319/mcp` by default; browser development stays on 4317. Windows retains `%LOCALAPPDATA%\Apix\data`; macOS and Linux retain the developer data directories above. Data and credentials are never included in installers. See [desktop build and lifecycle](docs/DESKTOP.md) and [Windows installation](docs/WINDOWS.md).
+
+The host backend build writes `apix-runtime` and the optional demo API to `release/`. On Windows, `start.ps1` keeps data and logs in the release's `data` directory unless configured explicitly. The demo API is not started with the workspace.
 
 ## Repository layout
 
 - `runtime/internal/activity/web`: the only UI source.
 - `runtime`: Go runtime, REST, MCP, SQLite, and service management.
-- `scripts`: development, standalone builds, and checks.
+- `src-tauri`: Tauri desktop shell and native installer configuration.
+- `desktop`: small startup screen and icon source; the workspace UI stays embedded in Go.
+- `scripts`: development, sidecar and standalone builds, and checks.
 - `docs`: [user guide](docs/user-guide.md), [development workflow](docs/development-workflow.md).
 
 ## Endpoints

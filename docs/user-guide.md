@@ -4,7 +4,7 @@ Apix runs as one local Web workspace at `http://127.0.0.1:4317/`. The same Go pr
 
 ## Startup
 
-From the project root in Ubuntu WSL:
+From the project root in your current operating system:
 
 ```bash
 pnpm dev
@@ -12,7 +12,7 @@ pnpm dev
 
 Use `pnpm dev:backend` to start only the runtime. Restart after changing embedded Web assets. A standalone release can run without Node.js or a separate frontend build.
 
-Development keeps the existing database and credentials key in `~/.local/share/dev.apix.desktop/`. For standalone configuration and alternate data directories, see [the runtime guide](../runtime/GUIDE.md).
+Use `pnpm dev:desktop` for the Tauri desktop window, or install a native desktop package. Closing the window stops its owned backend. Platform data directories, build requirements and migration details are listed in [the desktop guide](DESKTOP.md); standalone configuration is in [the runtime guide](../runtime/GUIDE.md).
 
 ## Requests and the interface library
 

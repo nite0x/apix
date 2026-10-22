@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Apix",
+  "version": "../package.json",
+  "identifier": "dev.apix.desktop",
+  "build": {
+    "beforeDevCommand": "node scripts/build-sidecar.mjs",
+    "beforeBuildCommand": "node scripts/build-sidecar.mjs",
+    "frontendDist": "../desktop"
+  },
+  "app": {
+    "windows": [{
+      "label": "main",
+      "title": "Apix",
+      "width": 1440,
+      "height": 960,
+      "minWidth": 960,
+      "minHeight": 640
+    }],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'",
+      "capabilities": []
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": ["binaries/apix-runtime"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "resources": {"../LICENSE": "LICENSE"},
+    "category": "DeveloperTool",
+    "shortDescription": "Local API debugging and testing workspace",
+    "macOS": {"minimumSystemVersion": "10.15"},
+    "windows": {
+      "webviewInstallMode": {"type": "downloadBootstrapper"},
+      "nsis": {"installMode": "currentUser", "displayLanguageSelector": true, "languages": ["English", "SimpChinese"]}
+    }
+  }
+}

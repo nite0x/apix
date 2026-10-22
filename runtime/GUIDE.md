@@ -4,7 +4,7 @@ Apix Runtime 可以独立运行，供 AI 通过 MCP 调用，也可以直接调�
 
 Runtime 已嵌入工作台页面。启动后打开 `http://127.0.0.1:4317/` 进入主页，通过左侧导航切换：主页 `/` 显示运行概况，服务 `/services` 查看状态和启停服务，接口 `/requests` 调试请求、管理接口库并查看最近 200 条执行记录，数据库 `/databases` 管理 MySQL、PostgreSQL 和 Hologres 连接，接口测试 `/tests` 按批次查看不同入参的验证结果并管理可复用用例，测试流程 `/flows` 编排有步骤依赖的业务流程，日志 `/logs` 查看运行事件及服务 stdout/stderr。侧边栏支持折叠为图标导航，悬停或键盘聚焦显示名称，当前页面高亮，并在本机浏览器记住折叠状态；窄屏默认折叠。服务、接口和日志每秒自动更新，支持接口搜索、日志来源筛选和暂停显示；服务卡片的“查看日志”可直接跳转并筛选对应服务。各页面地址支持直接打开、刷新和浏览器前进后退。自定义 `APIX_ADDR` 时使用相应地址。
 
-命令行 `/commands` 支持一次性程序或脚本、独立参数、工作目录、环境变量和 stdin，验证退出码与 stdout/stderr，并复用 `/tests` 的保存用例与测试批次。执行发生在 Runtime 所在系统；当前 WSL 开发环境使用 Linux 工具链。完整示例见成品包内 `COMMAND_TESTING.md`（源码位置为 `docs/COMMAND_TESTING.md`）。
+命令行 `/commands` 支持一次性程序或脚本、独立参数、工作目录、环境变量和 stdin，验证退出码与 stdout/stderr，并复用 `/tests` 的保存用例与测试批次。执行发生在 Runtime 所在系统，使用该系统的工具链；Windows 版也支持显式选择 WSL 环境。完整示例见成品包内 `COMMAND_TESTING.md`（源码位置为 `docs/COMMAND_TESTING.md`）。
 
 接口测试支持临时用例、保存用例、批量运行、独立重试和断言预期/实际对比。AI 使用 `begin_test_batch` 开始本次任务，后续调用显式携带 `batch_id`，结束时调用 `finish_test_batch`；不需要为独立接口输入变体创建 Flow。完整调用示例见成品包内的 `API_TESTING.md`（源码位置为 `docs/API_TESTING.md`）。
 
@@ -21,12 +21,12 @@ Runtime 已嵌入工作台页面。启动后打开 `http://127.0.0.1:4317/` 进�
 
 ## 启动
 
-开发命令在 Ubuntu WSL 的项目根目录执行，使用 Linux Node.js、pnpm 和 Go：
+开发命令在当前系统的项目根目录执行，使用对应平台的 Node.js、pnpm 和 Go：
 
 ```bash
-cd /home/nite/projects/apix
 pnpm dev
 # 仅运行后端：pnpm dev:backend
+# Tauri 桌面窗口：pnpm dev:desktop
 ```
 
 直接运行成品只需要当前操作系统对应的可执行程序。Linux 成品：
@@ -35,7 +35,7 @@ pnpm dev
 ./release/apix-runtime
 ```
 
-Windows 独立成品在 WSL 中通过 `pnpm build:windows` 交叉编译到 `release/windows-x64`。将成品放到 Windows 目录后运行 `start.ps1`；它默认把配置和日志保存在脚本旁的 `data` 目录：
+Windows 独立后端可在 Windows 运行 `pnpm build:runtime`，也可在 WSL 使用 `GOOS=windows GOARCH=amd64 APIX_OUTPUT_DIR=release/windows-x64 pnpm build:runtime` 交叉编译。将成品放到 Windows 目录后运行 `start.ps1`；它默认把配置和日志保存在脚本旁的 `data` 目录。原生桌面安装包请使用 [Tauri 桌面构建](../docs/DESKTOP.md) 的 `pnpm build:windows`：
 
 ```powershell
 .\start.ps1
