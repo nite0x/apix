@@ -61,3 +61,7 @@ Implemented the service page, controlled RHF/Zod editor, canonical execution-env
 ## Stage 4 — workspaces
 
 Migrated home, HTTP requests/collections, database connections and SQL, MCP tools, command execution/case editors, AI tool integration and live logs. Feature suites passed: requests 10, databases 8, tools 9, AI tools 3 (30 total). Dedicated large-cell inspectors and 100-row SQL result pagination avoid mounting all 10,000 possible rows. Password omission, masked header preservation, edit versions and real backend batch ownership semantics remain intact. Live logs retain pause/autoscroll/source deep links and screen-only clearing. Application routes are lazy-loaded. API cancellation now combines caller signals with operation timeouts.
+
+## Stage 5 — cases, flows and execution records
+
+Migrated saved cases, HTTP/MCP/command editors, flow definitions and typed steps, assertions/extractors/output references, run inputs, execution batches and immutable flow results. Preserved version conflicts, incremental saves, selected result tabs, archived/deleted dependencies and purged-definition snapshots. Regression fixes include React StrictMode save lifecycle, invalid SQL JSON drafts across tab changes, environment-provided required variables and dirty lifecycle action protection. Existing route aliases/query links are normalized without losing batch/run/step IDs.
