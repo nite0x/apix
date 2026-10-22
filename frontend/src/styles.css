@@ -1,0 +1,39 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+@theme inline {
+  --color-background: var(--background); --color-foreground: var(--foreground);
+  --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive); --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px);
+}
+:root {
+  font-family: Inter, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --radius: .5rem; --background: #f8fafb; --foreground: #1d2935;
+  --card: #fff; --card-foreground: #1d2935; --popover: #fff; --popover-foreground: #1d2935;
+  --primary: #13795f; --primary-foreground: #fff; --secondary: #eef2f5; --secondary-foreground: #293846;
+  --muted: #f1f4f6; --muted-foreground: #647482; --accent: #e7f2ed; --accent-foreground: #11664f;
+  --destructive: #be3c3c; --border: #e1e7eb; --input: #d5dfe5; --ring: #16856c;
+}
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body { @apply m-0 bg-background text-foreground antialiased; font-size: 13px; }
+  button, a, input, select, textarea { touch-action: manipulation; }
+  button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
+  pre, code, textarea[spellcheck="false"] { font-family: "Cascadia Code", Consolas, monospace; }
+}
+@layer components {
+  .toolbar { @apply flex flex-wrap items-end gap-2; }
+  .form-grid { @apply grid gap-4 sm:grid-cols-2; }
+  .stack { @apply space-y-4; }
+  .panel { @apply rounded-lg border bg-card p-4; }
+  .data-grid { @apply w-full border-collapse text-left text-xs; }
+  .data-grid th { @apply border-b bg-muted px-3 py-2 font-medium text-muted-foreground; }
+  .data-grid td { @apply border-b px-3 py-2 align-top; }
+}

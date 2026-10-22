@@ -2,6 +2,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildWeb } from './build-web.mjs';
+
+buildWeb();
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const targets = {

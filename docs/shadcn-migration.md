@@ -46,8 +46,10 @@ Cross-cutting: dirty drafts survive polling/errors; submit actions cannot double
 
 ## Validation record
 
-Not yet executed for the migration. Record actual commands/results and platform limitations here before completion.
+Foundation: `pnpm build:web` passed; API/dirty-navigation tests passed (5 assertions/tests across 2 files); `go test ./internal/activity` passed with the new static asset mount. Full-feature checks follow after all modules are integrated.
 
 ## Decision log
 
 - 2026-10-22: Use isolated feature modules during parallel implementation; shared component/API contracts are coordinated centrally. Retain all existing API semantics rather than inventing per-page operations absent from the backend.
+
+- Foundation: official `shadcn` CLI generated the local Radix-based components. Multiple editor dirty scopes are aggregated into one router blocker. Go dependencies downloaded successfully using the configured proxy; the older environment startup note about blocked downloads is stale.

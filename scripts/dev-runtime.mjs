@@ -4,6 +4,9 @@ import { homedir } from "node:os";
 import http from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildWeb } from './build-web.mjs';
+
+buildWeb();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");

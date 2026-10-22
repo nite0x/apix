@@ -77,6 +77,28 @@ func Routes(r gin.IRouter, db *sql.DB, services *localservice.Service, history *
 	r.GET("/logs", servePage)
 	r.GET("/ai-tools", servePage)
 	web, _ := fs.Sub(assets, "web")
+	ui, _ := fs.Sub(assets, "web/dist")
+	r.GET("/activity/ui/*path", func(c *gin.Context) {
+		name := strings.TrimPrefix(c.Param("path"), "/")
+		if name == "" {
+			name = "index.html"
+		}
+		if !fs.ValidPath(name) {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if _, err := fs.Stat(ui, name); err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(name, "assets/") {
+			c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			c.Header("Cache-Control", "no-cache")
+		}
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.FileFromFS(name, http.FS(ui))
+	})
 	r.GET("/activity/assets/:name", func(c *gin.Context) {
 		name := c.Param("name")
 		if name != "execution-environments.js" && name != "lifecycle-ui.js" && name != "execution-history.js" && name != "execution-history.css" && name != "execution-batch.js" && name != "command-tools.js" && name != "command-tools.css" && name != "mcp-tools.js" && name != "mcp-tools.css" && name != "ai-tools.js" && name != "ai-tools.css" && name != "request-api.js" && name != "request-library.js" && name != "request-history.js" && name != "workspace-tabs.js" && name != "app.js" && name != "request-detail.js" && name != "service-detail.js" && name != "databases.js" && name != "style.css" && name != "desktop.css" && name != "services.css" && name != "flows.js" && name != "flow-model.js" && name != "flows.css" && name != "testing.js" && name != "testing.css" && name != "manual-request.js" && name != "manual-request.css" && name != "service-editor.js" && name != "manual-tools.css" {
