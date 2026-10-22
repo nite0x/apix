@@ -86,7 +86,7 @@ pnpm check
 pnpm test
 ```
 
-If the change affects embedded Web assets or release packaging, also run:
+If the change affects embedded Web assets, also run `pnpm build:web` and the isolated [browser verification](../frontend/e2e/README.md). Runtime build entrypoints compile the frontend before Go. For native release packaging, also run:
 
 ```bash
 pnpm build

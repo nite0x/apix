@@ -6,10 +6,15 @@ on:
     paths:
       - 'src-tauri/**'
       - 'desktop/**'
+      - 'frontend/**'
       - 'runtime/**'
       - 'scripts/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
+      - 'components.json'
+      - 'tsconfig.json'
+      - 'eslint.config.mjs'
+      - '.prettierrc.json'
       - '.github/workflows/desktop.yml'
 
 permissions:

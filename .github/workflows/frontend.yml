@@ -1,0 +1,62 @@
+name: Frontend verification
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - 'runtime/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'components.json'
+      - 'tsconfig.json'
+      - 'eslint.config.mjs'
+      - '.prettierrc.json'
+      - '.github/workflows/frontend.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.12'
+          cache-dependency-path: runtime/go.sum
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm format:check
+      - run: pnpm test:web
+      - run: pnpm build:web
+      - run: go build -o "$RUNNER_TEMP/apix-e2e" .
+        working-directory: runtime
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Verify production UI with isolated data
+        shell: bash
+        run: |
+          task_data=$(mktemp -d)
+          APIX_ADDR=127.0.0.1:4317 APIX_DB_PATH="$task_data/apix.db" APIX_LOG_PATH="$task_data/runtime.log" "$RUNNER_TEMP/apix-e2e" > "$task_data/server.log" 2>&1 &
+          task_pid=$!
+          trap 'kill "$task_pid" 2>/dev/null || true; wait "$task_pid" 2>/dev/null || true; rm -rf "$task_data"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4317/health > /dev/null; then break; fi
+            if ! kill -0 "$task_pid" 2>/dev/null; then cat "$task_data/server.log"; exit 1; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4317/health
+          APIX_E2E_ISOLATED=1 pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-browser-evidence
+          path: test-results/
+          if-no-files-found: ignore

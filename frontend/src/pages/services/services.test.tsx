@@ -28,6 +28,59 @@ function fillNew() {
   });
 }
 describe('service editor migration', () => {
+  it('checks the selected WSL user and pins the canonical environment when saving', async () => {
+    const writes: { url: string; body: any }[] = [];
+    const definition = {
+      id: 'wsl-service',
+      edit_version: 9,
+      name: 'WSL service',
+      command: 'java',
+      work_dir: '/home/nite/project',
+      args: [],
+      env: { PROFILE: 'dev' },
+      health_url: 'http://127.0.0.1:8080/health',
+      startup_timeout_ms: 30000,
+      environment_id: 'wsl:Ubuntu:nite',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, options: RequestInit = {}) => {
+        if (url === '/api/execution-environments')
+          return response({
+            items: [
+              { id: 'local', name: '本机' },
+              { id: 'wsl:Ubuntu', name: 'Ubuntu' },
+            ],
+          });
+        if (url === '/api/services/wsl-service') return response({ definition });
+        const body = JSON.parse(String(options.body));
+        writes.push({ url, body });
+        if (url.endsWith('/check'))
+          return response({
+            id: body.environment_id,
+            name: 'Ubuntu · ci user',
+            program: '/usr/bin/java',
+          });
+        return response({ ...body, edit_version: 10 });
+      }),
+    );
+    const { client, onClose } = renderEditor('wsl-service');
+    await waitFor(() => expect(screen.getByLabelText('WSL 用户')).toHaveValue('nite'));
+    fireEvent.change(screen.getByLabelText('WSL 用户'), { target: { value: 'ci user' } });
+    fireEvent.click(screen.getByRole('button', { name: '检查运行环境' }));
+    expect(await screen.findByText(/检查通过 · Ubuntu/)).toBeInTheDocument();
+    expect(writes[0]).toMatchObject({
+      url: '/api/execution-environments/check',
+      body: { environment_id: 'wsl:Ubuntu:ci%20user', program: 'java', env: { PROFILE: 'dev' } },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(writes[1]).toMatchObject({
+      url: '/api/services',
+      body: { id: 'wsl-service', edit_version: 9, environment_id: 'wsl:Ubuntu:ci%20user' },
+    });
+    client.clear();
+  });
   it('validates JSON before writing and save-only prevents duplicate writes and pending dismissal', async () => {
     const writes: any[] = [];
     let release: (() => void) | undefined;

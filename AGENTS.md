@@ -17,7 +17,8 @@
 
 ## 项目结构和常用命令
 
-- `runtime/internal/activity/web`：唯一 Web 工作台 UI，随 Go 构建内嵌。
+- `frontend`：唯一工作台 UI 源码，使用 React、TypeScript、Tailwind 和本地 shadcn/ui 组件。
+- `runtime/internal/activity/web/dist`：生成的前端资源，随 Go 构建内嵌；不要手动编辑或提交。
 - `runtime`：Go 后端，管理本地数据并提供 REST、MCP 和日志服务。
 - `src-tauri`：Tauri 2 桌面窗口、单实例和 Go sidecar 生命周期管理；桌面构建需要 Rust 1.90+ 及目标平台依赖。
 - `scripts`：开发启动、检查、Go sidecar 和独立后端打包脚本。
@@ -28,13 +29,16 @@
 pnpm install --frozen-lockfile
 pnpm dev:browser                   # 启动 Go 后端并打开内嵌工作台
 pnpm dev:desktop                   # 构建 Go sidecar 并启动 Tauri 桌面窗口
-pnpm check
-pnpm test:web                     # 工作台界面测试
+pnpm check                        # TypeScript、React Hooks 和脚本检查
+pnpm format:check
+pnpm test:web                     # Vitest / Testing Library 工作台测试
+pnpm build:web                    # 单独构建内嵌前端资源
+pnpm dev:frontend                 # 可选 Vite HMR，1420 端口，代理到 Go 4317
 pnpm build:runtime
 pnpm build:desktop                 # 在当前平台构建 Tauri 安装包
 pnpm build:windows                 # 在 Windows 使用 Rust MSVC 构建 NSIS 安装包
 pnpm test:sidecar                  # 先构建 sidecar，再验证握手、MCP 和退出清理
-cd runtime && go test ./...         # Go 测试
+pnpm test:runtime                  # 先构建前端，再执行全部 Go 测试
 ```
 
 根据本次修改选择必要检查；单纯修改文档时无需重新构建或运行整套测试。
@@ -45,6 +49,6 @@ cd runtime && go test ./...         # Go 测试
 - 启动前检查端口和已有进程，复用属于本项目的健康服务，避免重复启动或停止无关服务。
 - 默认开发数据库按平台保留：macOS 为 `~/Library/Application Support/dev.apix.desktop/apix.db`，Linux 为 `~/.local/share/dev.apix.desktop/apix.db`，配套密钥为同目录下的 `apix.db.credentials.key`。验证时保留现有数据，不要误用 Windows 副本里的数据库或覆盖密钥。
 - 本项目中的外部业务服务配置可能指向 Windows Java 或 PowerShell 程序；这不代表它们已经迁到 Linux。没有用户明确要求时，不要启动这些外部服务来代替 Apix 自身的验证。
-- 默认使用 `pnpm dev:browser`，只访问 `http://127.0.0.1:4317/`。Web 资源内嵌在 Go 程序中，修改后需重启后端。桌面版默认使用回环端口 4319，由 Tauri 启动并在退出时清理 sidecar；APIX_ADDR=127.0.0.1:0 可用于隔离验证。Windows 安装包在 Windows 使用 Rust MSVC 构建，具体见 docs/DESKTOP.md。
+- 默认使用 `pnpm dev:browser`，只访问 `http://127.0.0.1:4317/`。Web 资源内嵌在 Go 程序中，修改后需重新构建并重启后端。可同时启动 `pnpm dev:frontend` 使用 `http://127.0.0.1:1420/` 进行前端 HMR；最终验收仍使用 Go 提供的生产页面。干净检出后直接运行 Go 命令前先执行 `pnpm build:web`。桌面版默认使用回环端口 4319，由 Tauri 启动并在退出时清理 sidecar；APIX_ADDR=127.0.0.1:0 可用于隔离验证。Windows 安装包在 Windows 使用 Rust MSVC 构建，具体见 docs/DESKTOP.md。
 - 流程编排、会话人工处理及暂停规则的产品设计暂缓；保留现有执行行为，不因 UI 清理扩展或重写这些能力。
 - 保留已有未提交修改，不擅自提交、推送或重置工作区。

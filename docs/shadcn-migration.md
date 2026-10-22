@@ -93,3 +93,54 @@ business services were used; browser tests used `/tmp/apix-shadcn-e2e/`.
 Decision details: SQL records use existing execution-batch management (there is
 no SQL-specific pin/hide API). Step output selection copies and displays a
 reference for pasting instead of inserting at the former cursor position.
+
+## Stage 7 — cutover and cleanup
+
+Removed the 32 original HTML/JavaScript/CSS files and 19 DOM-ID-based test files.
+Go embeds only `web/dist`; the old static filename whitelist and old asset route
+are removed. New test entrypoints use Vitest/Testing Library. Removed unused
+`cn`, duplicate direct Radix packages and the unused TanStack Table dependency.
+Updated README, AGENTS, frontend architecture instructions and CI: frontend
+changes trigger the native desktop matrix, and a dedicated browser job builds and
+runs an isolated production runtime with Playwright evidence artifacts.
+
+The final service regression also covers selected-user WSL environment checks,
+canonical environment IDs, unchanged edit versions and saving without launching
+WSL. This is a mocked UI contract test; host-specific WSL execution remains
+covered by existing Go/platform acceptance tests.
+
+### Behavior test replacement map
+
+| Previous test area | Replacement evidence |
+| --- | --- |
+| AI installation/verification/removal | `pages/ai-tools/ai-tools.test.tsx`, lifecycle tests |
+| Service management/manual service/environment | `pages/services/services.test.tsx`, real browser service workflow |
+| Collections/import/request drafts/history | `pages/requests/{model,requests,detail}.test.*`, real HTTP persistence workflow |
+| Database editor/manual SQL/results/history | `pages/databases/{model,databases}.test.*`, browser SQL validation workflow |
+| MCP server/tool/history | `pages/mcp/{model,index}.test.*`, shared command execution helpers |
+| Command execution/cases/history | `pages/commands/{model,index}.test.*` |
+| Saved-case lifecycle/edit/retry/batches | `pages/testing/testing.test.tsx`, lifecycle tests, records tests |
+| Flow models/output references/order/failure policies | `pages/flows/model.test.ts` |
+| Flow save/conflict/draft/navigation | `pages/flows/flows.test.tsx`, `lib/use-dirty.test.tsx`, browser flow workflow |
+| Execution records/layout/typed details/purged definitions | `pages/records/records.test.tsx`, request detail tests, browser immutable run links |
+| Archive/restore/bulk/cleanup/retention/stored logs | `components/lifecycle/lifecycle.test.tsx` |
+| Live logs, pause, clear, source selection, safe output | `pages/logs/logs.test.tsx` |
+| Legacy routes, static assets, CSP | `lib/routes.test.ts`, nonce test, Go activity test and production browser suite |
+
+### Stage commits
+
+1. `e8d89d6` — inventory and behavior baseline.
+2. `4a2498d` — engineering foundation and build pipeline.
+3. `8affb58` — service vertical slice and lifecycle components.
+4. `06b1845` — request/database/tool/overview workspaces.
+5. `3888162` — saved cases, flows and execution records.
+6. `2af63b4` — production/browser/sidecar verification and source formatting.
+7. Final cleanup commit — legacy removal, CI and documentation.
+
+Final cutover validation: 60/60 frontend tests, 7/7 production browser tests,
+full Go regression, frozen-lockfile installation, standalone release build,
+sidecar lifecycle/MCP checks, YAML parsing and diff/format/type/Hooks checks all
+passed. The browser suite was repeated against the final `release/apix-runtime`
+with legacy sources/routes removed; `/activity/assets/app.js` returns 404.
+The dedicated test backend was stopped after verification. Local changes are
+committed on the migration branch; no remote push or release was performed.
