@@ -6,7 +6,9 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
   const url = path.startsWith('/api/') || path === '/api' ? path : `/api${path.startsWith('/') ? '' : '/'}${path}`;
   const headers = new Headers(options.headers);
   if (options.body != null && !(options.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  const response = await fetch(url, { cache: 'no-store', ...options, headers, signal: options.signal ?? AbortSignal.timeout(url === '/api/runs' ? 70000 : 330000) });
+  const timeout = AbortSignal.timeout(url === '/api/runs' ? 70000 : (!options.method || options.method === 'GET') ? 15000 : url === '/api/execution-environments/check' ? 45000 : 330000);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  const response = await fetch(url, { cache: 'no-store', ...options, headers, signal });
   if (response.status === 204) return null as T;
   const text = await response.text();
   let data: any;

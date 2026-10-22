@@ -11,7 +11,10 @@ describe('runtime API contract', () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: '版本冲突', edit_version: 3 }), { status: 409 }));
     vi.stubGlobal('fetch', fetcher); const controller = new AbortController();
     await expect(api('/requests/x', { signal: controller.signal })).rejects.toMatchObject({ status: 409, data: { edit_version: 3 } });
-    expect(fetcher.mock.calls[0][1].signal).toBe(controller.signal);
+    const combined = fetcher.mock.calls[0][1].signal as AbortSignal;
+    expect(combined.aborted).toBe(false);
+    controller.abort();
+    expect(combined.aborted).toBe(true);
   });
   it('does not treat arbitrary failed operations as persisted runs', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'x', error: 'protected', request_snapshot: {} }), { status: 409 })));
