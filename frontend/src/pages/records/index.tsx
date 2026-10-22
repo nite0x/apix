@@ -5,9 +5,23 @@ import { api, json } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { PageHeader, EmptyState, ErrorAlert, Field, CodeBlock, SelectField, StatusBadge } from '@/components/shared';
+import {
+  PageHeader,
+  EmptyState,
+  ErrorAlert,
+  Field,
+  CodeBlock,
+  SelectField,
+  StatusBadge,
+} from '@/components/shared';
 import { RecordActions, RetentionPolicy } from '@/components/lifecycle';
 import { CommandCaseEditor } from '@/pages/commands';
 import { MCPCaseEditor } from '@/pages/mcp';
@@ -15,28 +29,646 @@ import { HTTPCaseEditor, RunCasesDialog } from '@/pages/testing/case-editor';
 import { Check } from '@/pages/flows/fields';
 import FlowRunView from './flow-run';
 import { Assertions, RunOutput, runInput, runTarget, duration } from './results';
-const options=(values:[string,string][])=>values.map(([value,label])=>({value,label}));
-const resultTypes=[['all','全部','total'],['failed','断言失败','failed'],['error','执行错误','errors'],['passed','通过','passed'],['unverified','未验证','unverified'],['running','进行中','running']];
-export default function RecordsPage(){
- const[params,setParams]=useSearchParams();const flowView=!params.has('batch')&&(params.has('run')||params.has('id'));
- return <div className="space-y-5"><PageHeader title="执行记录" description="统一查看流程和独立执行的输入、断言与结果。" actions={<RetentionPolicy/>}/>{flowView?<FlowRunView/>:<BatchRecords params={params} setParams={setParams}/>}</div>;
+const options = (values: [string, string][]) => values.map(([value, label]) => ({ value, label }));
+const resultTypes = [
+  ['all', '全部', 'total'],
+  ['failed', '断言失败', 'failed'],
+  ['error', '执行错误', 'errors'],
+  ['passed', '通过', 'passed'],
+  ['unverified', '未验证', 'unverified'],
+  ['running', '进行中', 'running'],
+];
+export default function RecordsPage() {
+  const [params, setParams] = useSearchParams();
+  const flowView = !params.has('batch') && (params.has('run') || params.has('id'));
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="执行记录"
+        description="统一查看流程和独立执行的输入、断言与结果。"
+        actions={<RetentionPolicy />}
+      />
+      {flowView ? <FlowRunView /> : <BatchRecords params={params} setParams={setParams} />}
+    </div>
+  );
 }
-function BatchRecords({params,setParams}:{params:URLSearchParams;setParams:(value:URLSearchParams|Record<string,string>,options?:{replace?:boolean})=>void}){
- const[selected,setSelected]=useState(params.get('batch')||'');const[target,setTarget]=useState(params.get('step')||'');const[search,setSearch]=useState('');const[type,setType]=useState(params.get('type')==='flow'?'flow':'');const[executionType,setExecutionType]=useState('');const[status,setStatus]=useState('');const[hidden,setHidden]=useState(false);const[after,setAfter]=useState('');const[before,setBefore]=useState('');const[offset,setOffset]=useState(0);const[resultSearch,setResultSearch]=useState('');const[filter,setFilter]=useState('all');const[order,setOrder]=useState('sequence');const[error,setError]=useState<unknown>(null);const[newOpen,setNewOpen]=useState(false);const[newName,setNewName]=useState('');const[caseEditor,setCaseEditor]=useState<any>(null);const[caseKind,setCaseKind]=useState('');const[retry,setRetry]=useState<string[]>([]);const[tab,setTab]=useState('assertions');const client=useQueryClient();
- useEffect(()=>{setSelected(params.get('batch')||'');setTarget(params.get('step')||'');},[params]);
- const query=new URLSearchParams({q:search,type,execution_type:executionType,status,hidden:String(hidden),offset:String(offset),limit:'50'});if(after)query.set('after',new Date(after).toISOString());if(before)query.set('before',new Date(before).toISOString());
- const list=useQuery({queryKey:['execution-records',query.toString()],queryFn:({signal})=>api<{items:any[];total:number}>(`/execution-records?${query}`,{signal}),refetchInterval:3000});
- const selectedID=selected||list.data?.items?.[0]?.id||'';const detail=useQuery({queryKey:['test-batch',selectedID],queryFn:({signal})=>api<any>(`/test-batches/${encodeURIComponent(selectedID)}`,{signal}),enabled:!!selectedID,refetchInterval:q=>q.state.data?.status==='running'||q.state.data?.counts?.running?1200:false});
- const batch=detail.data;const run=batch?.runs?.find((item:any)=>item.id===target);const session=useQuery({queryKey:['batch-session',selectedID],queryFn:({signal})=>api<any>(`/sessions/${encodeURIComponent(selectedID)}`,{signal}),enabled:!!batch?.counts?.running,retry:false,refetchInterval:1200});const paused=session.data?.steps?.find((step:any)=>step.status==='paused');
- const refresh=async()=>{await Promise.all([client.invalidateQueries({queryKey:['execution-records']}),client.invalidateQueries({queryKey:['test-batch']})]);};
- const action=useMutation({mutationFn:({path,body}:{path:string;body?:unknown})=>json<any>(path,body||{}),onSuccess:refresh,onError:setError});
- const choose=(id:string,step='')=>{setSelected(id);setTarget(step);setTab('assertions');setParams(step?{batch:id,step}:{batch:id});};
- const saveCase=(item:any)=>{setCaseKind(item.type||'http');setCaseEditor(item);};
- const runs=(batch?.runs||[]).filter((item:any)=>(filter==='all'||item.status===filter)&&`${item.name} ${runTarget(item)} ${item.error_message||''} ${item.id}`.toLowerCase().includes(resultSearch.toLowerCase()));
- if(order==='issues')runs.sort((a:any,b:any)=>Number(['failed','error'].includes(b.status))-Number(['failed','error'].includes(a.status)));else if(order==='target')runs.sort((a:any,b:any)=>runTarget(a).localeCompare(runTarget(b)));
- return <><ErrorAlert error={error||list.error||detail.error}/><Card><CardContent className="space-y-3 pt-5"><div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5"><Field label="搜索执行记录"><Input type="search" aria-label="搜索执行记录" placeholder="名称、目标或批次 ID" value={search} onChange={e=>{setSearch(e.target.value);setOffset(0);}}/></Field><SelectField label="记录来源类型" value={type} onValueChange={value=>{setType(value);setOffset(0);}} options={options([['','全部类型'],['collection','独立执行 / 集合'],['flow','多步流程']])}/><SelectField label="执行类型" value={executionType} onValueChange={value=>{setExecutionType(value);setOffset(0);}} options={options([['','全部执行类型'],['http','HTTP'],['mcp','MCP'],['command','命令行'],['sql','SQL'],['service','服务']])}/><SelectField label="批次状态" value={status} onValueChange={value=>{setStatus(value);setOffset(0);}} options={options([['','全部状态'],['running','运行中'],['completed','已结束'],['interrupted','已中断']])}/><Check label="查询已隐藏记录" value={hidden} onChange={value=>{setHidden(value);setOffset(0);}}/></div><div className="flex flex-wrap items-end gap-3"><Field label="开始时间"><Input type="datetime-local" aria-label="开始时间" value={after} onChange={e=>{setAfter(e.target.value);setOffset(0);}}/></Field><Field label="结束时间"><Input type="datetime-local" aria-label="结束时间" value={before} onChange={e=>{setBefore(e.target.value);setOffset(0);}}/></Field><Button variant="outline" onClick={()=>void refresh()}>刷新记录</Button><Button onClick={()=>setNewOpen(true)}>新建集合测试</Button></div></CardContent></Card><div className="grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]"><Card><CardHeader><CardTitle>执行批次 · {list.data?.total||0}</CardTitle></CardHeader><CardContent className="space-y-2"><div className="max-h-[65vh] space-y-2 overflow-auto">{(list.data?.items||[]).map(item=><Button key={item.id} variant={item.id===selectedID?'secondary':'ghost'} className="h-auto w-full justify-start whitespace-normal border p-3 text-left" aria-pressed={item.id===selectedID} onClick={()=>choose(item.id)}><div className="w-full space-y-2"><div className="flex justify-between gap-2"><span className="text-xs text-muted-foreground">{item.source==='flow'?'多步流程':'独立执行 / 集合'}</span><StatusBadge status={item.status}/></div><p>{item.name}</p><p className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString('zh-CN')} · {item.counts?.total||0} 次执行</p><p className="text-xs text-muted-foreground">通过 {item.counts?.passed||0} · 失败 {item.counts?.failed||0} · 错误 {item.counts?.errors||0}</p></div></Button>)}</div>{!list.isPending&&!list.data?.items?.length?<EmptyState title="没有匹配的记录"/>:null}<div className="flex items-center justify-between"><Button size="sm" variant="outline" disabled={!offset} onClick={()=>setOffset(Math.max(0,offset-50))}>上一页</Button><span className="text-xs">第 {Math.floor(offset/50)+1} 页</span><Button size="sm" variant="outline" disabled={offset+50>=(list.data?.total||0)} onClick={()=>setOffset(offset+50)}>下一页</Button></div></CardContent></Card><Card>{batch?<><CardHeader><CardTitle>{batch.name}</CardTitle><div className="flex flex-wrap items-center gap-2"><StatusBadge status={batch.status}/><RecordActions record={batch} onChanged={refresh} onRemoved={async()=>{setSelected('');setTarget('');setParams({});await refresh();}}/>{batch.source==='flow'?<Button variant="outline" size="sm" asChild><Link to={`/execution-records?type=flow&run=${encodeURIComponent(batch.id)}`}>查看步骤详情</Link></Button>:null}{batch.source!=='flow'&&batch.status==='running'?<><Button variant="outline" size="sm" onClick={()=>saveCase({type:'http',name:''})}>添加 HTTP 测试</Button><Button variant="outline" size="sm" onClick={()=>saveCase({type:'mcp',name:'',mcp_request:{}})}>添加 MCP 测试</Button><Button variant="outline" size="sm" onClick={()=>saveCase({type:'command',name:'',command_request:{}})}>添加命令行测试</Button><Button variant="outline" size="sm" disabled={action.isPending||!!batch.counts?.running} onClick={()=>action.mutate({path:`/test-batches/${encodeURIComponent(batch.id)}/finish`})}>结束批次</Button></>:null}</div></CardHeader><CardContent className="space-y-4">{paused?<div className="space-y-2 rounded-md border p-3"><p className="text-sm">测试正在等待暂停规则确认</p><div className="flex gap-2">{[['continue','继续请求'],['skip','跳过'],['stop','停止']].map(([resume,label])=><Button key={resume} variant="outline" disabled={action.isPending} onClick={()=>action.mutate({path:`/steps/${encodeURIComponent(paused.id)}/resume`,body:{action:resume}})}>{label}</Button>)}</div></div>:null}<div role="group" aria-label="筛选测试结果" className="flex flex-wrap gap-2">{resultTypes.map(([value,label,count])=><Button key={value} variant={filter===value?'secondary':'outline'} size="sm" aria-pressed={filter===value} onClick={()=>setFilter(value)}>{label} {batch.counts?.[count]||0}</Button>)}</div><div className="flex flex-wrap gap-3"><Input className="max-w-md" type="search" aria-label="搜索执行用例" placeholder="用例、目标或错误信息" value={resultSearch} onChange={e=>setResultSearch(e.target.value)}/><SelectField label="结果展示方式" value={order} onValueChange={setOrder} options={options([['sequence','按执行顺序'],['issues','异常优先'],['target','按目标分组']])}/></div><p role="status" className="text-xs text-muted-foreground">显示 {runs.length} / {batch.runs?.length||0} 条执行</p><div className="space-y-2">{runs.map((item:any)=><Button key={item.id} variant="ghost" className="h-auto w-full justify-between gap-3 whitespace-normal border p-3 text-left" aria-label={`查看执行详情：${item.name}`} onClick={()=>choose(batch.id,item.id)}><span className="min-w-0 space-y-1"><span className="block">{item.name}</span><span className="block break-all text-xs text-muted-foreground">{runTarget(item)}</span>{item.error_message?<span className="block text-xs text-destructive">{item.error_message}</span>:null}</span><span className="flex shrink-0 items-center gap-2"><StatusBadge status={item.status}/><span className="text-xs text-muted-foreground">{duration(item)}</span></span></Button>)}</div>{!runs.length?<EmptyState title="没有符合筛选条件的结果"/>:null}</CardContent></>:<CardContent className="pt-5"><EmptyState title="每次测试，都有自己的记录" description="选择批次查看执行输入、预期与结果。"/></CardContent>}</Card></div>
- <Dialog open={!!run} onOpenChange={value=>{if(!value)choose(selectedID);}}><DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl"><DialogHeader><DialogTitle>{run?.name||'执行详情'}</DialogTitle><DialogDescription>{run?`${runTarget(run)} · ${duration(run)}`:'执行输入、输出与断言结果'}</DialogDescription></DialogHeader>{run?<><StatusBadge status={run.status}/><ErrorAlert error={run.error_message}/><Tabs value={tab} onValueChange={setTab}><TabsList aria-label="执行详情内容"><TabsTrigger value="assertions">断言结果</TabsTrigger><TabsTrigger value="input">执行输入</TabsTrigger><TabsTrigger value="output">执行输出</TabsTrigger><TabsTrigger value="metadata">记录信息</TabsTrigger></TabsList><TabsContent value="assertions"><Assertions run={run}/></TabsContent><TabsContent value="input"><CodeBlock value={runInput(run)}/></TabsContent><TabsContent value="output"><RunOutput run={run}/></TabsContent><TabsContent value="metadata"><CodeBlock value={{id:run.id,batch_id:run.batch_id,case_id:run.case_id,case_version:run.case_version,started_at:run.started_at,finished_at:run.finished_at,api_run_id:run.api_run_id}}/></TabsContent></Tabs><div className="flex flex-wrap gap-2">{['http','mcp','command'].includes(run.type||'http')?<Button variant="outline" onClick={()=>saveCase(run.type==='command'?{type:'command',name:run.name,command_request:run.command_request_snapshot,expected_exit_code:run.expected_exit_code,assertions:run.assertion_definitions||[]}:run.type==='mcp'?{type:'mcp',name:run.name,mcp_request:run.mcp_request_snapshot,expected_is_error:run.expected_is_error,validate_output_schema:run.validate_output_schema,assertions:run.assertion_definitions||[]}:{type:'http',name:run.name,request:run.request_snapshot,expected_status:run.expected_status,assertions:run.assertion_definitions||[]})}>另存为用例</Button>:null}{run.case_id?<Button variant="outline" onClick={()=>setRetry([run.case_id])}>重试用例</Button>:null}</div></>:null}</DialogContent></Dialog>
- <Dialog open={newOpen} onOpenChange={value=>{if(!action.isPending)setNewOpen(value);}}><DialogContent><form onSubmit={async e=>{e.preventDefault();try{const created=await action.mutateAsync({path:'/test-batches',body:{name:newName}});setNewOpen(false);setNewName('');choose(created.id);}catch{}}}><DialogHeader><DialogTitle>新建测试批次</DialogTitle><DialogDescription>执行多条独立用例并保留同组记录。</DialogDescription></DialogHeader><div className="my-4"><Field label="批次名称"><Input aria-label="批次名称" required value={newName} onChange={e=>setNewName(e.target.value)}/></Field><ErrorAlert error={error}/></div><Button disabled={action.isPending}>创建批次</Button></form></DialogContent></Dialog>
- <HTTPCaseEditor item={caseEditor} open={caseKind==='http'} onOpenChange={open=>{if(!open){setCaseKind('');setCaseEditor(null);}}} onSaved={async id=>{setCaseKind('');if(id)choose(id);await refresh();}} batchID={batch?.source!=='flow'&&batch?.status==='running'?batch.id:undefined}/><MCPCaseEditor item={caseEditor} open={caseKind==='mcp'} onOpenChange={open=>{if(!open)setCaseKind('');}} onSaved={async id=>{if(id)choose(id);await refresh();}} batchID={batch?.source!=='flow'&&batch?.status==='running'?batch.id:undefined}/><CommandCaseEditor item={caseEditor} open={caseKind==='command'} onOpenChange={open=>{if(!open)setCaseKind('');}} onSaved={async id=>{if(id)choose(id);await refresh();}} batchID={batch?.source!=='flow'&&batch?.status==='running'?batch.id:undefined}/><RunCasesDialog ids={retry} open={!!retry.length} onOpenChange={open=>{if(!open)setRetry([]);}} onFinished={async id=>{setRetry([]);choose(id);await refresh();}}/>
- </>;
+function BatchRecords({
+  params,
+  setParams,
+}: {
+  params: URLSearchParams;
+  setParams: (
+    value: URLSearchParams | Record<string, string>,
+    options?: { replace?: boolean },
+  ) => void;
+}) {
+  const [selected, setSelected] = useState(params.get('batch') || '');
+  const [target, setTarget] = useState(params.get('step') || '');
+  const [search, setSearch] = useState('');
+  const [type, setType] = useState(params.get('type') === 'flow' ? 'flow' : '');
+  const [executionType, setExecutionType] = useState('');
+  const [status, setStatus] = useState('');
+  const [hidden, setHidden] = useState(false);
+  const [after, setAfter] = useState('');
+  const [before, setBefore] = useState('');
+  const [offset, setOffset] = useState(0);
+  const [resultSearch, setResultSearch] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [order, setOrder] = useState('sequence');
+  const [error, setError] = useState<unknown>(null);
+  const [newOpen, setNewOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [caseEditor, setCaseEditor] = useState<any>(null);
+  const [caseKind, setCaseKind] = useState('');
+  const [retry, setRetry] = useState<string[]>([]);
+  const [tab, setTab] = useState('assertions');
+  const client = useQueryClient();
+  useEffect(() => {
+    setSelected(params.get('batch') || '');
+    setTarget(params.get('step') || '');
+  }, [params]);
+  const query = new URLSearchParams({
+    q: search,
+    type,
+    execution_type: executionType,
+    status,
+    hidden: String(hidden),
+    offset: String(offset),
+    limit: '50',
+  });
+  if (after) query.set('after', new Date(after).toISOString());
+  if (before) query.set('before', new Date(before).toISOString());
+  const list = useQuery({
+    queryKey: ['execution-records', query.toString()],
+    queryFn: ({ signal }) =>
+      api<{ items: any[]; total: number }>(`/execution-records?${query}`, { signal }),
+    refetchInterval: 3000,
+  });
+  const selectedID = selected || list.data?.items?.[0]?.id || '';
+  const detail = useQuery({
+    queryKey: ['test-batch', selectedID],
+    queryFn: ({ signal }) =>
+      api<any>(`/test-batches/${encodeURIComponent(selectedID)}`, { signal }),
+    enabled: !!selectedID,
+    refetchInterval: (q) =>
+      q.state.data?.status === 'running' || q.state.data?.counts?.running ? 1200 : false,
+  });
+  const batch = detail.data;
+  const run = batch?.runs?.find((item: any) => item.id === target);
+  const session = useQuery({
+    queryKey: ['batch-session', selectedID],
+    queryFn: ({ signal }) => api<any>(`/sessions/${encodeURIComponent(selectedID)}`, { signal }),
+    enabled: !!batch?.counts?.running,
+    retry: false,
+    refetchInterval: 1200,
+  });
+  const paused = session.data?.steps?.find((step: any) => step.status === 'paused');
+  const refresh = async () => {
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ['execution-records'] }),
+      client.invalidateQueries({ queryKey: ['test-batch'] }),
+    ]);
+  };
+  const action = useMutation({
+    mutationFn: ({ path, body }: { path: string; body?: unknown }) => json<any>(path, body || {}),
+    onSuccess: refresh,
+    onError: setError,
+  });
+  const choose = (id: string, step = '') => {
+    setSelected(id);
+    setTarget(step);
+    setTab('assertions');
+    setParams(step ? { batch: id, step } : { batch: id });
+  };
+  const saveCase = (item: any) => {
+    setCaseKind(item.type || 'http');
+    setCaseEditor(item);
+  };
+  const runs = (batch?.runs || []).filter(
+    (item: any) =>
+      (filter === 'all' || item.status === filter) &&
+      `${item.name} ${runTarget(item)} ${item.error_message || ''} ${item.id}`
+        .toLowerCase()
+        .includes(resultSearch.toLowerCase()),
+  );
+  if (order === 'issues')
+    runs.sort(
+      (a: any, b: any) =>
+        Number(['failed', 'error'].includes(b.status)) -
+        Number(['failed', 'error'].includes(a.status)),
+    );
+  else if (order === 'target')
+    runs.sort((a: any, b: any) => runTarget(a).localeCompare(runTarget(b)));
+  return (
+    <>
+      <ErrorAlert error={error || list.error || detail.error} />
+      <Card>
+        <CardContent className="space-y-3 pt-5">
+          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
+            <Field label="搜索执行记录">
+              <Input
+                type="search"
+                aria-label="搜索执行记录"
+                placeholder="名称、目标或批次 ID"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setOffset(0);
+                }}
+              />
+            </Field>
+            <SelectField
+              label="记录来源类型"
+              value={type}
+              onValueChange={(value) => {
+                setType(value);
+                setOffset(0);
+              }}
+              options={options([
+                ['', '全部类型'],
+                ['collection', '独立执行 / 集合'],
+                ['flow', '多步流程'],
+              ])}
+            />
+            <SelectField
+              label="执行类型"
+              value={executionType}
+              onValueChange={(value) => {
+                setExecutionType(value);
+                setOffset(0);
+              }}
+              options={options([
+                ['', '全部执行类型'],
+                ['http', 'HTTP'],
+                ['mcp', 'MCP'],
+                ['command', '命令行'],
+                ['sql', 'SQL'],
+                ['service', '服务'],
+              ])}
+            />
+            <SelectField
+              label="批次状态"
+              value={status}
+              onValueChange={(value) => {
+                setStatus(value);
+                setOffset(0);
+              }}
+              options={options([
+                ['', '全部状态'],
+                ['running', '运行中'],
+                ['completed', '已结束'],
+                ['interrupted', '已中断'],
+              ])}
+            />
+            <Check
+              label="查询已隐藏记录"
+              value={hidden}
+              onChange={(value) => {
+                setHidden(value);
+                setOffset(0);
+              }}
+            />
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="开始时间">
+              <Input
+                type="datetime-local"
+                aria-label="开始时间"
+                value={after}
+                onChange={(e) => {
+                  setAfter(e.target.value);
+                  setOffset(0);
+                }}
+              />
+            </Field>
+            <Field label="结束时间">
+              <Input
+                type="datetime-local"
+                aria-label="结束时间"
+                value={before}
+                onChange={(e) => {
+                  setBefore(e.target.value);
+                  setOffset(0);
+                }}
+              />
+            </Field>
+            <Button variant="outline" onClick={() => void refresh()}>
+              刷新记录
+            </Button>
+            <Button onClick={() => setNewOpen(true)}>新建集合测试</Button>
+          </div>
+        </CardContent>
+      </Card>
+      <div className="grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+        <Card>
+          <CardHeader>
+            <CardTitle>执行批次 · {list.data?.total || 0}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="max-h-[65vh] space-y-2 overflow-auto">
+              {(list.data?.items || []).map((item) => (
+                <Button
+                  key={item.id}
+                  variant={item.id === selectedID ? 'secondary' : 'ghost'}
+                  className="h-auto w-full justify-start whitespace-normal border p-3 text-left"
+                  aria-pressed={item.id === selectedID}
+                  onClick={() => choose(item.id)}
+                >
+                  <div className="w-full space-y-2">
+                    <div className="flex justify-between gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {item.source === 'flow' ? '多步流程' : '独立执行 / 集合'}
+                      </span>
+                      <StatusBadge status={item.status} />
+                    </div>
+                    <p>{item.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(item.created_at).toLocaleString('zh-CN')} ·{' '}
+                      {item.counts?.total || 0} 次执行
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      通过 {item.counts?.passed || 0} · 失败 {item.counts?.failed || 0} · 错误{' '}
+                      {item.counts?.errors || 0}
+                    </p>
+                  </div>
+                </Button>
+              ))}
+            </div>
+            {!list.isPending && !list.data?.items?.length ? (
+              <EmptyState title="没有匹配的记录" />
+            ) : null}
+            <div className="flex items-center justify-between">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!offset}
+                onClick={() => setOffset(Math.max(0, offset - 50))}
+              >
+                上一页
+              </Button>
+              <span className="text-xs">第 {Math.floor(offset / 50) + 1} 页</span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={offset + 50 >= (list.data?.total || 0)}
+                onClick={() => setOffset(offset + 50)}
+              >
+                下一页
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          {batch ? (
+            <>
+              <CardHeader>
+                <CardTitle>{batch.name}</CardTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge status={batch.status} />
+                  <RecordActions
+                    record={batch}
+                    onChanged={refresh}
+                    onRemoved={async () => {
+                      setSelected('');
+                      setTarget('');
+                      setParams({});
+                      await refresh();
+                    }}
+                  />
+                  {batch.source === 'flow' ? (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link to={`/execution-records?type=flow&run=${encodeURIComponent(batch.id)}`}>
+                        查看步骤详情
+                      </Link>
+                    </Button>
+                  ) : null}
+                  {batch.source !== 'flow' && batch.status === 'running' ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => saveCase({ type: 'http', name: '' })}
+                      >
+                        添加 HTTP 测试
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => saveCase({ type: 'mcp', name: '', mcp_request: {} })}
+                      >
+                        添加 MCP 测试
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => saveCase({ type: 'command', name: '', command_request: {} })}
+                      >
+                        添加命令行测试
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={action.isPending || !!batch.counts?.running}
+                        onClick={() =>
+                          action.mutate({
+                            path: `/test-batches/${encodeURIComponent(batch.id)}/finish`,
+                          })
+                        }
+                      >
+                        结束批次
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {paused ? (
+                  <div className="space-y-2 rounded-md border p-3">
+                    <p className="text-sm">测试正在等待暂停规则确认</p>
+                    <div className="flex gap-2">
+                      {[
+                        ['continue', '继续请求'],
+                        ['skip', '跳过'],
+                        ['stop', '停止'],
+                      ].map(([resume, label]) => (
+                        <Button
+                          key={resume}
+                          variant="outline"
+                          disabled={action.isPending}
+                          onClick={() =>
+                            action.mutate({
+                              path: `/steps/${encodeURIComponent(paused.id)}/resume`,
+                              body: { action: resume },
+                            })
+                          }
+                        >
+                          {label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <div role="group" aria-label="筛选测试结果" className="flex flex-wrap gap-2">
+                  {resultTypes.map(([value, label, count]) => (
+                    <Button
+                      key={value}
+                      variant={filter === value ? 'secondary' : 'outline'}
+                      size="sm"
+                      aria-pressed={filter === value}
+                      onClick={() => setFilter(value)}
+                    >
+                      {label} {batch.counts?.[count] || 0}
+                    </Button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <Input
+                    className="max-w-md"
+                    type="search"
+                    aria-label="搜索执行用例"
+                    placeholder="用例、目标或错误信息"
+                    value={resultSearch}
+                    onChange={(e) => setResultSearch(e.target.value)}
+                  />
+                  <SelectField
+                    label="结果展示方式"
+                    value={order}
+                    onValueChange={setOrder}
+                    options={options([
+                      ['sequence', '按执行顺序'],
+                      ['issues', '异常优先'],
+                      ['target', '按目标分组'],
+                    ])}
+                  />
+                </div>
+                <p role="status" className="text-xs text-muted-foreground">
+                  显示 {runs.length} / {batch.runs?.length || 0} 条执行
+                </p>
+                <div className="space-y-2">
+                  {runs.map((item: any) => (
+                    <Button
+                      key={item.id}
+                      variant="ghost"
+                      className="h-auto w-full justify-between gap-3 whitespace-normal border p-3 text-left"
+                      aria-label={`查看执行详情：${item.name}`}
+                      onClick={() => choose(batch.id, item.id)}
+                    >
+                      <span className="min-w-0 space-y-1">
+                        <span className="block">{item.name}</span>
+                        <span className="block break-all text-xs text-muted-foreground">
+                          {runTarget(item)}
+                        </span>
+                        {item.error_message ? (
+                          <span className="block text-xs text-destructive">
+                            {item.error_message}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <StatusBadge status={item.status} />
+                        <span className="text-xs text-muted-foreground">{duration(item)}</span>
+                      </span>
+                    </Button>
+                  ))}
+                </div>
+                {!runs.length ? <EmptyState title="没有符合筛选条件的结果" /> : null}
+              </CardContent>
+            </>
+          ) : (
+            <CardContent className="pt-5">
+              <EmptyState
+                title="每次测试，都有自己的记录"
+                description="选择批次查看执行输入、预期与结果。"
+              />
+            </CardContent>
+          )}
+        </Card>
+      </div>
+      <Dialog
+        open={!!run}
+        onOpenChange={(value) => {
+          if (!value) choose(selectedID);
+        }}
+      >
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{run?.name || '执行详情'}</DialogTitle>
+            <DialogDescription>
+              {run ? `${runTarget(run)} · ${duration(run)}` : '执行输入、输出与断言结果'}
+            </DialogDescription>
+          </DialogHeader>
+          {run ? (
+            <>
+              <StatusBadge status={run.status} />
+              <ErrorAlert error={run.error_message} />
+              <Tabs value={tab} onValueChange={setTab}>
+                <TabsList aria-label="执行详情内容">
+                  <TabsTrigger value="assertions">断言结果</TabsTrigger>
+                  <TabsTrigger value="input">执行输入</TabsTrigger>
+                  <TabsTrigger value="output">执行输出</TabsTrigger>
+                  <TabsTrigger value="metadata">记录信息</TabsTrigger>
+                </TabsList>
+                <TabsContent value="assertions">
+                  <Assertions run={run} />
+                </TabsContent>
+                <TabsContent value="input">
+                  <CodeBlock value={runInput(run)} />
+                </TabsContent>
+                <TabsContent value="output">
+                  <RunOutput run={run} />
+                </TabsContent>
+                <TabsContent value="metadata">
+                  <CodeBlock
+                    value={{
+                      id: run.id,
+                      batch_id: run.batch_id,
+                      case_id: run.case_id,
+                      case_version: run.case_version,
+                      started_at: run.started_at,
+                      finished_at: run.finished_at,
+                      api_run_id: run.api_run_id,
+                    }}
+                  />
+                </TabsContent>
+              </Tabs>
+              <div className="flex flex-wrap gap-2">
+                {['http', 'mcp', 'command'].includes(run.type || 'http') ? (
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      saveCase(
+                        run.type === 'command'
+                          ? {
+                              type: 'command',
+                              name: run.name,
+                              command_request: run.command_request_snapshot,
+                              expected_exit_code: run.expected_exit_code,
+                              assertions: run.assertion_definitions || [],
+                            }
+                          : run.type === 'mcp'
+                            ? {
+                                type: 'mcp',
+                                name: run.name,
+                                mcp_request: run.mcp_request_snapshot,
+                                expected_is_error: run.expected_is_error,
+                                validate_output_schema: run.validate_output_schema,
+                                assertions: run.assertion_definitions || [],
+                              }
+                            : {
+                                type: 'http',
+                                name: run.name,
+                                request: run.request_snapshot,
+                                expected_status: run.expected_status,
+                                assertions: run.assertion_definitions || [],
+                              },
+                      )
+                    }
+                  >
+                    另存为用例
+                  </Button>
+                ) : null}
+                {run.case_id ? (
+                  <Button variant="outline" onClick={() => setRetry([run.case_id])}>
+                    重试用例
+                  </Button>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={newOpen}
+        onOpenChange={(value) => {
+          if (!action.isPending) setNewOpen(value);
+        }}
+      >
+        <DialogContent>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                const created = await action.mutateAsync({
+                  path: '/test-batches',
+                  body: { name: newName },
+                });
+                setNewOpen(false);
+                setNewName('');
+                choose(created.id);
+              } catch {}
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>新建测试批次</DialogTitle>
+              <DialogDescription>执行多条独立用例并保留同组记录。</DialogDescription>
+            </DialogHeader>
+            <div className="my-4">
+              <Field label="批次名称">
+                <Input
+                  aria-label="批次名称"
+                  required
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                />
+              </Field>
+              <ErrorAlert error={error} />
+            </div>
+            <Button disabled={action.isPending}>创建批次</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <HTTPCaseEditor
+        item={caseEditor}
+        open={caseKind === 'http'}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCaseKind('');
+            setCaseEditor(null);
+          }
+        }}
+        onSaved={async (id) => {
+          setCaseKind('');
+          if (id) choose(id);
+          await refresh();
+        }}
+        batchID={batch?.source !== 'flow' && batch?.status === 'running' ? batch.id : undefined}
+      />
+      <MCPCaseEditor
+        item={caseEditor}
+        open={caseKind === 'mcp'}
+        onOpenChange={(open) => {
+          if (!open) setCaseKind('');
+        }}
+        onSaved={async (id) => {
+          if (id) choose(id);
+          await refresh();
+        }}
+        batchID={batch?.source !== 'flow' && batch?.status === 'running' ? batch.id : undefined}
+      />
+      <CommandCaseEditor
+        item={caseEditor}
+        open={caseKind === 'command'}
+        onOpenChange={(open) => {
+          if (!open) setCaseKind('');
+        }}
+        onSaved={async (id) => {
+          if (id) choose(id);
+          await refresh();
+        }}
+        batchID={batch?.source !== 'flow' && batch?.status === 'running' ? batch.id : undefined}
+      />
+      <RunCasesDialog
+        ids={retry}
+        open={!!retry.length}
+        onOpenChange={(open) => {
+          if (!open) setRetry([]);
+        }}
+        onFinished={async (id) => {
+          setRetry([]);
+          choose(id);
+          await refresh();
+        }}
+      />
+    </>
+  );
 }

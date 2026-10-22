@@ -7,7 +7,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const target = /^host: (.+)$/m.exec(execFileSync('rustc', ['-vV'], { encoding: 'utf8' }))[1];
+// Explicit Go executables can be checked on headless hosts without Rust.
+const target = process.argv[2] ? null : /^host: (.+)$/m.exec(execFileSync('rustc', ['-vV'], { encoding: 'utf8' }))[1];
 const executable = resolve(root, process.argv[2] || `src-tauri/binaries/apix-runtime-${target}${process.platform === 'win32' ? '.exe' : ''}`);
 const directory = mkdtempSync(join(tmpdir(), 'apix-sidecar-'));
 const children = [];

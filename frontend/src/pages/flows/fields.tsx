@@ -5,10 +5,152 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/shared';
 import type { Pair } from './model';
-export function Check({label,value,onChange,disabled=false}:{label:string;value:boolean;onChange:(value:boolean)=>void;disabled?:boolean}){const id=useId();return <label htmlFor={id} className="flex items-center gap-2 text-sm"><Checkbox id={id} checked={value} onCheckedChange={checked=>onChange(checked===true)} disabled={disabled}/>{label}</label>;}
-export function JsonField({label,value,onChange,onValidityChange,kind='array',description,rows=4}:{label:string;value:any;onChange:(value:any)=>void;onValidityChange?:(valid:boolean)=>void;kind?:'array'|'object'|'any';description?:string;rows?:number}){
- const serialized=JSON.stringify(value,null,2);const[text,setText]=useState(serialized);const[error,setError]=useState('');const emitted=useRef(serialized);
- useEffect(()=>{if(serialized!==emitted.current){setText(serialized);setError('');emitted.current=serialized;}},[serialized]);
- return <Field label={label} description={description}><Textarea aria-label={label} className="font-mono text-xs" rows={rows} value={text} onChange={event=>{setText(event.target.value);try{const parsed=JSON.parse(event.target.value);if(kind==='array'&&!Array.isArray(parsed))throw new Error('请输入 JSON 数组');if(kind==='object'&&(!parsed||Array.isArray(parsed)||typeof parsed!=='object'))throw new Error('请输入 JSON 对象');setError('');onValidityChange?.(true);emitted.current=JSON.stringify(parsed,null,2);onChange(parsed);}catch(issue){setError(issue instanceof Error?issue.message:'JSON 无效');onValidityChange?.(false);}}}/>{error?<span role="alert" className="text-xs text-destructive">{error}</span>:null}</Field>;
+export function Check({
+  label,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+  disabled?: boolean;
+}) {
+  const id = useId();
+  return (
+    <label htmlFor={id} className="flex items-center gap-2 text-sm">
+      <Checkbox
+        id={id}
+        checked={value}
+        onCheckedChange={(checked) => onChange(checked === true)}
+        disabled={disabled}
+      />
+      {label}
+    </label>
+  );
 }
-export function PairEditor({label,value,onChange}:{label:string;value:Pair[];onChange:(pairs:Pair[])=>void}){return <section className="space-y-2"><h4 className="text-sm font-medium">{label}</h4>{value.map((pair,index)=><div key={index} className="grid grid-cols-[auto_1fr_1fr_auto] items-center gap-2"><Check label="启用" value={pair.enabled} onChange={enabled=>onChange(value.map((item,i)=>i===index?{...item,enabled}:item))}/><Input aria-label={`${label}名称 ${index+1}`} placeholder="名称" value={pair.name} onChange={e=>onChange(value.map((item,i)=>i===index?{...item,name:e.target.value}:item))}/><Input aria-label={`${label}值 ${index+1}`} placeholder="值，支持 {{变量}}" value={pair.value} onChange={e=>onChange(value.map((item,i)=>i===index?{...item,value:e.target.value}:item))}/><Button type="button" variant="ghost" aria-label={`删除${label} ${index+1}`} onClick={()=>onChange(value.filter((_,i)=>i!==index))}>删除</Button></div>)}<Button type="button" variant="outline" size="sm" onClick={()=>onChange([...value,{name:'',value:'',enabled:true}])}>添加{label}</Button></section>;}
+export function JsonField({
+  label,
+  value,
+  onChange,
+  onValidityChange,
+  kind = 'array',
+  description,
+  rows = 4,
+}: {
+  label: string;
+  value: any;
+  onChange: (value: any) => void;
+  onValidityChange?: (valid: boolean) => void;
+  kind?: 'array' | 'object' | 'any';
+  description?: string;
+  rows?: number;
+}) {
+  const serialized = JSON.stringify(value, null, 2);
+  const [text, setText] = useState(serialized);
+  const [error, setError] = useState('');
+  const emitted = useRef(serialized);
+  useEffect(() => {
+    if (serialized !== emitted.current) {
+      setText(serialized);
+      setError('');
+      emitted.current = serialized;
+    }
+  }, [serialized]);
+  return (
+    <Field label={label} description={description}>
+      <Textarea
+        aria-label={label}
+        className="font-mono text-xs"
+        rows={rows}
+        value={text}
+        onChange={(event) => {
+          setText(event.target.value);
+          try {
+            const parsed = JSON.parse(event.target.value);
+            if (kind === 'array' && !Array.isArray(parsed)) throw new Error('请输入 JSON 数组');
+            if (
+              kind === 'object' &&
+              (!parsed || Array.isArray(parsed) || typeof parsed !== 'object')
+            )
+              throw new Error('请输入 JSON 对象');
+            setError('');
+            onValidityChange?.(true);
+            emitted.current = JSON.stringify(parsed, null, 2);
+            onChange(parsed);
+          } catch (issue) {
+            setError(issue instanceof Error ? issue.message : 'JSON 无效');
+            onValidityChange?.(false);
+          }
+        }}
+      />
+      {error ? (
+        <span role="alert" className="text-xs text-destructive">
+          {error}
+        </span>
+      ) : null}
+    </Field>
+  );
+}
+export function PairEditor({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: Pair[];
+  onChange: (pairs: Pair[]) => void;
+}) {
+  return (
+    <section className="space-y-2">
+      <h4 className="text-sm font-medium">{label}</h4>
+      {value.map((pair, index) => (
+        <div key={index} className="grid grid-cols-[auto_1fr_1fr_auto] items-center gap-2">
+          <Check
+            label="启用"
+            value={pair.enabled}
+            onChange={(enabled) =>
+              onChange(value.map((item, i) => (i === index ? { ...item, enabled } : item)))
+            }
+          />
+          <Input
+            aria-label={`${label}名称 ${index + 1}`}
+            placeholder="名称"
+            value={pair.name}
+            onChange={(e) =>
+              onChange(
+                value.map((item, i) => (i === index ? { ...item, name: e.target.value } : item)),
+              )
+            }
+          />
+          <Input
+            aria-label={`${label}值 ${index + 1}`}
+            placeholder="值，支持 {{变量}}"
+            value={pair.value}
+            onChange={(e) =>
+              onChange(
+                value.map((item, i) => (i === index ? { ...item, value: e.target.value } : item)),
+              )
+            }
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            aria-label={`删除${label} ${index + 1}`}
+            onClick={() => onChange(value.filter((_, i) => i !== index))}
+          >
+            删除
+          </Button>
+        </div>
+      ))}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => onChange([...value, { name: '', value: '', enabled: true }])}
+      >
+        添加{label}
+      </Button>
+    </section>
+  );
+}

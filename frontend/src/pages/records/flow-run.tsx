@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, json } from '@/lib/api';
@@ -7,13 +7,230 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ErrorAlert, CodeBlock, EmptyState, StatusBadge } from '@/components/shared';
 import { activeStatus, outputReference } from '@/pages/flows/model';
 import { Assertions, RunOutput, duration } from './results';
-export default function FlowRunView(){
- const[params,setParams]=useSearchParams();const id=params.get('id')||'';const givenRun=params.get('run')||'';const target=params.get('step')||'';const[open,setOpen]=useState<Set<string>>(new Set(target?[target]:[]));const[error,setError]=useState<unknown>(null);
- const history=useQuery({queryKey:['flow-history',id],queryFn:({signal})=>api<any[]>(`/flows/${encodeURIComponent(id)}/runs`,{signal}),enabled:!!id&&!givenRun});
- const runID=givenRun||history.data?.[0]?.id||'';const run=useQuery({queryKey:['flow-run',runID],queryFn:({signal})=>api<any>(`/flow-runs/${encodeURIComponent(runID)}`,{signal}),enabled:!!runID,refetchInterval:q=>q.state.data&&activeStatus(q.state.data.status)?1200:false});
- const definitionID=run.data?.flow_id||id;const definition=useQuery({queryKey:['flows','detail',definitionID],queryFn:({signal})=>api<any>(`/flows/${encodeURIComponent(definitionID)}`,{signal}),enabled:!!definitionID,retry:false});
- const action=useMutation({mutationFn:({path,body}:{path:string;body?:unknown})=>json(path,body||{}),onSuccess:()=>run.refetch(),onError:setError});
- const value=run.data;const steps:any[]=value?.steps||[];const assertions=steps.flatMap(step=>step.assertions||[]);
- const deleted=value&&!value.flow_id||value&&(definition.error as any)?.status===404;
- return <div className="space-y-4"><div className="flex flex-wrap items-center gap-2"><Button variant="outline" asChild><Link to="/execution-records">全部执行记录</Link></Button>{value&&!deleted?<Button variant="outline" asChild><Link to={`/flows?id=${encodeURIComponent(definitionID)}`}>查看流程定义</Link></Button>:null}<Button variant="outline" disabled={run.isFetching} onClick={()=>run.refetch()}>刷新结果</Button>{value&&activeStatus(value.status)?<Button variant="destructive" disabled={action.isPending} onClick={()=>action.mutate({path:`/flow-runs/${encodeURIComponent(runID)}/cancel`})}>停止运行</Button>:null}</div><ErrorAlert error={run.error||history.error||error}/>{deleted?<p role="status" className="rounded-md border p-3 text-sm">原流程已彻底删除，历史快照独立保留。</p>:null}{value?<><Card><CardHeader><CardTitle className="flex flex-wrap items-center gap-3">{value.flow_name_snapshot}<StatusBadge status={value.status}/></CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">定义快照 v{value.flow_version} · {new Date(value.created_at).toLocaleString('zh-CN')} · {duration(value)}</p><div className="flex flex-wrap gap-5 text-sm"><span>步骤完成 {steps.filter(step=>!activeStatus(step.status)&&step.status!=='pending').length}/{value.total_steps}</span><span>断言通过 {assertions.filter(rule=>rule.passed).length}/{assertions.length}</span></div><ErrorAlert error={value.error_message||value.cleanup_error&&`清理失败：${value.cleanup_error}`}/>{Object.keys(value.variables||{}).length?<details><summary className="cursor-pointer text-sm">本次输入与流程默认值</summary><CodeBlock value={value.variables}/></details>:null}</CardContent></Card>{steps.map((step,index)=>{const expanded=open.has(step.id)||target===step.id||(!open.has(`visited:${step.id}`)&&['failed','paused'].includes(step.status));return <Card key={step.id} id={`flow-run-step-${step.id}`} className={target===step.id?'ring-2 ring-primary':''}><CardHeader><Button variant="ghost" className="h-auto justify-between gap-3 whitespace-normal text-left" aria-expanded={expanded} onClick={()=>{const next=new Set(open);next.add(`visited:${step.id}`);if(expanded){next.delete(step.id);const query=new URLSearchParams(params);query.delete('step');setParams(query,{replace:true});}else{next.add(step.id);const query=new URLSearchParams(params);query.set('step',step.id);setParams(query,{replace:true});}setOpen(next);}}><span className="min-w-0"><span className="block">{index+1}. {step.name_snapshot}</span><span className="text-xs text-muted-foreground">{step.phase==='finally'?'收尾步骤 · ':''}{(step.type||'http').toUpperCase()} · {duration(step)}</span></span><StatusBadge status={step.status}/></Button></CardHeader>{expanded?<CardContent className="space-y-4"><ErrorAlert error={step.error_message}/>{step.status==='paused'?<div className="flex flex-wrap gap-2">{[['continue','继续执行'],['skip','跳过步骤'],['stop','停止流程']].map(([resume,label])=><Button key={resume} variant={resume==='stop'?'destructive':'outline'} disabled={action.isPending} onClick={()=>action.mutate({path:`/flow-runs/${encodeURIComponent(runID)}/steps/${encodeURIComponent(step.id)}/resume`,body:{action:resume}})}>{label}</Button>)}</div>:null}<Assertions run={step}/>{step.result?.extracted_variables?.length?<section aria-label="提取结果" className="space-y-2"><h3 className="font-medium">输出变量 · 本次运行</h3>{step.result.extracted_variables.map((variable:any,i:number)=><div key={i} className="rounded-md border p-3 text-sm"><code>{step.flow_step_id?outputReference(step.flow_step_id,variable.name):variable.name}</code><p className="mt-2 break-all">{variable.secret?'••••••':variable.value}</p></div>)}</section>:null}<RunOutput run={step}/>{!step.api_run_id&&step.type==='http'?<><h3 className="font-medium">HTTP 请求快照</h3><CodeBlock value={step.request_snapshot}/></>:null}</CardContent>:null}</Card>;})}{!steps.length?<EmptyState title="正在准备执行步骤"/>:null}</>:(!!runID&&run.isPending)||(!runID&&!!id&&history.isPending)?<p role="status">正在读取运行快照…</p>:<EmptyState title="尚无流程执行记录"/>}</div>;
+export default function FlowRunView() {
+  const [params, setParams] = useSearchParams();
+  const id = params.get('id') || '';
+  const givenRun = params.get('run') || '';
+  const target = params.get('step') || '';
+  const [open, setOpen] = useState<Set<string>>(new Set(target ? [target] : []));
+  const [error, setError] = useState<unknown>(null);
+  const history = useQuery({
+    queryKey: ['flow-history', id],
+    queryFn: ({ signal }) => api<any[]>(`/flows/${encodeURIComponent(id)}/runs`, { signal }),
+    enabled: !!id && !givenRun,
+  });
+  const runID = givenRun || history.data?.[0]?.id || '';
+  const run = useQuery({
+    queryKey: ['flow-run', runID],
+    queryFn: ({ signal }) => api<any>(`/flow-runs/${encodeURIComponent(runID)}`, { signal }),
+    enabled: !!runID,
+    refetchInterval: (q) => (q.state.data && activeStatus(q.state.data.status) ? 1200 : false),
+  });
+  const definitionID = run.data?.flow_id || id;
+  const definition = useQuery({
+    queryKey: ['flows', 'detail', definitionID],
+    queryFn: ({ signal }) => api<any>(`/flows/${encodeURIComponent(definitionID)}`, { signal }),
+    enabled: !!definitionID,
+    retry: false,
+  });
+  const action = useMutation({
+    mutationFn: ({ path, body }: { path: string; body?: unknown }) => json(path, body || {}),
+    onSuccess: () => run.refetch(),
+    onError: setError,
+  });
+  const value = run.data;
+  const hasTargetStep = !!value?.steps?.some((step: any) => step.id === target);
+  useEffect(() => {
+    if (hasTargetStep && target) {
+      const element = document.getElementById(`flow-run-step-${target}`);
+      element?.scrollIntoView?.({ block: 'center' });
+      element?.focus({ preventScroll: true });
+    }
+  }, [hasTargetStep, runID, target]);
+  const steps: any[] = value?.steps || [];
+  const assertions = steps.flatMap((step) => step.assertions || []);
+  const deleted = (value && !value.flow_id) || (value && (definition.error as any)?.status === 404);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" asChild>
+          <Link to="/execution-records">全部执行记录</Link>
+        </Button>
+        {value && !deleted ? (
+          <Button variant="outline" asChild>
+            <Link to={`/flows?id=${encodeURIComponent(definitionID)}`}>查看流程定义</Link>
+          </Button>
+        ) : null}
+        <Button variant="outline" disabled={run.isFetching} onClick={() => run.refetch()}>
+          刷新结果
+        </Button>
+        {value && activeStatus(value.status) ? (
+          <Button
+            variant="destructive"
+            disabled={action.isPending}
+            onClick={() =>
+              action.mutate({ path: `/flow-runs/${encodeURIComponent(runID)}/cancel` })
+            }
+          >
+            停止运行
+          </Button>
+        ) : null}
+      </div>
+      <ErrorAlert error={run.error || history.error || error} />
+      {deleted ? (
+        <p role="status" className="rounded-md border p-3 text-sm">
+          原流程已彻底删除，历史快照独立保留。
+        </p>
+      ) : null}
+      {value ? (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex flex-wrap items-center gap-3">
+                {value.flow_name_snapshot}
+                <StatusBadge status={value.status} />
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                定义快照 v{value.flow_version} ·{' '}
+                {new Date(value.created_at).toLocaleString('zh-CN')} · {duration(value)}
+              </p>
+              <div className="flex flex-wrap gap-5 text-sm">
+                <span>
+                  步骤完成{' '}
+                  {
+                    steps.filter((step) => !activeStatus(step.status) && step.status !== 'pending')
+                      .length
+                  }
+                  /{value.total_steps}
+                </span>
+                <span>
+                  断言通过 {assertions.filter((rule) => rule.passed).length}/{assertions.length}
+                </span>
+              </div>
+              <ErrorAlert
+                error={
+                  value.error_message || (value.cleanup_error && `清理失败：${value.cleanup_error}`)
+                }
+              />
+              {Object.keys(value.variables || {}).length ? (
+                <details>
+                  <summary className="cursor-pointer text-sm">本次输入与流程默认值</summary>
+                  <CodeBlock value={value.variables} />
+                </details>
+              ) : null}
+            </CardContent>
+          </Card>
+          {steps.map((step, index) => {
+            const expanded =
+              open.has(step.id) ||
+              target === step.id ||
+              (!open.has(`visited:${step.id}`) && ['failed', 'paused'].includes(step.status));
+            return (
+              <Card
+                key={step.id}
+                id={`flow-run-step-${step.id}`}
+                tabIndex={-1}
+                className={target === step.id ? 'ring-2 ring-primary' : ''}
+              >
+                <CardHeader>
+                  <Button
+                    variant="ghost"
+                    className="h-auto justify-between gap-3 whitespace-normal text-left"
+                    aria-expanded={expanded}
+                    onClick={() => {
+                      const next = new Set(open);
+                      next.add(`visited:${step.id}`);
+                      if (expanded) {
+                        next.delete(step.id);
+                        const query = new URLSearchParams(params);
+                        query.delete('step');
+                        setParams(query, { replace: true });
+                      } else {
+                        next.add(step.id);
+                        const query = new URLSearchParams(params);
+                        query.set('step', step.id);
+                        setParams(query, { replace: true });
+                      }
+                      setOpen(next);
+                    }}
+                  >
+                    <span className="min-w-0">
+                      <span className="block">
+                        {index + 1}. {step.name_snapshot}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {step.phase === 'finally' ? '收尾步骤 · ' : ''}
+                        {(step.type || 'http').toUpperCase()} · {duration(step)}
+                      </span>
+                    </span>
+                    <StatusBadge status={step.status} />
+                  </Button>
+                </CardHeader>
+                {expanded ? (
+                  <CardContent className="space-y-4">
+                    <ErrorAlert error={step.error_message} />
+                    {step.status === 'paused' ? (
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          ['continue', '继续执行'],
+                          ['skip', '跳过步骤'],
+                          ['stop', '停止流程'],
+                        ].map(([resume, label]) => (
+                          <Button
+                            key={resume}
+                            variant={resume === 'stop' ? 'destructive' : 'outline'}
+                            disabled={action.isPending}
+                            onClick={() =>
+                              action.mutate({
+                                path: `/flow-runs/${encodeURIComponent(runID)}/steps/${encodeURIComponent(step.id)}/resume`,
+                                body: { action: resume },
+                              })
+                            }
+                          >
+                            {label}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
+                    <Assertions run={step} />
+                    {step.result?.extracted_variables?.length ? (
+                      <section aria-label="提取结果" className="space-y-2">
+                        <h3 className="font-medium">输出变量 · 本次运行</h3>
+                        {step.result.extracted_variables.map((variable: any, i: number) => (
+                          <div key={i} className="rounded-md border p-3 text-sm">
+                            <code>
+                              {step.flow_step_id
+                                ? outputReference(step.flow_step_id, variable.name)
+                                : variable.name}
+                            </code>
+                            <p className="mt-2 break-all">
+                              {variable.secret ? '••••••' : variable.value}
+                            </p>
+                          </div>
+                        ))}
+                      </section>
+                    ) : null}
+                    <RunOutput run={step} />
+                    {!step.api_run_id && step.type === 'http' ? (
+                      <>
+                        <h3 className="font-medium">HTTP 请求快照</h3>
+                        <CodeBlock value={step.request_snapshot} />
+                      </>
+                    ) : null}
+                  </CardContent>
+                ) : null}
+              </Card>
+            );
+          })}
+          {!steps.length ? <EmptyState title="正在准备执行步骤" /> : null}
+        </>
+      ) : (!!runID && run.isPending) || (!runID && !!id && history.isPending) ? (
+        <p role="status">正在读取运行快照…</p>
+      ) : (
+        <EmptyState title="尚无流程执行记录" />
+      )}
+    </div>
+  );
 }

@@ -3,8 +3,10 @@ package activity
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"io/fs"
 	"net/http"
@@ -56,12 +58,21 @@ type serviceLog struct {
 
 func Routes(r gin.IRouter, db *sql.DB, services *localservice.Service, history *journal.Store) {
 	m := &monitor{db: db, services: services, history: history}
-	page, _ := assets.ReadFile("web/index.html")
+	page, err := assets.ReadFile("web/dist/index.html")
+	if err != nil {
+		panic("build frontend assets with pnpm build:web before compiling the runtime: " + err.Error())
+	}
 	servePage := func(c *gin.Context) {
+		nonceBytes := make([]byte, 18)
+		if _, err := rand.Read(nonceBytes); err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		nonce := base64.RawStdEncoding.EncodeToString(nonceBytes)
 		c.Header("Cache-Control", "no-store")
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-"+nonce+"'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
 		c.Header("X-Content-Type-Options", "nosniff")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", page)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(strings.ReplaceAll(string(page), "__APIX_STYLE_NONCE__", nonce)))
 	}
 	r.GET("/", servePage)
 	r.GET("/activity", servePage)
@@ -80,8 +91,9 @@ func Routes(r gin.IRouter, db *sql.DB, services *localservice.Service, history *
 	ui, _ := fs.Sub(assets, "web/dist")
 	r.GET("/activity/ui/*path", func(c *gin.Context) {
 		name := strings.TrimPrefix(c.Param("path"), "/")
-		if name == "" {
-			name = "index.html"
+		if name == "" || name == "index.html" {
+			servePage(c)
+			return
 		}
 		if !fs.ValidPath(name) {
 			c.Status(http.StatusNotFound)

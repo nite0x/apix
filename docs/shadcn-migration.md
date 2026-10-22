@@ -65,3 +65,31 @@ Migrated home, HTTP requests/collections, database connections and SQL, MCP tool
 ## Stage 5 — cases, flows and execution records
 
 Migrated saved cases, HTTP/MCP/command editors, flow definitions and typed steps, assertions/extractors/output references, run inputs, execution batches and immutable flow results. Preserved version conflicts, incremental saves, selected result tabs, archived/deleted dependencies and purged-definition snapshots. Regression fixes include React StrictMode save lifecycle, invalid SQL JSON drafts across tab changes, environment-provided required variables and dirty lifecycle action protection. Existing route aliases/query links are normalized without losing batch/run/step IDs.
+
+## Stage 6 — verification and production entry
+
+Switched the Go document to the compiled React entry, retaining all page paths.
+Assets use hashed immutable URLs and actual MIME types. Each document receives a
+fresh style nonce; Radix scroll locking uses the global nonce convention and
+SelectViewport receives its explicit nonce. Real-browser CSP errors identified
+the latter integration requirement; scripts/styles remain protected without
+`unsafe-inline`. Mobile navigation now uses a focus-managed shadcn Sheet.
+
+Executed validation:
+
+- TypeScript, ESLint React Hooks rules/exhaustive dependencies, tooling syntax and Prettier checks passed.
+- 21 frontend test files / 59 behavior/model tests passed.
+- Existing 19 legacy test files / 39 tests passed before removal, as a baseline cross-check.
+- Full `go test ./...` passed, including embedded asset/API tests.
+- Production Playwright suite passed on the isolated runtime: all routes and aliases, 1440/390px screenshots, no document overflow, service save/edit/archive without starting programs, real HTTP request persistence/reload/pin, SQL validation, flow execution and durable run/step links.
+- Explicit Go executable sidecar checks passed: readiness/workspace/MCP and shutdown, EOF, closed parent pipes, plus occupied-port refusal.
+
+Native Tauri windows and macOS/Windows/Linux installers were not executed in the
+headless cloud environment (Rust/native GUI prerequisites are absent). Their CI
+matrix remains configured; the Go sidecar protocol and production embedded UI
+were exercised locally. No user database, credentials or configured external
+business services were used; browser tests used `/tmp/apix-shadcn-e2e/`.
+
+Decision details: SQL records use existing execution-batch management (there is
+no SQL-specific pin/hide API). Step output selection copies and displays a
+reference for pasting instead of inserting at the former cursor position.

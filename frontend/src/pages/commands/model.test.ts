@@ -11,24 +11,52 @@ describe('command definitions', () => {
     expect(() => readCommand({ ...draft, args: '["-"]', timeout: '301' })).toThrow('1 至 300');
   });
   it('retains edit concurrency version and explicit zero expected exit code', () => {
-    const item = { id: 'case', edit_version: 7, project_id: 'project', name: 'inline Python', command_request: { program: 'python3', args: ['-'], stdin: 'print("done")', environment_id: 'wsl:Ubuntu:alice' }, expected_exit_code: 0 };
+    const item = {
+      id: 'case',
+      edit_version: 7,
+      project_id: 'project',
+      name: 'inline Python',
+      command_request: {
+        program: 'python3',
+        args: ['-'],
+        stdin: 'print("done")',
+        environment_id: 'wsl:Ubuntu:alice',
+      },
+      expected_exit_code: 0,
+    };
     const draft = commandDraft(item);
     const out = readCommand(draft, item);
-    expect(out.value).toMatchObject({ id: 'case', edit_version: 7, project_id: 'project', expected_exit_code: 0, command_request: { args: ['-'], stdin: 'print("done")', environment_id: 'wsl:Ubuntu:alice' } });
-    expect(readCommand({ ...draft, expected: '' }, item).value).not.toHaveProperty('expected_exit_code');
+    expect(out.value).toMatchObject({
+      id: 'case',
+      edit_version: 7,
+      project_id: 'project',
+      expected_exit_code: 0,
+      command_request: { args: ['-'], stdin: 'print("done")', environment_id: 'wsl:Ubuntu:alice' },
+    });
+    expect(readCommand({ ...draft, expected: '' }, item).value).not.toHaveProperty(
+      'expected_exit_code',
+    );
   });
 });
 describe('test execution lifecycle', () => {
   it('finishes an owned batch even when execution fails', async () => {
     const requests: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      requests.push(url);
-      if (url === '/api/test-batches') return new Response(JSON.stringify({ id: 'batch-1' }));
-      if (url.endsWith('/runs')) return new Response(JSON.stringify({ error: 'execution failed' }), { status: 500 });
-      return new Response(null, { status: 204 });
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        requests.push(url);
+        if (url === '/api/test-batches') return new Response(JSON.stringify({ id: 'batch-1' }));
+        if (url.endsWith('/runs'))
+          return new Response(JSON.stringify({ error: 'execution failed' }), { status: 500 });
+        return new Response(null, { status: 204 });
+      }),
+    );
     await expect(executeTest({ name: 'test' })).rejects.toThrow('execution failed');
-    expect(requests).toEqual(['/api/test-batches', '/api/test-batches/batch-1/runs', '/api/test-batches/batch-1/finish']);
+    expect(requests).toEqual([
+      '/api/test-batches',
+      '/api/test-batches/batch-1/runs',
+      '/api/test-batches/batch-1/finish',
+    ]);
   });
   it('does not finish a caller-owned batch', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ test_status: 'passed' })));
@@ -39,11 +67,15 @@ describe('test execution lifecycle', () => {
     expect(fetcher.mock.calls[0]?.length).toBe(2);
   });
   it('reports finish failure without dropping persisted execution output', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/test-batches') return new Response(JSON.stringify({ id: 'batch' }));
-      if (url.endsWith('/runs')) return new Response(JSON.stringify({ test_status: 'passed', test_run_id: 'run' }));
-      return new Response(JSON.stringify({ error: 'busy' }), { status: 409 });
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === '/api/test-batches') return new Response(JSON.stringify({ id: 'batch' }));
+        if (url.endsWith('/runs'))
+          return new Response(JSON.stringify({ test_status: 'passed', test_run_id: 'run' }));
+        return new Response(JSON.stringify({ error: 'busy' }), { status: 409 });
+      }),
+    );
     const out = await executeTest({ name: 'test' });
     expect(out.result.test_run_id).toBe('run');
     expect(out.finishWarning).toContain('busy');

@@ -26,3 +26,6 @@ release/
 memory/
 .codegraph/*
 .cursor/
+
+/test-results/
+/playwright-report/
