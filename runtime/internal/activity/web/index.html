@@ -135,9 +135,13 @@
       <div class="detail-heading"><div><div class="eyebrow">LOCAL SERVICE</div><h2 id="service-editor-title">新增服务</h2></div><button id="service-editor-close" class="button small" type="button" aria-label="关闭服务配置">关闭 ×</button></div>
       <fieldset id="service-fields" class="manual-tool-form">
         <label>服务名称<input id="service-name" required maxlength="256" placeholder="例如：本地 API 服务" autofocus></label>
+        <label>运行环境<select id="service-environment" aria-label="服务运行环境"><option value="local">本机</option></select></label>
+        <label id="service-user-field" hidden>WSL 用户<input id="service-user" placeholder="留空使用发行版默认用户，保存后固定用户" autocomplete="off" spellcheck="false"></label>
         <label>工作目录<input id="service-work-dir" required placeholder="D:\project\my-api" spellcheck="false" autocomplete="off"></label>
         <label>启动程序<input id="service-command" required placeholder="例如：node、java 或可执行文件的完整路径" spellcheck="false" autocomplete="off"></label>
         <p class="manual-tool-hint">启动程序和参数分开填写；需要执行脚本时，启动程序填 powershell.exe 或 cmd.exe。</p>
+        <label>环境变量（JSON 对象）<textarea id="service-env" rows="2" spellcheck="false" placeholder='{"PATH":"/home/you/.local/bin:/usr/local/bin:/usr/bin:/bin"}'>{}</textarea></label>
+        <div><button id="service-check-environment" class="button small" type="button">检查运行环境</button><span id="service-environment-result" role="status"></span></div>
         <label>启动参数 <span class="manual-tool-hint">每行一个参数，路径含空格也无需额外加引号</span><textarea id="service-args" rows="4" placeholder="server.js&#10;--port&#10;8080" spellcheck="false"></textarea></label>
         <div class="manual-tool-grid service-config"><label>健康检查地址<input id="service-health-url" type="url" required placeholder="http://127.0.0.1:8080/health" spellcheck="false" autocomplete="off"></label><label>启动超时（秒）<input id="service-timeout" type="number" min="1" max="300" value="30" required></label></div>
         <p class="manual-tool-hint">保存后可以反复启停。启动时优先复用健康检查地址上的已有服务，未发现时再启动程序。</p>

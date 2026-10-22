@@ -6,11 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/executionenv"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +19,7 @@ import (
 const OutputLimit = 256 * 1024
 
 type Request struct {
+	EnvironmentID  string            `json:"environment_id,omitempty"`
 	Program        string            `json:"program"`
 	Args           []string          `json:"args"`
 	WorkDir        string            `json:"work_dir"`
@@ -27,6 +28,7 @@ type Request struct {
 	TimeoutSeconds int               `json:"timeout_seconds"`
 }
 type Result struct {
+	EnvironmentID   string `json:"environment_id,omitempty"`
 	ExitCode        *int   `json:"exit_code,omitempty"`
 	Stdout          string `json:"stdout"`
 	Stderr          string `json:"stderr"`
@@ -55,8 +57,11 @@ func Validate(req *Request) error {
 	if len(req.WorkDir) > 8192 || strings.ContainsRune(req.WorkDir, 0) {
 		return errors.New("工作目录无效")
 	}
-	if req.WorkDir != "" && !filepath.IsAbs(req.WorkDir) && !strings.Contains(req.WorkDir, "{{") {
+	if req.WorkDir != "" && !(executionenv.Local(req.EnvironmentID) && filepath.IsAbs(req.WorkDir) || !executionenv.Local(req.EnvironmentID) && strings.HasPrefix(req.WorkDir, "/")) && !strings.Contains(req.WorkDir, "{{") {
 		return errors.New("工作目录需要是绝对路径")
+	}
+	if err := executionenv.Validate(executionenv.Spec{EnvironmentID: req.EnvironmentID, Program: req.Program}); err != nil {
+		return err
 	}
 	total := 0
 	for _, arg := range req.Args {
@@ -137,7 +142,10 @@ func (r *Runner) Wait(ctx context.Context) error {
 }
 func (r *Runner) Run(parent context.Context, req Request) *Result {
 	started := time.Now()
-	out := &Result{Platform: runtime.GOOS, WorkDir: req.WorkDir}
+	out := &Result{Platform: runtime.GOOS, WorkDir: req.WorkDir, EnvironmentID: req.EnvironmentID}
+	if !executionenv.Local(req.EnvironmentID) {
+		out.Platform = "linux"
+	}
 	defer func() { out.DurationMS = time.Since(started).Milliseconds() }()
 	fail := func(kind string, err error) *Result { out.ErrorKind = kind; out.ErrorMessage = err.Error(); return out }
 	if err := Validate(&req); err != nil {
@@ -159,51 +167,27 @@ func (r *Runner) Run(parent context.Context, req Request) *Result {
 	if ctx.Err() != nil {
 		return fail("cancelled", errors.New("命令已取消，未启动进程"))
 	}
-	if req.WorkDir == "" {
+	if req.WorkDir == "" && executionenv.Local(req.EnvironmentID) {
 		dir, err := os.Getwd()
 		if err != nil {
 			return fail("start", err)
 		}
 		req.WorkDir = dir
 	}
+	if !executionenv.Local(req.EnvironmentID) {
+		info, err := executionenv.Check(ctx, executionenv.Spec{EnvironmentID: req.EnvironmentID, WorkDir: req.WorkDir})
+		if err != nil {
+			return fail("environment", err)
+		}
+		req.EnvironmentID = info.ID
+		out.EnvironmentID = info.ID
+		if req.WorkDir == "" {
+			req.WorkDir = info.WorkDir
+		}
+	}
 	out.WorkDir = req.WorkDir
-	environment := map[string]string{}
-	envKey := func(name string) string {
-		if runtime.GOOS == "windows" {
-			return strings.ToUpper(name)
-		}
-		return name
-	}
-	for _, entry := range os.Environ() {
-		key, value, ok := strings.Cut(entry, "=")
-		if ok {
-			environment[envKey(key)] = value
-		}
-	}
-	for key, value := range req.Env {
-		environment[envKey(key)] = value
-	}
-	environment["PWD"] = req.WorkDir
-	cmd := exec.Command(req.Program, req.Args...)
-	cmd.Dir = req.WorkDir
-	if strings.ContainsRune(req.Program, os.PathSeparator) && !filepath.IsAbs(req.Program) {
-		cmd = exec.Command(filepath.Join(req.WorkDir, req.Program), req.Args...)
-		cmd.Dir = req.WorkDir
-	}
-	keys := make([]string, 0, len(environment))
-	for key := range environment {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		cmd.Env = append(cmd.Env, key+"="+environment[key])
-	}
-	cmd.Stdin = strings.NewReader(req.Stdin)
 	stdout, stderr := &cappedBuffer{}, &cappedBuffer{}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	cmd.WaitDelay = time.Second
-	tree, err := startProcess(cmd)
+	tree, err := executionenv.Start(ctx, executionenv.Spec{EnvironmentID: req.EnvironmentID, Program: req.Program, Args: req.Args, WorkDir: req.WorkDir, Env: req.Env, Stdin: req.Stdin}, stdout, stderr)
 	if err != nil {
 		return fail("start", fmt.Errorf("进程启动失败: %w", err))
 	}
@@ -214,20 +198,18 @@ func (r *Runner) Run(parent context.Context, req Request) *Result {
 		defer close(watcherDone)
 		select {
 		case <-ctx.Done():
-			_ = tree.stop()
+			_ = tree.Stop()
 		case <-finished:
 		}
 	}()
-	waitErr := cmd.Wait()
+	waitErr := tree.Wait()
 	close(finished)
 	<-watcherDone
-	stopErr := tree.stop()
+	stopErr := tree.Stop()
 	out.Stdout, out.StdoutTruncated = stdout.snapshot()
 	out.Stderr, out.StderrTruncated = stderr.snapshot()
-	if cmd.ProcessState != nil {
-		code := cmd.ProcessState.ExitCode()
-		out.ExitCode = &code
-	}
+	code := tree.ExitCode()
+	out.ExitCode = &code
 	if ctx.Err() != nil {
 		kind, message := "cancelled", "命令已取消，已清理本次进程树"
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -242,7 +224,7 @@ func (r *Runner) Run(parent context.Context, req Request) *Result {
 		return fail("cleanup", errors.New("进程树清理失败"))
 	}
 	var exitErr *exec.ExitError
-	if waitErr != nil && !errors.As(waitErr, &exitErr) && !errors.Is(waitErr, exec.ErrWaitDelay) {
+	if waitErr != nil && tree.ExitCode() < 0 && !errors.As(waitErr, &exitErr) && !errors.Is(waitErr, exec.ErrWaitDelay) {
 		return fail("execution", fmt.Errorf("等待进程结束失败: %w", waitErr))
 	}
 	if out.ExitCode == nil || *out.ExitCode < 0 {

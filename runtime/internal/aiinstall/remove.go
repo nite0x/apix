@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"regexp"
 	"sort"
@@ -44,21 +43,14 @@ func (s *Installer) removalPlan(target Target, id string) (*RemovalPreview, Clie
 	if c.Status == "external" {
 		return v, c, nil, nil, nil
 	}
-	info, err := os.Lstat(c.Path)
-	if os.IsNotExist(err) {
+	original, exists, err := s.readConfig(c)
+	if err != nil {
+		return nil, c, nil, nil, err
+	}
+	if !exists {
 		v.Status = "absent"
 		v.Instructions = "已验证配置文件不存在。"
 		return v, c, nil, nil, nil
-	}
-	if err != nil {
-		return nil, c, nil, nil, err
-	}
-	if !info.Mode().IsRegular() || info.Size() > 8<<20 {
-		return nil, c, nil, nil, errors.New("配置必须是小于 8 MB 的普通文件；符号链接请手动管理")
-	}
-	original, err := os.ReadFile(c.Path)
-	if err != nil {
-		return nil, c, nil, nil, err
 	}
 	v.Fingerprint = fingerprintBytes(original)
 	difference := ""

@@ -1,3 +1,4 @@
+import {loadEnvironments,checkEnvironment,withUser} from './execution-environments.js';
 import {openArchived,showReferences,lifecycleButton,openBulkManager} from './lifecycle-ui.js';
 const $ = id => document.getElementById(id);
 const dialog = $('service-editor');
@@ -10,6 +11,8 @@ let editing = false;
 let editVersion=0;
 let loading = false;
 let loadController = null;
+let environmentController=null;
+let environmentRevision=0;
 const deleteDialog = $('service-delete');
 let deleteTarget = null;
 let deleteOpener = null;
@@ -37,9 +40,33 @@ function setLoading(value) {
   form.setAttribute('aria-busy', String(value));
 }
 
+function syncEnvironment() {
+ const id=$('service-environment').value;
+ $('service-user-field').hidden=!id.startsWith('wsl:');
+ $('service-work-dir').placeholder=id.startsWith('wsl:')?'/home/you/projects/my-api':'当前系统的绝对路径';
+}
+function serviceEnvironment() { return withUser($('service-environment').value,$('service-user').value); }
+async function environments(selected='local') {
+ environmentController?.abort();const controller=new AbortController();environmentController=controller;
+ try { await loadEnvironments($('service-environment'),selected,controller.signal);if(controller.signal.aborted||!dialog.open)return;if(selected.startsWith('wsl:'))$('service-user').value=decodeURIComponent(selected.split(':')[2]||'');syncEnvironment(); }
+ catch(error){if(!controller.signal.aborted&&dialog.open)notice('service-environment-result',error.message,true);}
+}
+$('service-environment').addEventListener('change',()=>{$('service-user').value=decodeURIComponent($('service-environment').value.split(':')[2]||'');syncEnvironment();notice('service-environment-result');});
+$('service-check-environment').addEventListener('click',async()=>{
+ if(loading||saving)return;const revision=environmentRevision;setLoading(true);
+ const button=$('service-check-environment');button.disabled=true;notice('service-environment-result','正在检查…');
+ try {
+  const env=JSON.parse($('service-env').value||'{}');
+  const result=await checkEnvironment({environment_id:serviceEnvironment(),program:$('service-command').value.trim(),work_dir:$('service-work-dir').value.trim(),env});
+  if(!dialog.open||revision!==environmentRevision)return;
+  await environments(result.id);
+  notice('service-environment-result',`检查通过 · ${result.name} · ${result.program||result.work_dir}`);
+ }catch(error){if(dialog.open&&revision===environmentRevision)notice('service-environment-result',error.message,true);}finally{if(revision===environmentRevision){button.disabled=false;setLoading(false);}}
+});
 function openEditor(trigger, edit) {
+  environmentRevision++;environmentController?.abort();$('service-check-environment').disabled=false;
   opener = trigger; editing = edit; savedSignature = '';
-  form.reset();editVersion=0; notice('service-form-error');
+  form.reset();editVersion=0;notice("service-environment-result");syncEnvironment(); if(!edit)environments(); notice('service-form-error');
   $('service-editor-title').textContent = edit ? '编辑服务' : '新增服务';
   $('service-save').textContent = edit ? '保存修改' : '仅保存';
   $('service-save').classList.toggle('primary', edit);
@@ -60,6 +87,7 @@ export async function openServiceEditor(id, trigger) {
   try {
     const { definition: d } = await api(`/${encodeURIComponent(id)}`, undefined, 'GET', controller.signal);
     if (controller.signal.aborted || !dialog.open) return;
+    await environments(d.environment_id||'local');if(controller.signal.aborted||!dialog.open)return;$('service-env').value=JSON.stringify(d.env||{},null,2);
     editVersion=d.edit_version||0;$('service-name').value = d.name; $('service-work-dir').value = d.work_dir;
     $('service-command').value = d.command; $('service-args').value = (d.args || []).join('\n');
     $('service-health-url').value = d.health_url; $('service-timeout').value = d.startup_timeout_ms / 1000;
@@ -103,7 +131,7 @@ $('service-delete-confirm').addEventListener('click', async () => {
 for (const id of ['service-editor-close', 'service-editor-cancel']) $(id).addEventListener('click', () => { if (!saving) dialog.close(); });
 dialog.addEventListener('cancel', event => { if (saving) event.preventDefault(); });
 dialog.addEventListener('close', () => {
-  loadController?.abort(); loadController = null; setLoading(false);
+  environmentRevision++;environmentController?.abort();loadController?.abort(); loadController = null; setLoading(false);
   if (opener?.isConnected) opener.focus(); else $('service-add').focus();
 });
 
@@ -116,10 +144,12 @@ form.addEventListener('submit', async event => {
   event.preventDefault(); if (saving || loading) return;
   const start = !editing && event.submitter?.id !== 'service-save';
   const definition = {
-    id: draftID,edit_version:editVersion, name: $('service-name').value.trim(), work_dir: $('service-work-dir').value.trim(),
+    id: draftID,edit_version:editVersion, environment_id:serviceEnvironment(), name: $('service-name').value.trim(), work_dir: $('service-work-dir').value.trim(),
     command: $('service-command').value.trim(), args: $('service-args').value.split(/\r?\n/).filter(line => line.trim() !== ''),
     health_url: $('service-health-url').value.trim(), startup_timeout_ms: Number($('service-timeout').value) * 1000,
   };
+  try { definition.env=JSON.parse($('service-env').value||'{}');if(!definition.env||Array.isArray(definition.env)||typeof definition.env!=='object'||Object.values(definition.env).some(v=>typeof v!=='string'))throw new Error(); }
+  catch { notice('service-form-error','环境变量需要是值为字符串的 JSON 对象。',true);return; }
   if (!definition.name || !definition.work_dir || !definition.command) { notice('service-form-error', '请填写服务名称、工作目录和启动程序。', true); return; }
   try { if (!['http:', 'https:'].includes(new URL(definition.health_url).protocol)) throw new Error(); }
   catch { notice('service-form-error', '健康检查地址需要是完整的 HTTP 或 HTTPS 地址。', true); return; }

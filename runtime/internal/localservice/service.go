@@ -8,36 +8,38 @@ import (
 	"errors"
 	"fmt"
 	"github.com/apix/apix/runtime/internal/lifecycle"
-	"io"
-	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/apix/apix/runtime/internal/executionenv"
 	"github.com/apix/apix/runtime/internal/executionrecord"
 	"github.com/google/uuid"
 )
 
 type Definition struct {
-	EditVersion      int64    `json:"edit_version"`
-	Archived         bool     `json:"archived"`
-	ID               string   `json:"id"`
-	Name             string   `json:"name"`
-	WorkDir          string   `json:"work_dir"`
-	Command          string   `json:"command"`
-	Args             []string `json:"args"`
-	HealthURL        string   `json:"health_url"`
-	StartupTimeoutMS int      `json:"startup_timeout_ms"`
+	EnvironmentID    string            `json:"environment_id,omitempty"`
+	Env              map[string]string `json:"env,omitempty"`
+	EditVersion      int64             `json:"edit_version"`
+	Archived         bool              `json:"archived"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	WorkDir          string            `json:"work_dir"`
+	Command          string            `json:"command"`
+	Args             []string          `json:"args"`
+	HealthURL        string            `json:"health_url"`
+	StartupTimeoutMS int               `json:"startup_timeout_ms"`
 }
 type Instance struct {
-	ServiceID string `json:"service_id"`
-	Owner     string `json:"owner"`
-	Status    string `json:"status"`
-	PID       int    `json:"pid"`
-	Started   bool   `json:"started"`
+	EnvironmentID    string `json:"environment_id,omitempty"`
+	EnvironmentError string `json:"environment_error,omitempty"`
+	ServiceID        string `json:"service_id"`
+	Owner            string `json:"owner"`
+	Status           string `json:"status"`
+	PID              int    `json:"pid"`
+	Started          bool   `json:"started"`
 }
 type LogLine struct {
 	Sequence int64     `json:"sequence"`
@@ -47,7 +49,7 @@ type LogLine struct {
 }
 type process struct {
 	instance Instance
-	tree     *processTree
+	tree     executionenv.Process
 	done     chan struct{}
 	ready    chan struct{}
 	stopping bool
@@ -59,7 +61,6 @@ type Service struct {
 	running  map[string]*process
 	borrowed map[string]map[string]*process
 	closed   bool
-	client   *http.Client
 }
 
 func New(db *sql.DB) (*Service, error) {
@@ -79,7 +80,7 @@ func New(db *sql.DB) (*Service, error) {
 			return nil, err
 		}
 	}
-	return &Service{db: db, running: make(map[string]*process), borrowed: make(map[string]map[string]*process), client: &http.Client{Timeout: time.Second}}, nil
+	return &Service{db: db, running: make(map[string]*process), borrowed: make(map[string]map[string]*process)}, nil
 }
 
 func (s *Service) PutDefinition(ctx context.Context, d Definition) (*Definition, error) {
@@ -99,10 +100,15 @@ func (s *Service) PutDefinition(ctx context.Context, d Definition) (*Definition,
 	if d.WorkDir == "" {
 		return nil, errors.New("work_dir is required")
 	}
-	st, err := os.Stat(d.WorkDir)
-	if err != nil || !st.IsDir() {
-		return nil, errors.New("work_dir must be an existing directory")
+	d.WorkDir = d.spec().WorkDir
+	if err := executionenv.Validate(d.spec()); err != nil {
+		return nil, err
 	}
+	info, err := executionenv.Check(ctx, executionenv.Spec{EnvironmentID: d.EnvironmentID, WorkDir: d.WorkDir})
+	if err != nil {
+		return nil, err
+	}
+	d.EnvironmentID = info.ID
 	u, err := url.Parse(d.HealthURL)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return nil, errors.New("health_url must be an HTTP or HTTPS URL")
@@ -236,6 +242,17 @@ func (s *Service) definition(ctx context.Context, id string) (Definition, error)
 	d.Archived = lifecycle.Archived(s.db, "service", id)
 	return d, err
 }
+func (d Definition) spec() executionenv.Spec {
+	directory := d.WorkDir
+	// Existing host-only definitions allowed directories relative to the runtime.
+	// Resolve them before applying the new target-aware path validation.
+	if executionenv.Local(d.EnvironmentID) && directory != "" && !filepath.IsAbs(directory) {
+		if absolute, err := filepath.Abs(directory); err == nil {
+			directory = absolute
+		}
+	}
+	return executionenv.Spec{EnvironmentID: d.EnvironmentID, Program: d.Command, Args: d.Args, WorkDir: directory, Env: d.Env}
+}
 func ownerName(owner string) string {
 	if owner == "" {
 		return "manual"
@@ -306,7 +323,7 @@ func (s *Service) start(ctx context.Context, id, owner string) (*Instance, error
 		s.mu.Unlock()
 		return &result, nil
 	}
-	p := &process{instance: Instance{ServiceID: id, Owner: owner, Status: "starting"}, done: make(chan struct{}), ready: make(chan struct{})}
+	p := &process{instance: Instance{ServiceID: id, Owner: owner, Status: "starting", EnvironmentID: d.EnvironmentID}, done: make(chan struct{}), ready: make(chan struct{})}
 	s.running[id] = p
 	// Reserve the service before network access, so concurrent starts cannot race.
 	s.mu.Unlock()
@@ -317,7 +334,7 @@ func (s *Service) start(ctx context.Context, id, owner string) (*Instance, error
 	}()
 	startupCtx, cancel := context.WithTimeout(ctx, time.Duration(d.StartupTimeoutMS)*time.Millisecond)
 	defer cancel()
-	healthy, available := s.probe(startupCtx, d.HealthURL)
+	healthy, available := s.probeEnvironment(startupCtx, d)
 	if healthy {
 		s.mu.Lock()
 		p.instance.Status = "stopped"
@@ -329,7 +346,7 @@ func (s *Service) start(ctx context.Context, id, owner string) (*Instance, error
 			return nil, errors.New("service start canceled")
 		}
 		s.log(id, "manager", "reused existing healthy service; lifecycle remains externally managed")
-		return &Instance{ServiceID: id, Owner: "external", Status: "running"}, nil
+		return &Instance{ServiceID: id, Owner: "external", Status: "running", EnvironmentID: d.EnvironmentID}, nil
 	}
 	if available {
 		s.mu.Lock()
@@ -349,16 +366,10 @@ func (s *Service) start(ctx context.Context, id, owner string) (*Instance, error
 		s.mu.Unlock()
 		return &result, errors.New("service start canceled")
 	}
-	cmd := exec.Command(d.Command, d.Args...)
-	cmd.Dir = d.WorkDir
-	// A descendant may inherit output pipes after the parent exits. Bound the
-	// drain so Wait can finish and remove that descendant process tree.
-	cmd.WaitDelay = time.Second
+	// The environment executor bounds pipe draining and owns process-tree cleanup.
 	stdout := &logWriter{s: s, id: id, stream: "stdout"}
 	stderr := &logWriter{s: s, id: id, stream: "stderr"}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	tree, err := startProcess(cmd)
+	tree, err := executionenv.Start(startupCtx, d.spec(), stdout, stderr)
 	if err != nil {
 		p.instance.Status = "failed"
 		close(p.done)
@@ -368,14 +379,14 @@ func (s *Service) start(ctx context.Context, id, owner string) (*Instance, error
 		return &result, err
 	}
 	p.tree = tree
-	p.instance.PID = cmd.Process.Pid
+	p.instance.PID = tree.PID()
 	p.instance.Started = true
 	s.mu.Unlock()
-	s.log(id, "manager", fmt.Sprintf("started pid=%d owner=%s", cmd.Process.Pid, owner))
+	s.log(id, "manager", fmt.Sprintf("started pid=%d owner=%s", tree.PID(), owner))
 	go func() {
-		waitErr := cmd.Wait()
+		waitErr := tree.Wait()
 		// Remove descendants before flushing logs or waiting on the database.
-		stopErr := tree.stop()
+		stopErr := tree.Stop()
 		stdout.flush()
 		stderr.flush()
 		if waitErr != nil {
@@ -402,7 +413,7 @@ func (s *Service) start(ctx context.Context, id, owner string) (*Instance, error
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if s.healthy(startupCtx, d.HealthURL) {
+		if s.healthyEnvironment(startupCtx, d) {
 			s.mu.Lock()
 			if p.instance.Status == "starting" && !p.stopping {
 				p.instance.Status = "running"
@@ -432,18 +443,17 @@ func (s *Service) healthy(ctx context.Context, address string) bool {
 	healthy, _ := s.probe(ctx, address)
 	return healthy
 }
-func (s *Service) probe(ctx context.Context, address string) (healthy, available bool) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
-	if err != nil {
-		return false, false
-	}
-	response, err := s.client.Do(req)
-	if err != nil {
-		return false, false
-	}
-	defer response.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-	return response.StatusCode >= 200 && response.StatusCode < 300, true
+func (s *Service) probe(ctx context.Context, address string) (bool, bool) {
+	h := executionenv.Probe(ctx, "local", address)
+	return h.Healthy, h.Available
+}
+func (s *Service) probeEnvironment(ctx context.Context, d Definition) (bool, bool) {
+	h := executionenv.Probe(ctx, d.EnvironmentID, d.HealthURL)
+	return h.Healthy, h.Available
+}
+func (s *Service) healthyEnvironment(ctx context.Context, d Definition) bool {
+	h, _ := s.probeEnvironment(ctx, d)
+	return h
 }
 func (s *Service) Stop(ctx context.Context, id, owner string) (*Instance, error) {
 	return s.recordAction(ctx, id, owner, "stop", s.stop)
@@ -478,7 +488,10 @@ func (s *Service) stop(ctx context.Context, id, owner string) (*Instance, error)
 	tree := p.tree
 	s.mu.Unlock()
 	if tree != nil {
-		if err := tree.stop(); err != nil {
+		if err := tree.Stop(); err != nil {
+			s.mu.Lock()
+			p.instance.Status = "cleanup_failed"
+			s.mu.Unlock()
 			s.log(id, "manager", "stop failed: "+err.Error())
 			return nil, err
 		}
@@ -509,7 +522,7 @@ func (s *Service) Status(ctx context.Context, id string) (*Instance, error) {
 		return nil, err
 	}
 	s.mu.Lock()
-	result := &Instance{ServiceID: id, Status: "stopped"}
+	result := &Instance{ServiceID: id, Status: "stopped", EnvironmentID: d.EnvironmentID}
 	if p := s.running[id]; p != nil {
 		*result = p.instance
 		result.Started = false
@@ -519,7 +532,25 @@ func (s *Service) Status(ctx context.Context, id string) (*Instance, error) {
 		}
 	}
 	s.mu.Unlock()
-	healthy := s.healthy(ctx, d.HealthURL)
+	if !executionenv.Local(d.EnvironmentID) {
+		environments, discoverErr := executionenv.Discover(ctx)
+		dName, _, parseErr := executionenv.Parse(d.EnvironmentID)
+		available := false
+		for _, env := range environments {
+			if env.Distribution == dName && env.Running {
+				available = true
+			}
+		}
+		if discoverErr != nil || parseErr != nil || !available {
+			result.EnvironmentError = "WSL 环境未运行或不可用"
+			return result, nil
+		}
+	}
+	health := executionenv.Probe(ctx, d.EnvironmentID, d.HealthURL)
+	if health.Unavailable {
+		result.EnvironmentError = health.Error
+	}
+	healthy := health.Healthy
 	// A start may have reserved or launched this service during the probe.
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -527,7 +558,7 @@ func (s *Service) Status(ctx context.Context, id string) (*Instance, error) {
 		*result = p.instance
 		result.Started = false
 	} else if healthy {
-		*result = Instance{ServiceID: id, Owner: "external", Status: "running"}
+		*result = Instance{ServiceID: id, Owner: "external", Status: "running", EnvironmentID: d.EnvironmentID}
 	}
 	return result, nil
 }

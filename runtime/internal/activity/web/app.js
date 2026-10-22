@@ -1,3 +1,4 @@
+import {environmentLabel,loadEnvironments} from './execution-environments.js';
 import {showReferences,lifecycleButton,openLogManager} from './lifecycle-ui.js';
 'use strict';
 import { refreshCommands } from './command-tools.js';
@@ -106,16 +107,19 @@ import { refreshRequestHistory } from './request-history.js';
   function empty(message, hint) { const el = node('div', 'empty', message); if (hint) el.append(node('small', '', hint)); return el; }
   function setOnline(online) { $('connection').textContent = online ? '实时同步中' : '连接中断，正在重试'; $('connection-dot').className = `dot ${online ? '' : 'offline'}`; $('log-dot').className = `dot ${online ? '' : 'offline'}`; }
   const serviceQuery=document.createElement('input');serviceQuery.type='search';serviceQuery.placeholder='名称、启动程序或健康地址';serviceQuery.setAttribute('aria-label','搜索服务');const serviceStatus=document.createElement('select');serviceStatus.setAttribute('aria-label','服务运行状态');for(const [v,label] of [['','全部运行状态'],['running','运行中'],['stopped','已停止'],['failed','异常'],['starting','启动中'],['stopping','停止中'],['cleanup_failed','清理失败']])serviceStatus.add(new Option(label,v));const serviceOwner=document.createElement('select');serviceOwner.setAttribute('aria-label','服务归属');for(const [v,label] of [['','全部归属'],['manual','手动启动'],['external','外部复用'],['flow','流程使用']])serviceOwner.add(new Option(label,v));$('service-filters').append(serviceQuery,serviceStatus,serviceOwner);serviceQuery.oninput=renderServices;serviceStatus.onchange=renderServices;serviceOwner.onchange=renderServices;
+  const serviceEnvironment=document.createElement('select');serviceEnvironment.setAttribute('aria-label','筛选运行环境');serviceEnvironment.add(new Option('全部运行环境',''));$('service-filters').append(serviceEnvironment);
+  loadEnvironments(serviceEnvironment).then(()=>{serviceEnvironment.prepend(new Option('全部运行环境',''));serviceEnvironment.value='';}).catch(()=>{});
+  serviceEnvironment.onchange=renderServices;
   function renderServices() {
     $('running-count').textContent = state.services.filter(s => s.status === 'running').length;
     $('services-note').textContent = `共 ${state.services.length} 个已配置`;
     $('service-total').textContent = `${state.services.length} 个服务`;
-    const key = JSON.stringify([state.services,serviceQuery.value,serviceStatus.value,serviceOwner.value, [...serviceActions], [...serviceFeedback]]); if (key === state.serviceKey) return; state.serviceKey = key;
+    const key = JSON.stringify([state.services,serviceQuery.value,serviceStatus.value,serviceOwner.value,serviceEnvironment.value, [...serviceActions], [...serviceFeedback]]); if (key === state.serviceKey) return; state.serviceKey = key;
     const fragment = document.createDocumentFragment();
-    for (const service of state.services.filter(item=>(!serviceQuery.value||`${item.name} ${item.command||''} ${item.health_url}`.toLowerCase().includes(serviceQuery.value.toLowerCase()))&&(!serviceStatus.value||item.status===serviceStatus.value)&&(!serviceOwner.value||(serviceOwner.value==='flow'?!['manual','external',''].includes(item.owner):item.owner===serviceOwner.value)))) {
+    for (const service of state.services.filter(item=>(!serviceQuery.value||`${item.name} ${item.command||''} ${item.health_url}`.toLowerCase().includes(serviceQuery.value.toLowerCase()))&&(!serviceEnvironment.value||(item.environment_id||'local')===serviceEnvironment.value||(serviceEnvironment.value.startsWith('wsl:')&&(item.environment_id||'').startsWith(serviceEnvironment.value.slice(0,serviceEnvironment.value.lastIndexOf(':')+1))))&&(!serviceStatus.value||item.status===serviceStatus.value)&&(!serviceOwner.value||(serviceOwner.value==='flow'?!['manual','external',''].includes(item.owner):item.owner===serviceOwner.value)))) {
       const card = node('div', 'service-card');
       const top = node('div', 'service-top'); const name = node('span', 'service-name', service.name); name.title = service.name;
-      const badge = node('span', `badge status-${service.status}`); if (service.status === 'running') badge.append(node('span', 'dot')); badge.append(document.createTextNode(serviceLabels[service.status] || service.status)); top.append(name, badge);
+      const badge = node('span', `badge status-${service.status}`); if (service.status === 'running') badge.append(node('span', 'dot')); badge.append(document.createTextNode(serviceLabels[service.status] || service.status)); top.append(name,node('span','subtle',environmentLabel(service.environment_id)), badge);
       const url = node('div', 'service-url', service.health_url); url.title = service.health_url;
       const external = service.owner === 'external';
       const bottom = node('div', 'service-bottom'); const owner = external ? '复用外部服务' : service.owner === 'manual' ? '手动启动' : service.owner ? `流程 ${service.owner.slice(0, 8)}` : '尚未启动'; bottom.append(node('span', '', service.pid && service.status === 'running' ? `PID ${service.pid} · ${owner}` : owner));
@@ -141,6 +145,7 @@ import { refreshRequestHistory } from './request-history.js';
       remove.title = locked ? '请先停止服务并完成清理，再归档配置' : '归档服务配置，保留历史日志';
       remove.addEventListener('click', () => openServiceDelete(service, remove));
       actions.append(details, logs, edit, remove, control,lifecycleButton('引用与影响',()=>showReferences('service',service.id))); bottom.append(actions); card.append(top, url, bottom);
+      if(service.environment_error)card.append(node('div','service-feedback error',service.environment_error));
       const feedback = serviceFeedback.get(service.id); if (feedback) { const message = node('div', `service-feedback ${feedback.error ? 'error' : ''}`, feedback.message); message.setAttribute('role', feedback.error ? 'alert' : 'status'); card.append(message); }
       fragment.append(card);
     }

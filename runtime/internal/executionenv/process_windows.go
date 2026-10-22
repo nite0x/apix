@@ -1,6 +1,6 @@
 //go:build windows
 
-package commandrunner
+package executionenv
 
 import (
 	"fmt"

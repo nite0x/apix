@@ -20,6 +20,7 @@ import (
 	"github.com/apix/apix/runtime/internal/api"
 	"github.com/apix/apix/runtime/internal/core"
 	"github.com/apix/apix/runtime/internal/database"
+	"github.com/apix/apix/runtime/internal/executionenv"
 	"github.com/apix/apix/runtime/internal/httpapi"
 	"github.com/apix/apix/runtime/internal/journal"
 	"github.com/apix/apix/runtime/internal/localservice"
@@ -144,6 +145,7 @@ func Run(_ []string) error {
 	mcpClient.Routes(r.Group("/api"))
 	databaseService.Routes(r.Group("/api"))
 	serviceManager.Routes(r.Group("/api"))
+	executionenv.Routes(r.Group("/api"))
 	activity.Routes(r, db.DB(), serviceManager, history)
 	r.GET("/api/events", func(c *gin.Context) {
 		after, e := strconv.ParseInt(valueOr(c.Query("after"), "0"), 10, 64)

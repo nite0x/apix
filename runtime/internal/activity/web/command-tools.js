@@ -1,3 +1,4 @@
+import {loadEnvironments,checkEnvironment} from './execution-environments.js';
 import { executionBatchLink } from './execution-batch.js';
 import { attachExecutionHistory } from './execution-history.js';
 let executionHistory = null;
@@ -22,6 +23,10 @@ function notice(text = '', error = false) { const n = root?.querySelector('[data
 function fields(item, modal = false) {
   const request = item?.command_request || {}; const content = el('div', 'command-fields');
   const name = field(modal ? '用例名称' : '测试名称', item?.name || (modal ? '' : '命令行测试')); name.input.required = true; name.input.maxLength = 512;
+  const target=field('运行环境',request.environment_id||'local','select');target.input.append(new Option(request.environment_id||'本机',request.environment_id||'local'));target.input.value=request.environment_id||'local';
+  loadEnvironments(target.input,request.environment_id||'local').catch(error=>{target.wrap.append(el('small','response-error',error.message));});
+  const targetNotice=el('small','','');
+  const check=button('检查运行环境',async()=>{check.disabled=true;targetNotice.textContent='正在检查…';try{const info=await checkEnvironment({environment_id:target.input.value,program:program.input.value,work_dir:cwd.input.value,env:jsonObject(env.input.value,'环境变量')});if(![...target.input.options].some(o=>o.value===info.id))target.input.add(new Option(info.name,info.id));target.input.value=info.id;targetNotice.textContent=`检查通过 · ${info.program||info.work_dir}`;}catch(error){targetNotice.textContent=error.message;}finally{check.disabled=false;}},'button small');
   const description = field('说明', item?.description || '');
   const program = field('执行程序', request.program || ''); program.input.required = true; program.input.placeholder = '例如：bash、python3、node 或程序的绝对路径'; program.input.spellcheck = false;
   const cwd = field('工作目录', request.work_dir || ''); cwd.input.placeholder = '留空使用 Runtime 工作目录；填写时使用绝对路径'; cwd.input.spellcheck = false;
@@ -33,12 +38,12 @@ function fields(item, modal = false) {
   const stdin = field('标准输入 / 脚本正文', request.stdin || '', 'textarea'); stdin.input.rows = 5; stdin.input.spellcheck = false; stdin.input.placeholder = '执行脚本文件：参数填脚本路径。内联脚本：bash 参数填 ["-s"]，python3 / node 参数填 ["-"]，在这里填写代码。';
   const assertions = field('输出断言（JSON 数组）', pretty(item?.assertions || []), 'textarea'); assertions.input.rows = 4; assertions.input.spellcheck = false; assertions.input.placeholder = '[{"source":"stdout","operator":"contains","expected":"完成"}]';
   const variables = field('运行变量（JSON 对象）', '{}', 'textarea'); variables.input.rows = 2; variables.input.spellcheck = false;
-  content.append(name.wrap, description.wrap, program.wrap, cwd.wrap, args.wrap, config, env.wrap, stdin.wrap, assertions.wrap, el('p', 'manual-tool-hint', 'stdout、stderr、exit_code 支持 equals、not_equals、contains、exists；输出为 JSON 时可填写点路径。敏感环境变量或参数建议保存为 {{token}}，在运行变量中显式传值。'), variables.wrap);
+  content.append(name.wrap, description.wrap, target.wrap,check,targetNotice,program.wrap, cwd.wrap, args.wrap, config, env.wrap, stdin.wrap, assertions.wrap, el('p', 'manual-tool-hint', 'stdout、stderr、exit_code 支持 equals、not_equals、contains、exists；输出为 JSON 时可填写点路径。敏感环境变量或参数建议保存为 {{token}}，在运行变量中显式传值。'), variables.wrap);
   if (pretty(request).includes('••••')) content.append(el('p', 'response-error', '此定义来自脱敏快照，请替换脱敏字段后再执行。'));
   return { content, program: program.input, read() {
     const argumentsValue = JSON.parse(args.input.value || '[]'); if (!Array.isArray(argumentsValue) || argumentsValue.some(v => typeof v !== 'string')) throw new Error('启动参数需要是字符串 JSON 数组，每项对应一个参数');
     const definitions = JSON.parse(assertions.input.value || '[]'); if (!Array.isArray(definitions)) throw new Error('输出断言需要是 JSON 数组');
-    return { value: { ...(item?.id ? { id: item.id, edit_version: item.edit_version, project_id: item.project_id } : {}), type: 'command', name: name.input.value, description: description.input.value, command_request: { program: program.input.value, args: argumentsValue, work_dir: cwd.input.value, env: jsonObject(env.input.value, '环境变量'), stdin: stdin.input.value, timeout_seconds: Number(timeout.input.value) }, ...(expected.input.value !== '' ? { expected_exit_code: Number(expected.input.value) } : {}), assertions: definitions }, variables: jsonObject(variables.input.value, '运行变量') };
+    return { value: { ...(item?.id ? { id: item.id, edit_version: item.edit_version, project_id: item.project_id } : {}), type: 'command', name: name.input.value, description: description.input.value, command_request: { environment_id:target.input.value,program: program.input.value, args: argumentsValue, work_dir: cwd.input.value, env: jsonObject(env.input.value, '环境变量'), stdin: stdin.input.value, timeout_seconds: Number(timeout.input.value) }, ...(expected.input.value !== '' ? { expected_exit_code: Number(expected.input.value) } : {}), assertions: definitions }, variables: jsonObject(variables.input.value, '运行变量') };
   } };
 }
 async function execute(value, variables, batchID) {

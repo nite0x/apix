@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -639,5 +640,36 @@ func TestRuntimeLogQueryAndCleanupPreserveServiceOutputAndOperationResults(t *te
 	}
 	if _, err := history.Get(ctx, operation); err != nil {
 		t.Fatal("deleted operation result", err)
+	}
+}
+
+func TestLegacyHostServiceKeepsRelativeDirectory(t *testing.T) {
+	s, db := newTestService(t)
+	d := definitionFor(t, s, "serve")
+	absolute := d.WorkDir
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(cwd, absolute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.EnvironmentID = ""
+	d.WorkDir = relative
+	raw, _ := json.Marshal(d)
+	if _, err = db.Exec("UPDATE local_service_definitions SET data=? WHERE id=?", string(raw), d.ID); err != nil {
+		t.Fatal(err)
+	}
+	started, err := s.Start(context.Background(), d.ID, "manual")
+	if err != nil || started.Status != "running" {
+		t.Fatalf("%+v %v", started, err)
+	}
+	if _, err = s.Stop(context.Background(), d.ID, "manual"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := s.PutDefinition(context.Background(), *d)
+	if err != nil || updated.WorkDir != absolute {
+		t.Fatalf("%+v %v", updated, err)
 	}
 }

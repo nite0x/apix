@@ -23,22 +23,27 @@ import (
 )
 
 type Target struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Home   string `json:"home"`
-	config string
-	codex  string
-	claude string
+	EnvironmentID string `json:"environment_id,omitempty"`
+	bridge        string
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Home          string `json:"home"`
+	config        string
+	codex         string
+	claude        string
 }
 type Client struct {
-	ID         string            `json:"id"`
-	Name       string            `json:"name"`
-	Path       string            `json:"path,omitempty"`
-	Status     string            `json:"status"`
-	Error      string            `json:"error,omitempty"`
-	Snippet    string            `json:"snippet"`
-	Links      map[string]string `json:"links,omitempty"`
-	Connection *Connection       `json:"connection,omitempty"`
+	EnvironmentID string            `json:"environment_id,omitempty"`
+	Command       string            `json:"-"`
+	Args          []string          `json:"-"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Path          string            `json:"path,omitempty"`
+	Status        string            `json:"status"`
+	Error         string            `json:"error,omitempty"`
+	Snippet       string            `json:"snippet"`
+	Links         map[string]string `json:"links,omitempty"`
+	Connection    *Connection       `json:"connection,omitempty"`
 }
 type Result struct {
 	Status     string      `json:"status"`
@@ -108,15 +113,22 @@ func (s *Installer) discoverWindows(ctx context.Context) {
 }
 
 func (s *Installer) target(id string) (Target, error) {
-	for _, target := range s.targets {
-		if target.ID == id && target.Home != "" {
-			return target, nil
+	for i, t := range s.targets {
+		if t.ID == id {
+			if wslTarget(t.ID) {
+				return s.resolveWSL(i)
+			}
+			if t.Home != "" {
+				return t, nil
+			}
 		}
 	}
 	return Target{}, errors.New("安装环境不可用，请刷新后重试")
 }
-
 func (s *Installer) client(t Target, id string) (Client, error) {
+	if t.EnvironmentID != "" {
+		return s.wslClient(t, id)
+	}
 	c := Client{ID: id, Status: "available"}
 	entry := map[string]string{"url": s.endpoint}
 	root := "mcpServers"
@@ -162,19 +174,9 @@ func (s *Installer) client(t Target, id string) (Client, error) {
 // plan never changes a file. Existing conflicting entries are left for the user
 // to review; appending to TOML preserves all existing comments and settings.
 func (s *Installer) plan(c Client) (original, updated []byte, exists bool, err error) {
-	info, statErr := os.Lstat(c.Path)
-	if statErr != nil && !os.IsNotExist(statErr) {
-		return nil, nil, false, errors.New("无法读取配置文件，请检查访问权限")
-	}
-	exists = statErr == nil
-	if exists && (!info.Mode().IsRegular() || info.Size() > 8<<20) {
-		return nil, nil, true, errors.New("配置必须是小于 8 MB 的普通文件；符号链接请手动配置")
-	}
-	if exists {
-		original, err = os.ReadFile(c.Path)
-		if err != nil {
-			return nil, nil, true, errors.New("无法读取配置文件，请检查访问权限")
-		}
+	original, exists, err = s.readConfig(c)
+	if err != nil {
+		return nil, nil, exists, err
 	}
 	conflict := errors.New("已有不同或停用的 apix 配置，请先在 AI 工具中检查；原文件未修改")
 	if c.ID == "codex" {
@@ -185,7 +187,7 @@ func (s *Installer) plan(c Client) (original, updated []byte, exists bool, err e
 		if servers, ok := doc["mcp_servers"].(map[string]any); ok {
 			if value, found := servers["apix"]; found {
 				entry, ok := value.(map[string]any)
-				if ok && entry["url"] == s.endpoint && entry["command"] == nil && entry["enabled"] != false {
+				if ok && s.matches(c, entry) && entry["enabled"] != false {
 					return original, original, exists, nil
 				}
 				return nil, nil, exists, conflict
@@ -218,7 +220,7 @@ func (s *Installer) plan(c Client) (original, updated []byte, exists bool, err e
 	}
 	if raw, found := servers["apix"]; found {
 		var entry map[string]any
-		if json.Unmarshal(raw, &entry) == nil && entry["url"] == s.endpoint && entry["command"] == nil && entry["disabled"] != true && ((c.ID == "cursor" && entry["type"] == nil) || entry["type"] == "http" || entry["type"] == "streamable-http") {
+		if json.Unmarshal(raw, &entry) == nil && s.matches(c, entry) && entry["disabled"] != true && (c.EnvironmentID != "" || (c.ID == "cursor" && entry["type"] == nil) || entry["type"] == "http" || entry["type"] == "streamable-http") {
 			return original, original, exists, nil
 		}
 		return nil, nil, exists, conflict
@@ -271,6 +273,9 @@ func (s *Installer) install(t Target, id string) (Result, error) {
 	return s.writeConfig(c, original, updated, exists, "installed")
 }
 func (s *Installer) writeConfig(c Client, original, updated []byte, exists bool, status string) (Result, error) {
+	if c.EnvironmentID != "" {
+		return s.writeWSL(c, original, updated, exists, status)
+	}
 	result := Result{Status: "configured", Path: c.Path}
 	if exists && bytes.Equal(original, updated) {
 		return result, nil
@@ -325,12 +330,13 @@ func (s *Installer) writeConfig(c Client, original, updated []byte, exists bool,
 
 func (s *Installer) Routes(r gin.IRouter) {
 	discover := func(c *gin.Context) {
-		if len(s.targets) > 1 {
+		if !wslTarget(c.Query("target")) && len(s.targets) > 1 && runtime.GOOS != "windows" {
 			return
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 		defer cancel()
 		s.discoverWindows(ctx)
+		s.discoverWSL(ctx)
 	}
 	// This file-writing API is restricted to the workbench's exact origin even
 	// when the runtime allows additional origins for ordinary API operations.

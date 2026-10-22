@@ -70,7 +70,11 @@ func (s *Installer) testConnection(ctx context.Context, t Target, id string) Con
 		result.Error = err.Error()
 		return result
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	timeout := 10 * time.Second
+	if t.EnvironmentID != "" {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	probe := s.probe
 	if probe == nil {
@@ -100,6 +104,9 @@ func (s *Installer) testConnection(ctx context.Context, t Target, id string) Con
 }
 
 func probeTarget(ctx context.Context, t Target, endpoint string) (probeResult, error) {
+	if t.EnvironmentID != "" {
+		return probeWSL(ctx, t, endpoint)
+	}
 	if t.ID == "windows" && runtime.GOOS == "linux" {
 		return probeWindows(ctx, endpoint)
 	}

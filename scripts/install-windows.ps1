@@ -9,9 +9,9 @@ $taskInstall = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs\Api
 $taskDesktop = [IO.Path]::GetFullPath([Environment]::GetFolderPath('Desktop'))
 $taskBackups = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Apix\backups'))
 $taskBackup = Join-Path $taskBackups ('desktop-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-$taskFiles = @('Apix.exe', 'apix-runtime.exe', 'Apix.exe.sha256', 'apix-runtime.exe.sha256', 'README-Windows.md', 'LICENSE')
+$taskFiles = @('executors\linux-amd64\apix-executor', 'executors\linux-amd64\apix-executor.sha256', 'executors\linux-arm64\apix-executor', 'executors\linux-arm64\apix-executor.sha256', 'Apix.exe', 'apix-runtime.exe', 'Apix.exe.sha256', 'apix-runtime.exe.sha256', 'README-Windows.md', 'LICENSE')
 
-foreach ($taskName in @('Apix.exe', 'apix-runtime.exe')) {
+foreach ($taskName in @('Apix.exe', 'apix-runtime.exe', 'executors\linux-amd64\apix-executor', 'executors\linux-arm64\apix-executor')) {
     $taskBinary = Join-Path $taskSource $taskName
     $taskChecksum = (Get-Content -LiteralPath ($taskBinary + '.sha256') -Raw).Trim().Split(' ')[0]
     if ((Get-FileHash -LiteralPath $taskBinary -Algorithm SHA256).Hash -ne $taskChecksum) {
@@ -23,6 +23,7 @@ foreach ($taskName in $taskFiles) {
     $taskFrom = Join-Path $taskSource $taskName
     $taskTo = Join-Path $taskInstall $taskName
     if ([IO.Path]::GetFullPath($taskFrom) -ne [IO.Path]::GetFullPath($taskTo)) {
+        New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($taskTo)) -Force | Out-Null
         Copy-Item -LiteralPath $taskFrom -Destination $taskTo -Force
     }
 }

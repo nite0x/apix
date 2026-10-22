@@ -13,7 +13,7 @@ function el(tag, className, text) {
   return item;
 }
 async function request(path, options) {
-  const response = await fetch(path, { ...options, signal: AbortSignal.timeout(15000) });
+  const response = await fetch(path, { ...options, signal: AbortSignal.timeout(90000) });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
   return result;
@@ -83,7 +83,8 @@ function render() {
     check.setAttribute('aria-label', `${client.name}：测试连接`);
     check.addEventListener('click', () => testConnection(client.id, data.target));
     actions.append(check);
-    if (client.links) {
+    if(client.status==='external'&&!client.links){actions.append(el('p','manual-tool-hint',client.snippet));}
+    else if (client.links) {
       for (const [name, href] of Object.entries(client.links)) {
         const link = el('a', 'button primary', `安装到 ${name}`);
         link.href = href;

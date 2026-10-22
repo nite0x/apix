@@ -2,12 +2,15 @@ package localservice
 
 import (
 	"context"
+	"github.com/apix/apix/runtime/internal/executionenv"
 	"time"
 )
 
 type HealthCheck struct {
-	Healthy   bool      `json:"healthy"`
-	CheckedAt time.Time `json:"checked_at"`
+	Healthy       bool      `json:"healthy"`
+	Error         string    `json:"error,omitempty"`
+	EnvironmentID string    `json:"environment_id,omitempty"`
+	CheckedAt     time.Time `json:"checked_at"`
 }
 
 type Details struct {
@@ -26,7 +29,11 @@ func (s *Service) Details(ctx context.Context, id string) (*Details, error) {
 	if err != nil {
 		return nil, err
 	}
-	health := HealthCheck{Healthy: s.healthy(ctx, d.HealthURL), CheckedAt: time.Now().UTC()}
+	h := executionenv.Health{Error: instance.EnvironmentError}
+	if instance.EnvironmentError == "" {
+		h = executionenv.Probe(ctx, d.EnvironmentID, d.HealthURL)
+	}
+	health := HealthCheck{Healthy: h.Healthy, Error: h.Error, EnvironmentID: d.EnvironmentID, CheckedAt: time.Now().UTC()}
 	logs, err := s.Logs(ctx, id, 0)
 	if err != nil {
 		return nil, err

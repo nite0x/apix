@@ -18,7 +18,8 @@
     "test:runtime": "cd runtime && go test ./...",
     "build": "pnpm build:runtime",
     "build:runtime": "node scripts/build-runtime.mjs",
-    "build:windows": "node scripts/build-windows.mjs"
+    "build:windows": "node scripts/build-windows.mjs",
+    "test:windows-wsl": "node scripts/test-windows-wsl.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

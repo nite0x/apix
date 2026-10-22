@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/apix/apix/runtime/internal/database"
+	"github.com/apix/apix/runtime/internal/executionenv"
 	"github.com/apix/apix/runtime/internal/executionrecord"
 	"github.com/apix/apix/runtime/internal/httpapi"
 	"github.com/apix/apix/runtime/internal/journal"
@@ -108,10 +109,25 @@ func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Se
 	s.registerLifecycleTools(http)
 	connection := object(map[string]any{"id": str(), "edit_version": integer(), "name": str(), "type": enum("mysql", "postgresql", "hologres"), "host": str(), "port": integer(), "database": str(), "username": str(), "password": str(), "ssl_mode": enum("disable", "prefer", "require", "verify-full")}, "name", "host", "database", "username")
 	sqlCommand := object(map[string]any{"batch_id": str(), "connection_id": str(), "mode": enum("query", "exec"), "sql": str(), "params": array(map[string]any{}), "timeout_ms": integer(), "max_rows": integer()}, "connection_id", "mode", "sql")
-	service := object(map[string]any{"id": str(), "edit_version": integer(), "name": str(), "work_dir": str(), "command": str(), "args": array(str()), "health_url": str(), "startup_timeout_ms": integer()}, "name", "work_dir", "command", "health_url")
+	service := object(map[string]any{"environment_id": str(), "env": map[string]any{"type": "object", "additionalProperties": str()}, "id": str(), "edit_version": integer(), "name": str(), "work_dir": str(), "command": str(), "args": array(str()), "health_url": str(), "startup_timeout_ms": integer()}, "name", "work_dir", "command", "health_url")
 	add := func(name, desc string, schema map[string]any, record bool, handler toolHandler) {
 		s.addCapability(name, desc, schema, history, record, handler)
 	}
+	add("list_execution_environments", "List the host and WSL distributions without starting stopped distributions. Use environment_id on services and command requests.", object(map[string]any{}), false, func(ctx context.Context, a map[string]any) (any, error) {
+		items, err := executionenv.Discover(ctx)
+		warning := ""
+		if err != nil {
+			warning = err.Error()
+		}
+		return map[string]any{"items": items, "warning": warning}, nil
+	})
+	add("check_execution_environment", "Explicitly start/check a selected environment, directory and executable. Returns the canonical environment_id pinned to the Linux user; use it when saving services.", object(map[string]any{"environment_id": str(), "work_dir": str(), "program": str(), "env": map[string]any{"type": "object", "additionalProperties": str()}}), false, func(ctx context.Context, a map[string]any) (any, error) {
+		var spec executionenv.Spec
+		if err := decode(a, &spec); err != nil {
+			return nil, err
+		}
+		return executionenv.Check(ctx, spec)
+	})
 	add("save_database_connection", "Save a MySQL, PostgreSQL or Hologres connection. New connections default to mysql; omitted type preserves the existing driver on updates. Default ports: mysql 3306, postgresql 5432, hologres 80. PostgreSQL/Hologres ssl_mode defaults to prefer. Passwords are encrypted locally and never returned. Include edit_version from the current connection to detect concurrent edits. Omit password on updates to preserve it; use an empty string for an empty password.", object(map[string]any{"connection": connection}, "connection"), true, func(ctx context.Context, a map[string]any) (any, error) {
 		var c database.ConnectionInput
 		if err := decode(a["connection"], &c); err != nil {
@@ -141,7 +157,7 @@ func (s *Server) RegisterCapabilities(http *httpapi.HTTPService, db *database.Se
 		}
 		return db.Execute(ctx, c)
 	})
-	add("save_service", "Save a local service. command is an executable; args are separate arguments. health_url must become healthy before startup succeeds. Include edit_version when updating to detect concurrent edits.", object(map[string]any{"service": service}, "service"), true, func(ctx context.Context, a map[string]any) (any, error) {
+	add("save_service", "Save a local or WSL service using environment_id from check_execution_environment. Omitted environment_id means the Apix host. Paths and health checks belong to that environment. Services must stay in the foreground. command is an executable; args are separate arguments. health_url must become healthy before startup succeeds. Include edit_version when updating to detect concurrent edits.", object(map[string]any{"service": service}, "service"), true, func(ctx context.Context, a map[string]any) (any, error) {
 		var d localservice.Definition
 		if err := decode(a["service"], &d); err != nil {
 			return nil, err
