@@ -49,7 +49,7 @@ pnpm build
 pnpm build:windows
 ```
 
-The host build writes `apix-runtime` and the optional demo API to `release/`. The Windows build uses Linux Go and Python 3 to create `release/Apix_<version>_windows-x64.zip`. Its `Install.ps1` installs two standalone programs and creates an Apix desktop shortcut. The launcher runs the background server without a console and opens the browser on port 4319. See [Windows installation](docs/WINDOWS.md).
+The host build writes `apix-runtime` and the optional demo API to `release/`. The Windows build uses Linux Go and Python 3 to create `release/Apix_<version>_windows-x64.zip`. Its `Install.ps1` installs two standalone programs and creates an Apix desktop shortcut. The Go launcher runs the background server without a console and hosts the workspace in a native Microsoft Edge WebView2 window on port 4319. Reopening the shortcut activates the existing window. Microsoft Edge WebView2 Evergreen Runtime is required; the installer checks for it and provides the official download link when absent. See [Windows installation](docs/WINDOWS.md).
 
 On Windows, `start.ps1` keeps data and logs in the release's `data` directory unless configured explicitly. The optional demo API is for smoke tests and is not started with the workspace.
 

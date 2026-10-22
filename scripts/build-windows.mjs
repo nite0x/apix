@@ -28,13 +28,24 @@ for (const name of ['Apix.exe', 'apix-runtime.exe', 'apix-demo-service.exe']) {
   const checksum = createHash('sha256').update(readFileSync(resolve(output, name))).digest('hex');
   writeFileSync(resolve(output, `${name}.sha256`), `${checksum}  ${name}\n`);
 }
+// Redistribute the notices for the Go binding, in-memory DLL loader and
+// Microsoft's embedded WebView2Loader. Evergreen itself is installed separately.
+const notices = [];
+for (const [module, paths] of [
+  ['github.com/jchv/go-webview2', ['LICENSE', 'webviewloader/sdk/LICENSE.txt']],
+  ['github.com/jchv/go-winloader', ['LICENSE.md']],
+]) {
+  const metadata = JSON.parse(execFileSync(process.env.APIX_GO || 'go', ['list', '-m', '-json', module], { cwd: resolve(root, 'runtime'), encoding: 'utf8' }));
+  for (const path of paths) notices.push(module + ' ' + metadata.Version + ' / ' + path + '\n\n' + readFileSync(resolve(metadata.Dir, path), 'utf8'));
+}
+writeFileSync(resolve(output, 'THIRD-PARTY-NOTICES.txt'), notices.join('\n\n----------------------------------------\n\n'));
 copyFileSync(resolve(root, 'scripts/install-windows.ps1'), resolve(output, 'Install.ps1'));
 copyFileSync(resolve(root, 'docs/WINDOWS.md'), resolve(output, 'README-Windows.md'));
 copyFileSync(resolve(root, 'LICENSE'), resolve(output, 'LICENSE'));
 const { version } = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
 const archive = resolve(root, `release/Apix_${version}_windows-x64.zip`);
-const files = ['executors/linux-amd64/apix-executor','executors/linux-amd64/apix-executor.sha256','executors/linux-arm64/apix-executor','executors/linux-arm64/apix-executor.sha256','Apix.exe', 'apix-runtime.exe', 'Apix.exe.sha256', 'apix-runtime.exe.sha256', 'Install.ps1', 'README-Windows.md', 'LICENSE'];
+const files = ['THIRD-PARTY-NOTICES.txt', 'executors/linux-amd64/apix-executor','executors/linux-amd64/apix-executor.sha256','executors/linux-arm64/apix-executor','executors/linux-arm64/apix-executor.sha256','Apix.exe', 'apix-runtime.exe', 'Apix.exe.sha256', 'apix-runtime.exe.sha256', 'Install.ps1', 'README-Windows.md', 'LICENSE'];
 execFileSync('python3', ['-c', 'import pathlib,sys,zipfile; base=pathlib.Path(sys.argv[1]); archive=zipfile.ZipFile(sys.argv[2],"w",zipfile.ZIP_DEFLATED); [archive.write(base/name,name) for name in sys.argv[3:]]; archive.close()', output, archive, ...files], { stdio: 'inherit' });
 const checksum = createHash('sha256').update(readFileSync(archive)).digest('hex');
 writeFileSync(`${archive}.sha256`, `${checksum}  ${archive.split('/').at(-1)}\n`);
-console.log(`Windows desktop package: ${archive}\nRun Install.ps1 on Windows to create the desktop shortcut. The desktop workspace uses port 4319 and a separate data directory.`);
+console.log(`Windows desktop package: ${archive}\nRun Install.ps1 on Windows to create the desktop shortcut. Apix.exe hosts the workspace in Microsoft Edge WebView2. Evergreen Runtime is required. The desktop workspace uses port 4319 and a separate data directory.`);

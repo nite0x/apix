@@ -28,7 +28,7 @@ wsl -d Ubuntu --exec bash -lc 'cd /home/nite/projects/apix/runtime && go test ./
 
 - `runtime/internal/activity/web`：唯一 Web 工作台 UI，随 Go 构建内嵌。
 - `runtime`：Go 后端，管理本地数据并提供 REST、MCP 和日志服务。
-- `scripts`：开发启动、检查和独立程序打包脚本；项目不使用桌面壳或 Rust 工具链。
+- `scripts`：开发启动、检查和独立程序打包脚本；Windows 桌面入口使用 Go + Microsoft Edge WebView2；不使用 Rust 工具链。
 
 以下命令均在 WSL 项目根目录执行，除非另有注明：
 

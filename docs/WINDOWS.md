@@ -1,4 +1,4 @@
-# Windows 桌面安装
+# Windows 桌面安装（Go + Microsoft Edge WebView2）
 
 将 Windows 成品 ZIP 解压，右键运行 `Install.ps1`，或在当前目录运行：
 
@@ -8,9 +8,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
 
 程序安装到当前用户的 `%LOCALAPPDATA%\Programs\Apix`，并创建桌面快捷方式 **Apix**，无需管理员权限。
 
-双击快捷方式即可启动后台程序并打开浏览器工作台：`http://127.0.0.1:4319/`。再次双击会复用同一个后台进程，不会重复启动。关闭浏览器后后台程序继续运行，可在任务管理器中结束 `apix-runtime.exe`。
+双击快捷方式即可打开独立的 **Apix 桌面窗口**，使用 Microsoft Edge WebView2 显示内嵌工作台；无需浏览器标签页。再次双击会唤起已有窗口，最小化后自动恢复，并复用同一个后台进程。关闭桌面窗口后后台程序继续运行，以保持 MCP 和已启动服务可用；可在任务管理器中结束 `apix-runtime.exe`。原有浏览器访问地址 `http://127.0.0.1:4319/` 仍可使用。
 
-桌面版使用独立数据目录 `%LOCALAPPDATA%\Apix\data`，不会导入、覆盖 WSL 数据或旧桌面版数据。开发工作台继续使用端口 4317。Windows 数据库密码由当前 Windows 用户的 DPAPI 保护。
+需要 Windows 10/11 x64 和 **Microsoft Edge WebView2 Evergreen Runtime**。安装程序及桌面入口都会检查运行环境；若缺失，请先从 [Microsoft 官方下载页](https://developer.microsoft.com/microsoft-edge/webview2/) 安装 Evergreen Runtime（离线机器可使用 Evergreen Standalone Installer），再运行 `Install.ps1`。安装 Edge 浏览器本身不等于安装 WebView2 Runtime。
+
+桌面版使用独立数据目录 `%LOCALAPPDATA%\Apix\data`，不会导入、覆盖 WSL 数据或旧桌面版数据。开发工作台继续使用端口 4317。Windows 数据库密码由当前 Windows 用户的 DPAPI 保护。WebView2 缓存、Cookie 和页面偏好保存在 `%LOCALAPPDATA%\Apix\webview2`，与应用数据库分开。
 
 旧桌面上的 Apix portable 目录和 setup 安装包会整体移入 `%LOCALAPPDATA%\Apix\backups`，保留原文件及可能存在的数据。
 
@@ -18,7 +20,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
 
 ## 源码打包
 
-在 Ubuntu WSL 项目根目录运行 `pnpm build:windows`。Linux Go 交叉编译运行时和无控制台启动程序，Python 3 标准库生成 `release/Apix_<版本>_windows-x64.zip` 及其 SHA-256 校验文件。安装和启动程序都不使用 Tauri。
+在 Ubuntu WSL 项目根目录运行 `pnpm build:windows`。Linux Go 交叉编译运行时和无控制台 WebView2 桌面程序，使用纯 Go WebView2 绑定，无需 Windows Node、C/C++ 或 Rust 工具链；WebView2Loader 已内嵌到 Apix.exe。Python 3 标准库生成 `release/Apix_<版本>_windows-x64.zip` 及其 SHA-256 校验文件。ZIP 包含依赖许可说明 `THIRD-PARTY-NOTICES.txt`。
+
+`Apix.exe --background` 只启动或检查后台，不打开窗口，也不依赖 WebView2；适用于原有后台启动场景。默认桌面端口为 4319，显式设置 `APIX_ADDR=127.0.0.1:<端口>` 可使用其他回环端口。开发默认入口及数据库保持原样。
 
 
 ## Windows 和 WSL 统一管理
@@ -41,6 +45,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
 
 WSL 客户端使用 stdio 调用同一安装目录中的 apix-runtime.exe mcp-stdio，再连接 Windows 的本机 HTTP MCP。此入口仅转发工具，不启动第二套数据库或工作台；无需修改 NAT / mirrored 网络设置或开放局域网端口。需要启用 WSL 的 Windows 程序互操作功能，且安装目录必须可从 WSL 访问。AI 工具的命令执行限制也需要允许该桥接程序运行。
 
+桥接建立连接后，会保持 AI 客户端的 stdio 会话，并每 2 秒检查后端 MCP 会话。Apix 重启或会话失效时自动重新握手、刷新工具列表；重连失败按 250 毫秒到 5 秒退避，直到后端恢复或客户端关闭。无需重新打开 AI 会话。首次启动桥接时仍要求 Apix 已运行。
+
+每次工具调用先进行无副作用的连接检查，遇到断线最多等待 10 秒恢复；工具本身仍遵循调用方的执行时限。后端长期未恢复时，本次调用返回不可用，后台继续重连。已经发出的工具调用若丢失响应，会报告结果未知，不会自动重放，以免重复执行请求、SQL 或命令。请先检查执行记录再决定是否重试。
+
 “测试连接”会从所选 Linux 环境实际调用 Windows 桥接程序，验证 MCP 握手和工具列表。主程序未运行、互操作被禁用或安装目录已移动时会报告失败；不会误报为已连接。Windows 正式版 MCP 地址通常为 http://127.0.0.1:4319/mcp，开发版为 4317，实际配置使用正在运行的主程序地址。
 
 TRAE 的 WSL 桥接不提供一键导入，请使用支持 stdio 的客户端，或切换到 Windows 环境配置 Windows TRAE。
@@ -57,8 +65,11 @@ go test ./...
 go test -race ./internal/executionenv ./internal/commandrunner ./internal/localservice ./internal/aiinstall ./internal/mcpbridge
 cd ..
 pnpm build:windows
+pnpm test:windows-desktop
 ```
 
 可选的真实 Windows / WSL 验收使用临时数据库和自建测试服务，不复用、修改或启动用户已有的业务服务。在 WSL 中执行 pnpm build:windows 后，运行 pnpm test:windows-wsl -- Ubuntu。脚本使用 Linux Go 交叉编译测试程序，将测试目标复制到 Windows 本地临时目录，通过 WSL 互操作执行，并在结束后仅清理本次创建的临时目录。
 
 该验收覆盖 Windows / WSL 服务启停、WSL 子进程清理、Windows 主进程异常退出及 WSL stdio MCP 连接同一运行时。Windows 本机回环检测单独运行；失败时不能把完整 MCP 验收标记为通过。部分 Windows 配置下，从 WSL 的 UNC 共享目录直接运行程序会导致本机 HTTP 访问异常，因此测试目标按真实安装方式放在 Windows 本地磁盘。未提供发行版参数时使用当前 WSL_DISTRO_NAME。
+
+桌面窗口验收 `pnpm test:windows-desktop` 在 WSL 中交叉编译测试程序，再通过互操作在 Windows 本地临时目录执行。它使用临时 LOCALAPPDATA、随机回环端口和独立数据库，检查 WebView2 实际页面渲染、界面路由、重复启动唤起、后台模式和关闭后重新打开；不安装程序或修改已有数据。此验收需要 Windows WebView2 Runtime。
