@@ -1,0 +1,81 @@
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
+import { afterEach, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import CommandsPage from './index';
+
+afterEach(() => vi.unstubAllGlobals());
+it('retains command input on failure, rejects invalid args, prevents duplicate execution and renders output safely', async () => {
+  const writes: { url: string; value: any }[] = [];
+  let release: (() => void) | undefined;
+  let failSave = true;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, options: RequestInit = {}) => {
+      const value = options.body ? JSON.parse(String(options.body)) : undefined;
+      if (options.method) writes.push({ url, value });
+      let result: any = [];
+      if (url === '/api/execution-environments')
+        result = { items: [{ id: 'local', name: '本机' }] };
+      if (url === '/api/commands/environment') result = { platform: 'linux', work_dir: '/tmp' };
+      if (url === '/api/test-batches') result = { id: 'batch' };
+      if (url.endsWith('/runs')) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        result = {
+          test_status: 'passed',
+          test_run_id: 'run',
+          duration_ms: 12,
+          command_result: { exit_code: 0, stdout: '<script>attack()</script>', stderr: '' },
+        };
+      }
+      if (url === '/api/test-cases' && failSave)
+        return new Response(JSON.stringify({ error: 'save conflict' }), { status: 409 });
+      if (url === '/api/test-cases') result = { id: 'case' };
+      return new Response(JSON.stringify(result));
+    }),
+  );
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const { container } = render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <CommandsPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  fireEvent.change(screen.getByLabelText('执行程序'), { target: { value: 'python3' } });
+  fireEvent.change(screen.getByLabelText('启动参数（JSON 数组）'), { target: { value: '[1]' } });
+  fireEvent.click(screen.getByRole('button', { name: '执行命令' }));
+  expect(await screen.findByText('启动参数需要是字符串 JSON 数组')).toBeInTheDocument();
+  expect(writes).toHaveLength(0);
+  fireEvent.change(screen.getByLabelText('启动参数（JSON 数组）'), { target: { value: '["-"]' } });
+  fireEvent.change(screen.getByLabelText('标准输入 / 脚本正文'), {
+    target: { value: 'print("done")' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '执行命令' }));
+  await waitFor(() => expect(release).toBeTypeOf('function'));
+  fireEvent.click(screen.getByRole('button', { name: '处理中…' }));
+  expect(writes.filter((item) => item.url.endsWith('/runs'))).toHaveLength(1);
+  release?.();
+  expect(await screen.findByText('<script>attack()</script>')).toBeInTheDocument();
+  expect(container.querySelector('script')).toBeNull();
+  expect(screen.getByRole('link', { name: '查看执行批次' })).toHaveAttribute(
+    'href',
+    '/execution-records?batch=batch&step=run',
+  );
+  await userEvent.click(screen.getByRole('tab', { name: '执行记录' }));
+  expect(await screen.findByText('暂无匹配的执行记录')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('tab', { name: '命令执行' }));
+  expect(screen.getByLabelText('标准输入 / 脚本正文')).toHaveValue('print("done")');
+  fireEvent.click(screen.getByRole('button', { name: '保存测试用例' }));
+  expect(await screen.findByText('save conflict')).toBeInTheDocument();
+  expect(screen.getByLabelText('标准输入 / 脚本正文')).toHaveValue('print("done")');
+  failSave = false;
+  fireEvent.click(screen.getByRole('button', { name: '保存测试用例' }));
+  expect(await screen.findByText('用例已保存，可在“已保存用例”中重复运行。')).toBeInTheDocument();
+  client.clear();
+});

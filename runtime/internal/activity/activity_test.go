@@ -60,21 +60,36 @@ func TestReadOnlyMonitorHistoryCursorsAndEmbeddedAssets(t *testing.T) {
 		return w
 	}
 	page := get("/")
-	if page.Code != 200 || !strings.Contains(page.Body.String(), "实时日志") || page.Header().Get("Content-Security-Policy") == "" {
+	if page.Code != 200 || !strings.Contains(page.Body.String(), `id="root"`) || page.Header().Get("Content-Security-Policy") == "" {
 		t.Fatalf("page=%d", page.Code)
 	}
 	for _, path := range []string{"/", "/activity", "/services", "/requests", "/databases", "/flows", "/flows?id=example", "/execution-records", "/execution-records?batch=example", "/execution-records?run=example", "/tests", "/tests?batch=example", "/test-collections", "/test-collections?tab=records&batch=example", "/logs", "/logs?source=svc", "/ai-tools"} {
 		w := get(path)
-		if w.Code != 200 || !strings.Contains(w.Body.String(), `aria-label="主导航"`) || w.Header().Get("Content-Security-Policy") == "" {
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `id="root"`) || w.Header().Get("Content-Security-Policy") == "" {
 			t.Fatalf("page route %s: %d", path, w.Code)
 		}
 	}
-	for _, path := range []string{"/activity/assets/execution-history.js", "/activity/assets/execution-history.css", "/activity/assets/execution-batch.js", "/activity/assets/ai-tools.js", "/activity/assets/ai-tools.css", "/activity/assets/request-api.js", "/activity/assets/request-library.js", "/activity/assets/request-history.js", "/activity/assets/app.js", "/activity/assets/workspace-tabs.js", "/activity/assets/request-detail.js", "/activity/assets/service-detail.js", "/activity/assets/databases.js", "/activity/assets/style.css", "/activity/assets/desktop.css", "/activity/assets/services.css", "/activity/assets/flows.js", "/activity/assets/flow-model.js", "/activity/assets/flows.css", "/activity/assets/testing.js", "/activity/assets/testing.css", "/activity/assets/manual-request.js", "/activity/assets/manual-request.css", "/activity/assets/service-editor.js", "/activity/assets/manual-tools.css"} {
-		if w := get(path); w.Code != 200 {
-			t.Fatalf("missing embedded asset %s", path)
+	assetEntries, err := assets.ReadDir("web/dist/assets")
+	if err != nil || len(assetEntries) == 0 {
+		t.Fatalf("frontend build missing: %v", err)
+	}
+	for _, entry := range assetEntries {
+		path := "/activity/ui/assets/" + entry.Name()
+		w := get(path)
+		if w.Code != 200 || w.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
+			t.Fatalf("embedded asset %s: %d", path, w.Code)
+		}
+		if strings.HasSuffix(entry.Name(), ".js") && !strings.Contains(w.Header().Get("Content-Type"), "javascript") {
+			t.Fatalf("invalid script MIME: %s", path)
 		}
 	}
-	if w := get("/activity/assets/missing"); w.Code != 404 {
+	if strings.Contains(page.Body.String(), "__APIX_STYLE_NONCE__") || !strings.Contains(page.Body.String(), `name="apix-style-nonce"`) || strings.Contains(page.Header().Get("Content-Security-Policy"), "unsafe-inline") {
+		t.Fatal("missing strict Radix style nonce")
+	}
+	if page.Body.String() == get("/").Body.String() {
+		t.Fatal("style nonce must be unique per document")
+	}
+	if w := get("/activity/ui/assets/missing.js"); w.Code != 404 {
 		t.Fatalf("unexpected asset %d", w.Code)
 	}
 	w := get("/api/activity")

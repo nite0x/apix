@@ -2,6 +2,9 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, copyFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildWeb } from './build-web.mjs';
+
+buildWeb();
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(root, process.env.APIX_OUTPUT_DIR || 'release');

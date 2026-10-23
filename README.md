@@ -27,7 +27,7 @@ pnpm dev
 
 `pnpm dev` and `pnpm dev:browser` start the Go runtime and open the workspace after a successful health check. They reuse an existing healthy runtime. For terminal-only startup, use `pnpm dev:backend`.
 
-Web assets live in `runtime/internal/activity/web` and are embedded at Go build time. Restart the runtime after editing them.
+The React/TypeScript UI lives in `frontend/`, using shadcn/ui and Tailwind CSS. Runtime and desktop build commands compile it into `runtime/internal/activity/web/dist/` before Go embeds it. Restart the runtime to load newly embedded assets. For frontend HMR, run `pnpm dev:frontend` alongside the backend and open `http://127.0.0.1:1420/`; Vite proxies the existing APIs to port 4317. See [frontend development](frontend/README.md).
 
 Development keeps the existing database and adjacent credentials key in `~/Library/Application Support/dev.apix.desktop/` on macOS, `$XDG_DATA_HOME/dev.apix.desktop/` (default `~/.local/share/`) on Linux, or `%LOCALAPPDATA%\dev.apix.desktop\` on Windows. Set `APIX_DB_PATH` for an isolated database. Direct executable startup defaults to `apix.db` in the caller's directory.
 
@@ -40,7 +40,7 @@ pnpm test:runtime
 pnpm build
 ```
 
-`pnpm check` checks Web and tooling JavaScript syntax. Web tests use Node's test runner and jsdom. Go tests cover the backend.
+`pnpm check` runs TypeScript, React Hooks lint and tooling syntax checks. Web tests use Vitest, Testing Library and jsdom. `pnpm format:check` verifies frontend formatting. `pnpm test:runtime` builds the embedded UI before running Go tests; before running Go commands directly from a clean checkout, run `pnpm build:web`. For real browser/API/persistence verification, see the [isolated Playwright workflow](frontend/e2e/README.md).
 
 ## Desktop and standalone builds
 
@@ -60,7 +60,8 @@ The host backend build writes `apix-runtime` and the optional demo API to `relea
 
 ## Repository layout
 
-- `runtime/internal/activity/web`: the only UI source.
+- `frontend`: React workspaces, local shadcn/ui components, themes and tests.
+- `runtime/internal/activity/web/dist`: generated frontend assets embedded in Go.
 - `runtime`: Go runtime, REST, MCP, SQLite, and service management.
 - `src-tauri`: Tauri desktop shell and native installer configuration.
 - `desktop`: small startup screen and icon source; the workspace UI stays embedded in Go.

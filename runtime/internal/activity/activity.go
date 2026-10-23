@@ -3,8 +3,10 @@ package activity
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"io/fs"
 	"net/http"
@@ -19,7 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-//go:embed web/*
+//go:embed web/dist
 var assets embed.FS
 
 type monitor struct {
@@ -56,12 +58,21 @@ type serviceLog struct {
 
 func Routes(r gin.IRouter, db *sql.DB, services *localservice.Service, history *journal.Store) {
 	m := &monitor{db: db, services: services, history: history}
-	page, _ := assets.ReadFile("web/index.html")
+	page, err := assets.ReadFile("web/dist/index.html")
+	if err != nil {
+		panic("build frontend assets with pnpm build:web before compiling the runtime: " + err.Error())
+	}
 	servePage := func(c *gin.Context) {
+		nonceBytes := make([]byte, 18)
+		if _, err := rand.Read(nonceBytes); err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		nonce := base64.RawStdEncoding.EncodeToString(nonceBytes)
 		c.Header("Cache-Control", "no-store")
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-"+nonce+"'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
 		c.Header("X-Content-Type-Options", "nosniff")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", page)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(strings.ReplaceAll(string(page), "__APIX_STYLE_NONCE__", nonce)))
 	}
 	r.GET("/", servePage)
 	r.GET("/activity", servePage)
@@ -76,25 +87,28 @@ func Routes(r gin.IRouter, db *sql.DB, services *localservice.Service, history *
 	r.GET("/commands", servePage)
 	r.GET("/logs", servePage)
 	r.GET("/ai-tools", servePage)
-	web, _ := fs.Sub(assets, "web")
-	r.GET("/activity/assets/:name", func(c *gin.Context) {
-		name := c.Param("name")
-		if name != "execution-environments.js" && name != "lifecycle-ui.js" && name != "execution-history.js" && name != "execution-history.css" && name != "execution-batch.js" && name != "command-tools.js" && name != "command-tools.css" && name != "mcp-tools.js" && name != "mcp-tools.css" && name != "ai-tools.js" && name != "ai-tools.css" && name != "request-api.js" && name != "request-library.js" && name != "request-history.js" && name != "workspace-tabs.js" && name != "app.js" && name != "request-detail.js" && name != "service-detail.js" && name != "databases.js" && name != "style.css" && name != "desktop.css" && name != "services.css" && name != "flows.js" && name != "flow-model.js" && name != "flows.css" && name != "testing.js" && name != "testing.css" && name != "manual-request.js" && name != "manual-request.css" && name != "service-editor.js" && name != "manual-tools.css" {
-			c.Status(404)
+	ui, _ := fs.Sub(assets, "web/dist")
+	r.GET("/activity/ui/*path", func(c *gin.Context) {
+		name := strings.TrimPrefix(c.Param("path"), "/")
+		if name == "" || name == "index.html" {
+			servePage(c)
 			return
 		}
-		data, err := fs.ReadFile(web, name)
-		if err != nil {
-			c.Status(404)
+		if !fs.ValidPath(name) {
+			c.Status(http.StatusNotFound)
 			return
 		}
-		kind := "text/css; charset=utf-8"
-		if strings.HasSuffix(name, ".js") {
-			kind = "text/javascript; charset=utf-8"
+		if _, err := fs.Stat(ui, name); err != nil {
+			c.Status(http.StatusNotFound)
+			return
 		}
-		c.Header("Cache-Control", "no-cache")
+		if strings.HasPrefix(name, "assets/") {
+			c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			c.Header("Cache-Control", "no-cache")
+		}
 		c.Header("X-Content-Type-Options", "nosniff")
-		c.Data(200, kind, data)
+		c.FileFromFS(name, http.FS(ui))
 	})
 	r.GET("/api/activity", m.snapshot)
 }
