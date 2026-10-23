@@ -2,7 +2,7 @@
 
 **Apix — Agentic Procedural Interface eXecution**
 
-Apix is a local API debugging and testing workspace. A Go process serves the Web UI, REST API, and MCP endpoint at `http://127.0.0.1:4317/`. The UI is embedded in the executable.
+Apix is a local API debugging and testing workspace. A Go process serves the embedded Web UI and REST API at `http://127.0.0.1:4317/`. Local AI clients connect to MCP over stdio, without an IP address or port.
 
 ## Features
 
@@ -54,7 +54,7 @@ pnpm build:sidecar && pnpm test:sidecar
 
 Tauri 2 owns the desktop window and Go sidecar. The same Go binary serves the embedded workspace, REST and MCP; the desktop loads it after a readiness handshake. Reopening the app focuses the existing window. Closing the window or quitting gracefully stops the owned backend and its managed resources. For an always-on MCP runtime, run the standalone backend instead.
 
-Desktop MCP stays at `http://127.0.0.1:4319/mcp` by default; browser development stays on 4317. Windows retains `%LOCALAPPDATA%\Apix\data`; macOS and Linux retain the developer data directories above. Data and credentials are never included in installers. See [desktop build and lifecycle](docs/DESKTOP.md) and [Windows installation](docs/WINDOWS.md).
+Desktop workspace defaults to port 4319; browser development stays on 4317. MCP uses `apix-runtime mcp-stdio --socket <local socket or named pipe>`. The **AI 工具** page generates the complete command for each client. Keep Apix running while using MCP. Windows retains `%LOCALAPPDATA%\Apix\data`; macOS and Linux retain the developer data directories above. Data and credentials are never included in installers. See [desktop build and lifecycle](docs/DESKTOP.md) and [Windows installation](docs/WINDOWS.md).
 
 The host backend build writes `apix-runtime` and the optional demo API to `release/`. On Windows, `start.ps1` keeps data and logs in the release's `data` directory unless configured explicitly. The demo API is not started with the workspace.
 
@@ -72,7 +72,7 @@ The host backend build writes `apix-runtime` and the optional demo API to `relea
 
 - Workspace: `http://127.0.0.1:4317/`
 - Health: `GET /health`
-- MCP: `/mcp`
+- MCP: stdio via the local runtime command; no TCP MCP endpoint
 - REST: `/api`
 - Execution events: `GET /api/events`
 

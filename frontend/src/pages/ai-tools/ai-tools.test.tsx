@@ -50,7 +50,7 @@ test('installation uses the selected system, prevents duplicate writes and repor
       return response({
         target,
         targets,
-        endpoint: 'http://127.0.0.1:4317/mcp',
+        transport: 'stdio',
         clients: [
           {
             id: 'codex',
@@ -66,6 +66,8 @@ test('installation uses the selected system, prevents duplicate writes and repor
   );
   const user = setup();
   await screen.findByText('/local/config.toml');
+  expect(screen.getByText('stdio')).toBeInTheDocument();
+  expect(screen.queryByText(/127\.0\.0\.1/)).not.toBeInTheDocument();
   await user.click(screen.getByRole('combobox', { name: '目标系统' }));
   await user.click(screen.getByRole('option', { name: /Windows/ }));
   await screen.findByText('/windows/config.toml');
@@ -94,7 +96,7 @@ test('late connection checks cannot overwrite another target and zero tools rema
       return response({
         target,
         targets,
-        endpoint: 'http://127.0.0.1:4317/mcp',
+        transport: 'stdio',
         clients: [
           {
             id: 'codex',
@@ -147,7 +149,7 @@ test('a failed automatic handshake leaves configuration installed and allows a m
       return response({
         target: 'local',
         targets,
-        endpoint: 'http://127.0.0.1:4317/mcp',
+        transport: 'stdio',
         clients: [
           {
             id: 'codex',

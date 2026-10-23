@@ -1,4 +1,4 @@
-// Package mcpbridge forwards a stdio client's tools to the single HTTP runtime.
+// Package mcpbridge forwards a stdio client's tools to the single local runtime.
 package mcpbridge
 
 import (
@@ -6,32 +6,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/localipc"
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
+	"os"
 	"sync"
 	"time"
 )
 
 func Connect(ctx context.Context, endpoint string) (*mcpclient.Client, *mcp.InitializeResult, error) {
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, nil, err
-	}
-	if u.Scheme != "http" || u.User != nil || u.Path != "/mcp" || u.RawQuery != "" || u.Fragment != "" {
-		return nil, nil, errors.New("bridge requires a loopback HTTP /mcp endpoint")
-	}
-	host := u.Hostname()
-	ip := net.ParseIP(host)
-	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return nil, nil, errors.New("bridge only connects to the local Windows runtime")
-	}
-	cli, err := mcpclient.NewStreamableHttpClient(endpoint, transport.WithHTTPBasicClient(&http.Client{Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 2 * time.Second, KeepAlive: 30 * time.Second}).DialContext, IdleConnTimeout: 30 * time.Second}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}))
+	return connect(ctx, localipc.Endpoint, localipc.HTTPClient(endpoint))
+}
+
+func connect(ctx context.Context, endpoint string, client *http.Client) (*mcpclient.Client, *mcp.InitializeResult, error) {
+	cli, err := mcpclient.NewStreamableHttpClient(endpoint, transport.WithHTTPBasicClient(client))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -257,11 +249,19 @@ func (b *bridge) call(ctx context.Context, request mcp.CallToolRequest) (*mcp.Ca
 	}
 }
 func Probe(ctx context.Context, endpoint string, out io.Writer) error {
-	cli, info, err := Connect(ctx, endpoint)
+	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
+	cli := mcpclient.NewClient(transport.NewStdio(exe, nil, "mcp-stdio", "--socket", endpoint))
 	defer cli.Close()
+	if err := cli.Start(ctx); err != nil {
+		return err
+	}
+	info, err := cli.Initialize(ctx, mcp.InitializeRequest{Params: mcp.InitializeParams{ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION, ClientInfo: mcp.Implementation{Name: "apix-stdio-probe", Version: "1"}}})
+	if err != nil {
+		return err
+	}
 	tools, err := cli.ListTools(ctx, mcp.ListToolsRequest{})
 	if err != nil {
 		return err

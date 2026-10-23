@@ -7,13 +7,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
-// The current Linux test binary is the only external program these tests launch.
+// The current test binary is the only external program these tests launch.
 func TestCommandHelper(t *testing.T) {
 	if os.Getenv("APIX_COMMAND_HELPER") != "1" {
 		return
@@ -90,12 +91,12 @@ func TestOutputLimitsMissingProgramsAndShutdown(t *testing.T) {
 	if out.ErrorKind != "" || !out.StdoutTruncated || !out.StderrTruncated || len(out.Stdout) != OutputLimit || len(out.Stderr) != OutputLimit {
 		t.Fatalf("output capture: %s %d/%d", out.ErrorKind, len(out.Stdout), len(out.Stderr))
 	}
-	missing := runner.Run(context.Background(), Request{Program: "/definitely-not-an-apix-program"})
+	missing := runner.Run(context.Background(), Request{Program: filepath.Join(t.TempDir(), "missing-program")})
 	if missing.ErrorKind != "start" || missing.ExitCode != nil {
 		t.Fatalf("missing: %+v", missing)
 	}
 	req := helperRequest("echo")
-	req.WorkDir = "/definitely-not-an-apix-directory"
+	req.WorkDir = filepath.Join(t.TempDir(), "missing-directory")
 	if out = runner.Run(context.Background(), req); out.ErrorKind != "start" {
 		t.Fatalf("directory: %+v", out)
 	}

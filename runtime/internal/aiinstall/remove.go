@@ -39,7 +39,7 @@ func (s *Installer) removalPlan(target Target, id string) (*RemovalPreview, Clie
 	if err != nil {
 		return nil, c, nil, nil, err
 	}
-	v := &RemovalPreview{Target: target.ID, Client: c.Name, Path: c.Path, Status: "manual", Instructions: "在目标 AI 工具的 MCP 设置中，找到名为 apix 且地址为 " + s.endpoint + " 的连接，移除后重新加载工具；请保留其他连接。手动操作不会自动标记为已验证移除。"}
+	v := &RemovalPreview{Target: target.ID, Client: c.Name, Path: c.Path, Status: "manual", Instructions: "在目标 AI 工具的 MCP 设置中，找到名为 apix 的 stdio 连接，移除后重新加载工具；请保留其他连接。手动操作不会自动标记为已验证移除。"}
 	if c.Status == "external" {
 		return v, c, nil, nil, nil
 	}

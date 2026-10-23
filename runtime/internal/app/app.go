@@ -23,6 +23,7 @@ import (
 	"github.com/apix/apix/runtime/internal/executionenv"
 	"github.com/apix/apix/runtime/internal/httpapi"
 	"github.com/apix/apix/runtime/internal/journal"
+	"github.com/apix/apix/runtime/internal/localipc"
 	"github.com/apix/apix/runtime/internal/localservice"
 	mcpserver "github.com/apix/apix/runtime/internal/mcp"
 	"github.com/apix/apix/runtime/internal/mcpclient"
@@ -49,6 +50,15 @@ func Run(_ []string) error {
 
 	// 1. Storage
 	dbPath := sqlitePath()
+	socket, err := localipc.Address(dbPath)
+	if err != nil {
+		return err
+	}
+	mcpListener, err := localipc.Listen(socket)
+	if err != nil {
+		return fmt.Errorf("local MCP listener: %w", err)
+	}
+	defer mcpListener.Close()
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		return err
 	}
@@ -108,18 +118,12 @@ func Run(_ []string) error {
 	// 3. MCP server
 	mcp := mcpserver.NewServer(executor)
 
-	// 4. REST API and Streamable HTTP MCP on localhost.
+	// 4. REST API and the workspace on localhost.
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.LoggerWithWriter(os.Stderr), gin.RecoveryWithWriter(os.Stderr))
 	r.Use(recordOperations(history))
 	r.Use(func(c *gin.Context) {
-		// Streamable MCP has its own strict Origin guard below. Keep the
-		// browser CORS policy away from /mcp.
-		if c.Request.URL.Path == "/mcp" {
-			c.Next()
-			return
-		}
 		origin := c.GetHeader("Origin")
 		if origin != "" && origin != "http://"+c.Request.Host && !allowedBrowserOrigin(origin) {
 			c.AbortWithStatus(http.StatusForbidden)
@@ -150,7 +154,7 @@ func Run(_ []string) error {
 	mcp.RegisterHTTPTools(httpService)
 	mcp.RegisterMCPClientTools(mcpClient, history)
 	mcp.RegisterCapabilities(httpService, databaseService, serviceManager, history)
-	r.Any("/mcp", allowMCPOrigin(), gin.WrapH(mcp.HTTPHandler()))
+	// MCP is available only through local IPC; TCP serves the workspace and REST.
 	httpService.Routes(r.Group("/api"))
 	mcpClient.Routes(r.Group("/api"))
 	databaseService.Routes(r.Group("/api"))
@@ -179,8 +183,7 @@ func Run(_ []string) error {
 		c.JSON(200, operation)
 	})
 
-	// 6. One independent Runtime owns both transports. AI clients connect to
-	// http://127.0.0.1:4317/mcp; the workspace uses the REST API and journal polling.
+	// 6. AI clients use stdio bridges; the workspace uses REST and journal polling.
 	address := os.Getenv("APIX_ADDR")
 	if address == "" {
 		address = "127.0.0.1:4317"
@@ -196,12 +199,15 @@ func Run(_ []string) error {
 	if err != nil {
 		return err
 	}
-	aiinstall.New("http://" + listener.Addr().String() + "/mcp").Routes(r)
+	aiinstall.New(socket).Routes(r)
 	go httpService.RunRetentionWorker(ctx)
 	server := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
-	serverErr := make(chan error, 1)
+	serverErr := make(chan error, 2)
 	go func() { serverErr <- server.Serve(listener) }()
-	history.Append("runtime.started", "", "", map[string]any{"address": listener.Addr().String(), "mcp": "/mcp"})
+	mcpHTTP := &http.Server{Handler: mcp.HTTPHandler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+	defer mcpHTTP.Close()
+	go func() { serverErr <- mcpHTTP.Serve(mcpListener) }()
+	history.Append("runtime.started", "", "", map[string]any{"address": listener.Addr().String(), "mcp": "stdio"})
 	log.Printf("Activity monitor: http://%s/", listener.Addr().String())
 	if os.Getenv("APIX_DESKTOP_SIDECAR") == "1" {
 		if err := desktopReady(os.Stdout, listener.Addr().String()); err != nil {
@@ -242,29 +248,6 @@ func allowedBrowserOrigin(origin string) bool {
 		}
 	}
 	return false
-}
-
-// allowMCPOrigin rejects browser requests unless their exact Origin appears
-// in APIX_MCP_ALLOWED_ORIGINS. Native MCP clients normally omit Origin and are
-// allowed because the Runtime is bound to loopback only.
-func allowMCPOrigin() gin.HandlerFunc {
-	allowed := map[string]struct{}{}
-	for _, value := range strings.Split(os.Getenv("APIX_MCP_ALLOWED_ORIGINS"), ",") {
-		if origin := strings.TrimSpace(value); origin != "" {
-			allowed[origin] = struct{}{}
-		}
-	}
-
-	return func(c *gin.Context) {
-		origin := c.GetHeader("Origin")
-		if origin != "" {
-			if _, ok := allowed[origin]; !ok {
-				c.AbortWithStatus(http.StatusForbidden)
-				return
-			}
-		}
-		c.Next()
-	}
 }
 
 func sqlitePath() string {

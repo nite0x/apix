@@ -644,13 +644,23 @@ func TestRuntimeLogQueryAndCleanupPreserveServiceOutputAndOperationResults(t *te
 }
 
 func TestLegacyHostServiceKeepsRelativeDirectory(t *testing.T) {
-	s, db := newTestService(t)
-	d := definitionFor(t, s, "serve")
-	absolute := d.WorkDir
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A relative path cannot cross drives when Windows puts TEMP on C: and
+	// the checkout on D:. Keep this fixture beside the package on every OS.
+	absolute, err := os.MkdirTemp(cwd, ".apix-relative-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(absolute); err != nil {
+			t.Error(err)
+		}
+	})
+	s, db := newTestService(t)
+	d := definitionFor(t, s, "serve")
 	relative, err := filepath.Rel(cwd, absolute)
 	if err != nil {
 		t.Fatal(err)

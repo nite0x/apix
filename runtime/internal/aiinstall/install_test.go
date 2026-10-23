@@ -18,8 +18,8 @@ import (
 func fixture(t *testing.T) (*Installer, Target) {
 	t.Helper()
 	home := t.TempDir()
-	target := Target{ID: "local", Home: home, Name: "Test", config: filepath.Join(home, "config")}
-	return &Installer{endpoint: "http://127.0.0.1:4317/mcp", targets: []Target{target}}, target
+	target := Target{ID: "local", Home: home, Name: "Test", config: filepath.Join(home, "config"), bridgeArgs: []string{"-test.run=^TestStdioConnectionFixture$"}}
+	return &Installer{socket: filepath.Join(home, "mcp.sock"), targets: []Target{target}}, target
 }
 func put(t *testing.T, path, content string) {
 	t.Helper()
@@ -40,6 +40,10 @@ func TestInstallMergesBacksUpAndIsIdempotent(t *testing.T) {
 				original = "# Keep this comment\nmodel = \"example\"\n[mcp_servers.existing]\ncommand = \"keep\"\n"
 			}
 			put(t, c.Path, original)
+			originalInfo, err := os.Stat(c.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
 			result, err := s.install(target, id)
 			if err != nil || result.Status != "installed" || result.Backup == "" {
 				t.Fatalf("%+v %v", result, err)
@@ -60,8 +64,8 @@ func TestInstallMergesBacksUpAndIsIdempotent(t *testing.T) {
 				if err := toml.Unmarshal(updated, &doc); err != nil {
 					t.Fatal(err)
 				}
-				if doc["mcp_servers"].(map[string]any)["apix"].(map[string]any)["url"] != s.endpoint {
-					t.Fatal("missing MCP URL")
+				if !s.matches(c, doc["mcp_servers"].(map[string]any)["apix"].(map[string]any)) {
+					t.Fatal("missing stdio command")
 				}
 			} else {
 				if !strings.Contains(string(updated), "12345678901234567890") {
@@ -76,10 +80,10 @@ func TestInstallMergesBacksUpAndIsIdempotent(t *testing.T) {
 					root = "servers"
 				}
 				entry := doc[root].(map[string]any)["apix"].(map[string]any)
-				if entry["url"] != s.endpoint {
-					t.Fatal("missing MCP URL")
+				if !s.matches(c, entry) || entry["url"] != nil {
+					t.Fatal("missing stdio command")
 				}
-				if id != "cursor" && entry["type"] != "http" {
+				if id != "cursor" && entry["type"] != "stdio" {
 					t.Fatal("wrong transport")
 				}
 			}
@@ -91,8 +95,11 @@ func TestInstallMergesBacksUpAndIsIdempotent(t *testing.T) {
 			if string(actual) != string(updated) {
 				t.Fatal("repeat install rewrote configuration")
 			}
-			info, _ := os.Stat(c.Path)
-			if info.Mode().Perm() != 0600 {
+			info, err := os.Stat(c.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != originalInfo.Mode().Perm() {
 				t.Fatal("permissions changed")
 			}
 		})
@@ -122,7 +129,7 @@ func TestFreshInstallAndCustomHomes(t *testing.T) {
 func TestUnsafeConfigsRemainUntouched(t *testing.T) {
 	for _, tc := range []struct{ id, content string }{
 		{"cursor", `{"mcpServers":{"apix":{"url":"http://other/mcp"}}}`},
-		{"claude", `{"mcpServers":{"apix":{"url":"http://127.0.0.1:4317/mcp"}}}`},
+		{"claude", `{"mcpServers":{"apix":{"url":"http://127.0.0.1:4317/mcp","headers":{"Authorization":"custom"}}}}`},
 		{"cursor", `{"mcpServers":{"apix":{"url":"http://127.0.0.1:4317/mcp","disabled":true}}}`},
 		{"cursor", `{"mcpServers":{"apix":{"url":"http://127.0.0.1:4317/mcp","type":"sse"}}}`},
 		{"cursor", `{"mcpServers":[]}`},
@@ -174,7 +181,7 @@ func TestTRAEOfficialInstallLinks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if parsed.Host != "trae.ai-ide" || parsed.Path != "/mcp-import" || parsed.Query().Get("type") != "http" || parsed.Query().Get("name") != "apix" {
+		if parsed.Host != "trae.ai-ide" || parsed.Path != "/mcp-import" || parsed.Query().Get("type") != "stdio" || parsed.Query().Get("name") != "apix" {
 			t.Fatal(link)
 		}
 		if name == "国内版" && parsed.Scheme != "trae-cn" {
@@ -184,8 +191,8 @@ func TestTRAEOfficialInstallLinks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var entry map[string]string
-		if json.Unmarshal(decoded, &entry) != nil || entry["url"] != s.endpoint {
+		var entry map[string]any
+		if json.Unmarshal(decoded, &entry) != nil || !s.matches(c, entry) || entry["url"] != nil {
 			t.Fatal(string(decoded))
 		}
 	}
@@ -269,7 +276,7 @@ func TestRemovalBacksUpOnlyRecognizedApixEntryAndDetectsConcurrentEdits(t *testi
 				t.Fatal(result, err)
 			}
 			after, _ := os.ReadFile(c.Path)
-			if !strings.Contains(string(after), "keep") || strings.Contains(string(after), s.endpoint) {
+			if !strings.Contains(string(after), "keep") || strings.Contains(string(after), s.socket) {
 				t.Fatal("lost other settings or retained apix", string(after))
 			}
 			if id != "codex" && !strings.Contains(string(after), "12345678901234567890") {

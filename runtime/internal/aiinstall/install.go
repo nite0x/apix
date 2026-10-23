@@ -1,4 +1,4 @@
-// Package aiinstall connects local AI clients to the running Apix MCP endpoint.
+// Package aiinstall connects local AI clients to Apix over stdio.
 package aiinstall
 
 import (
@@ -7,12 +7,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/url"
 	"os"
 	"os/exec"
+	"os/user"
+	"path"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -25,6 +27,7 @@ import (
 type Target struct {
 	EnvironmentID string `json:"environment_id,omitempty"`
 	bridge        string
+	bridgeArgs    []string
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	Home          string `json:"home"`
@@ -52,14 +55,14 @@ type Result struct {
 	Connection *Connection `json:"connection,omitempty"`
 }
 type Installer struct {
-	endpoint    string
+	socket      string
 	targets     []Target
 	mu          sync.Mutex
 	connections map[string]connectionCache
 	probe       func(context.Context, Target, string) (probeResult, error)
 }
 
-func New(endpoint string) *Installer {
+func New(socket string) *Installer {
 	home, _ := os.UserHomeDir()
 	config := os.Getenv("XDG_CONFIG_HOME")
 	if config == "" {
@@ -78,7 +81,7 @@ func New(endpoint string) *Installer {
 	if os.Getenv("WSL_DISTRO_NAME") != "" {
 		name = "Ubuntu / WSL"
 	}
-	return &Installer{endpoint: endpoint, targets: []Target{{ID: "local", Name: name, Home: home, config: config, codex: os.Getenv("CODEX_HOME"), claude: os.Getenv("CLAUDE_CONFIG_DIR")}}}
+	return &Installer{socket: socket, targets: []Target{{ID: "local", Name: name, Home: home, config: config, codex: os.Getenv("CODEX_HOME"), claude: os.Getenv("CLAUDE_CONFIG_DIR")}}}
 }
 
 // Windows profiles are discovered only on WSL, without launching an AI client.
@@ -109,7 +112,15 @@ func (s *Installer) discoverWindows(ctx context.Context) {
 	if config == "" {
 		config = filepath.Join(home, "AppData", "Roaming")
 	}
-	s.targets = append(s.targets, Target{ID: "windows", Name: "Windows", Home: home, config: config, codex: read("CODEX_HOME"), claude: read("CLAUDE_CONFIG_DIR")})
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	current, err := user.Current()
+	if err != nil {
+		return
+	}
+	s.targets = append(s.targets, Target{ID: "windows", Name: "Windows", Home: home, config: config, codex: read("CODEX_HOME"), claude: read("CLAUDE_CONFIG_DIR"), bridge: "wsl.exe", bridgeArgs: []string{"--distribution", os.Getenv("WSL_DISTRO_NAME"), "--user", current.Username, "--exec", exe}})
 }
 
 func (s *Installer) target(id string) (Target, error) {
@@ -126,42 +137,56 @@ func (s *Installer) target(id string) (Target, error) {
 	return Target{}, errors.New("安装环境不可用，请刷新后重试")
 }
 func (s *Installer) client(t Target, id string) (Client, error) {
-	if t.EnvironmentID != "" {
-		return s.wslClient(t, id)
+	command := t.bridge
+	if command == "" {
+		var err error
+		command, err = os.Executable()
+		if err != nil {
+			return Client{}, errors.New("无法定位 Apix 可执行文件")
+		}
 	}
-	c := Client{ID: id, Status: "available"}
-	entry := map[string]string{"url": s.endpoint}
+	c := Client{ID: id, Status: "available", EnvironmentID: t.EnvironmentID, Command: command, Args: append(append([]string{}, t.bridgeArgs...), "mcp-stdio", "--socket", s.socket)}
+	entry := map[string]any{"command": c.Command, "args": c.Args}
+	join := filepath.Join
+	if t.EnvironmentID != "" {
+		join = path.Join
+	}
 	root := "mcpServers"
 	switch id {
 	case "codex":
 		c.Name = "Codex"
 		dir := t.codex
 		if dir == "" {
-			dir = filepath.Join(t.Home, ".codex")
+			dir = join(t.Home, ".codex")
 		}
-		c.Path = filepath.Join(dir, "config.toml")
-		c.Snippet = "[mcp_servers.apix]\nurl = " + fmt.Sprintf("%q", s.endpoint) + "\n"
+		c.Path = join(dir, "config.toml")
+		commandTOML, _ := toml.Marshal(map[string]any{"command": c.Command, "args": c.Args})
+		c.Snippet = "[mcp_servers.apix]\n" + string(commandTOML)
 		return c, nil
 	case "claude":
 		c.Name = "Claude Code"
-		c.Path = filepath.Join(t.Home, ".claude.json")
+		c.Path = join(t.Home, ".claude.json")
 		if t.claude != "" {
-			c.Path = filepath.Join(t.claude, ".claude.json")
+			c.Path = join(t.claude, ".claude.json")
 		}
-		entry["type"] = "http"
+		entry["type"] = "stdio"
 	case "cursor":
 		c.Name = "Cursor"
-		c.Path = filepath.Join(t.Home, ".cursor", "mcp.json")
+		c.Path = join(t.Home, ".cursor", "mcp.json")
 	case "vscode":
 		c.Name = "VS Code / Copilot"
-		c.Path = filepath.Join(t.config, "Code", "User", "mcp.json")
+		c.Path = join(t.config, "Code", "User", "mcp.json")
 		root = "servers"
-		entry["type"] = "http"
+		entry["type"] = "stdio"
 	case "trae":
 		c.Name = "TRAE"
 		c.Status = "external"
+		if t.EnvironmentID != "" {
+			c.Snippet = "WSL 内请使用支持 stdio 的客户端连接 Apix。Windows TRAE 请切换至 Windows 环境安装 stdio MCP。"
+			return c, nil
+		}
 		encoded, _ := json.Marshal(entry)
-		query := url.Values{"type": {"http"}, "name": {"apix"}, "config": {base64.StdEncoding.EncodeToString(encoded)}}
+		query := url.Values{"type": {"stdio"}, "name": {"apix"}, "config": {base64.StdEncoding.EncodeToString(encoded)}}
 		c.Links = map[string]string{"国际版": "trae://trae.ai-ide/mcp-import?" + query.Encode(), "国内版": "trae-cn://trae.ai-ide/mcp-import?" + query.Encode()}
 	default:
 		return Client{}, errors.New("不支持的 AI 工具")
@@ -189,6 +214,16 @@ func (s *Installer) plan(c Client) (original, updated []byte, exists bool, err e
 				entry, ok := value.(map[string]any)
 				if ok && s.matches(c, entry) && entry["enabled"] != false {
 					return original, original, exists, nil
+				}
+				if ok && legacyEntry(c, entry) {
+					if next, replaced := upgradeTOML(original, c.Snippet); replaced {
+						var check, desired map[string]any
+						_ = toml.Unmarshal([]byte(c.Snippet), &desired)
+						servers["apix"] = desired["mcp_servers"].(map[string]any)["apix"]
+						if toml.Unmarshal(next, &check) == nil && reflect.DeepEqual(doc, check) {
+							return original, next, exists, nil
+						}
+					}
 				}
 				return nil, nil, exists, conflict
 			}
@@ -220,10 +255,12 @@ func (s *Installer) plan(c Client) (original, updated []byte, exists bool, err e
 	}
 	if raw, found := servers["apix"]; found {
 		var entry map[string]any
-		if json.Unmarshal(raw, &entry) == nil && s.matches(c, entry) && entry["disabled"] != true && (c.EnvironmentID != "" || (c.ID == "cursor" && entry["type"] == nil) || entry["type"] == "http" || entry["type"] == "streamable-http") {
+		if json.Unmarshal(raw, &entry) == nil && s.matches(c, entry) && entry["disabled"] != true && ((c.ID == "cursor" && entry["type"] == nil) || entry["type"] == "stdio") {
 			return original, original, exists, nil
 		}
-		return nil, nil, exists, conflict
+		if !legacyEntry(c, entry) {
+			return nil, nil, exists, conflict
+		}
 	}
 	var addition map[string]map[string]json.RawMessage
 	_ = json.Unmarshal([]byte(c.Snippet), &addition)
@@ -370,7 +407,7 @@ func (s *Installer) Routes(r gin.IRouter) {
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(200, gin.H{"endpoint": s.endpoint, "targets": s.targets, "target": id, "clients": s.list(target)})
+		c.JSON(200, gin.H{"transport": "stdio", "targets": s.targets, "target": id, "clients": s.list(target)})
 	})
 	group.POST("/:id/test", func(c *gin.Context) {
 		if !strings.HasPrefix(strings.ToLower(c.GetHeader("Content-Type")), "application/json") {

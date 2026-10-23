@@ -6,14 +6,31 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
+
+// HTTP fixtures let pagination/error tests control raw RPC responses. Actual
+// installer connection tests below launch a real stdio child process.
+func probeHTTP(ctx context.Context, endpoint string) (probeResult, error) {
+	client, err := mcpclient.NewStreamableHttpClient(endpoint, transport.WithHTTPBasicClient(&http.Client{Transport: &http.Transport{Proxy: nil}}))
+	if err != nil {
+		return probeResult{}, err
+	}
+	defer client.Close()
+	if err := client.Start(ctx); err != nil {
+		return probeResult{}, err
+	}
+	return probeClient(ctx, client)
+}
 
 func mcpEndpoint(t *testing.T, n int) string {
 	t.Helper()
@@ -97,7 +114,6 @@ func TestProbePaginationAndFailures(t *testing.T) {
 }
 func TestConnectionResultsCacheAndConfigurationChanges(t *testing.T) {
 	s, target := fixture(t)
-	s.endpoint = mcpEndpoint(t, 2)
 	if _, err := s.install(target, "codex"); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +140,7 @@ func TestConnectionTargetFailureRecoveryAndExpiry(t *testing.T) {
 	calls := 0
 	s.probe = func(ctx context.Context, selected Target, endpoint string) (probeResult, error) {
 		calls++
-		if selected.ID != "windows" || endpoint != s.endpoint {
+		if selected.ID != "windows" || endpoint != s.socket {
 			t.Fatal("wrong target or URL")
 		}
 		if calls == 1 {
@@ -164,6 +180,25 @@ func TestConnectionTargetFailureRecoveryAndExpiry(t *testing.T) {
 	if result := s.testConnection(context.Background(), target, "cursor"); result.Status != "failed" {
 		t.Fatalf("%+v", result)
 	}
+}
+
+// A real child process verifies that installer checks use the generated stdio
+// command rather than silently succeeding through an HTTP endpoint.
+func TestStdioConnectionFixture(t *testing.T) {
+	if len(os.Args) < 4 || os.Args[len(os.Args)-3] != "mcp-stdio" {
+		return
+	}
+	m := server.NewMCPServer("apix", "test", server.WithToolCapabilities(true))
+	for _, name := range []string{"one", "two"} {
+		m.AddTool(mcp.NewTool(name), func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			os.Exit(3) // Connection checks must never invoke a business tool.
+			return nil, nil
+		})
+	}
+	if err := server.NewStdioServer(m).Listen(context.Background(), os.Stdin, os.Stdout); err != nil {
+		os.Exit(2)
+	}
+	os.Exit(0)
 }
 func TestInstallAutomaticallyVerifiesAndFailureDoesNotUndoInstall(t *testing.T) {
 	gin.SetMode(gin.TestMode)

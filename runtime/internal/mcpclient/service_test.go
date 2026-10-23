@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -118,9 +119,19 @@ func TestStreamableHTTPDiscoveryCallsAndCredentialStorage(t *testing.T) {
 	if e = db.QueryRow("PRAGMA database_list").Scan(&seq, &name, &path); e != nil {
 		t.Fatal(e)
 	}
-	keyBefore, e := os.ReadFile(path + ".credentials.key")
-	if e != nil {
-		t.Fatal(e)
+	var keyBefore []byte
+	if runtime.GOOS == "windows" {
+		if !strings.HasPrefix(string(encrypted), "dpapi:v1:") {
+			t.Fatal("credential does not use Windows DPAPI")
+		}
+		if _, e := os.Stat(path + ".credentials.key"); !os.IsNotExist(e) {
+			t.Fatalf("DPAPI should not create a credential key file: %v", e)
+		}
+	} else {
+		keyBefore, e = os.ReadFile(path + ".credentials.key")
+		if e != nil {
+			t.Fatal(e)
+		}
 	}
 	restarted, e := New(db)
 	if e != nil {
@@ -156,9 +167,18 @@ func TestStreamableHTTPDiscoveryCallsAndCredentialStorage(t *testing.T) {
 	if _, e = s.Discover(context.Background(), saved.ID); e != nil {
 		t.Fatal("masked credential was overwritten", e)
 	}
-	keyAfter, _ := os.ReadFile(path + ".credentials.key")
-	if string(keyBefore) != string(keyAfter) {
-		t.Fatal("credential key changed")
+	if runtime.GOOS == "windows" {
+		if _, e := os.Stat(path + ".credentials.key"); !os.IsNotExist(e) {
+			t.Fatalf("DPAPI should not create a credential key file: %v", e)
+		}
+	} else {
+		keyAfter, e := os.ReadFile(path + ".credentials.key")
+		if e != nil {
+			t.Fatal(e)
+		}
+		if string(keyBefore) != string(keyAfter) {
+			t.Fatal("credential key changed")
+		}
 	}
 	if e = s.Archive(saved.ID); e != nil {
 		t.Fatal(e)

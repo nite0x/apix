@@ -2,7 +2,7 @@
 
 运行 Tauri 生成的 `Apix_*_setup.exe`（NSIS，当前用户安装，无需管理员权限）。安装程序包含 Tauri 桌面壳、Go 后端及 Linux x86_64 / aarch64 WSL 执行助手，并处理 Microsoft Edge WebView2 Evergreen Runtime 的安装。离线环境请先安装 [Microsoft WebView2 Evergreen Standalone Installer](https://developer.microsoft.com/microsoft-edge/webview2/)。
 
-再次打开会唤起已有窗口。默认 MCP 地址仍为 `http://127.0.0.1:4319/mcp`。**关闭窗口或退出应用会停止本次桌面启动的后端及其托管资源**；需要持续运行 MCP 时，使用独立的 `apix-runtime.exe`。不再提供旧版 `Apix.exe --background` 或 ZIP / Install.ps1 安装方式。
+再次打开会唤起已有窗口。本地 MCP 统一使用 stdio，通过命令启动连接，无需 IP 或端口。**关闭窗口或退出应用会停止本次桌面启动的后端及其托管资源**；需要持续运行 MCP 时，使用独立的 `apix-runtime.exe`。不再提供旧版 `Apix.exe --background` 或 ZIP / Install.ps1 安装方式。
 
 旧版数据目录 `%LOCALAPPDATA%\Apix\data` 原地保留，数据库及相邻凭据密钥继续使用；不会复制或覆盖 WSL 数据。升级前请退出旧 Apix 并结束旧版遗留的 `apix-runtime.exe`，否则端口占用会明确报错，不会接管旧进程。旧版手动安装的快捷方式请移除或改为新程序；NSIS 不负责卸载旧版 ZIP 安装。
 
@@ -36,13 +36,13 @@ pnpm build:windows
 
 在“AI 工具”选择“WSL · 发行版”，然后为 Codex、Claude Code、Cursor 或 VS Code / Copilot 安装配置。配置操作在目标 Linux 用户下执行，保留原有其他 MCP 配置，修改前保存备份，遇到不同的 apix 配置或并发修改时停止覆盖。
 
-WSL 客户端使用 stdio 调用同一安装目录中的 apix-runtime.exe mcp-stdio，再连接 Windows 的本机 HTTP MCP。此入口仅转发工具，不启动第二套数据库或工作台；无需修改 NAT / mirrored 网络设置或开放局域网端口。需要启用 WSL 的 Windows 程序互操作功能，且安装目录必须可从 WSL 访问。AI 工具的命令执行限制也需要允许该桥接程序运行。
+Windows 本机及 WSL 客户端都使用 stdio 调用同一安装目录中的 `apix-runtime.exe mcp-stdio --socket <命名管道>`，通过仅当前用户可访问的 Windows 命名管道连接后端，不经过 TCP。此入口仅转发工具，不启动第二套数据库或工作台；无需修改 NAT / mirrored 网络设置或开放端口。WSL 需要启用 Windows 程序互操作，且安装目录必须可从 WSL 访问。AI 工具的命令执行限制也需要允许该桥接程序运行。
 
 桥接建立连接后，会保持 AI 客户端的 stdio 会话，并每 2 秒检查后端 MCP 会话。Apix 重启或会话失效时自动重新握手、刷新工具列表；重连失败按 250 毫秒到 5 秒退避，直到后端恢复或客户端关闭。无需重新打开 AI 会话。首次启动桥接时仍要求 Apix 已运行。
 
 每次工具调用先进行无副作用的连接检查，遇到断线最多等待 10 秒恢复；工具本身仍遵循调用方的执行时限。后端长期未恢复时，本次调用返回不可用，后台继续重连。已经发出的工具调用若丢失响应，会报告结果未知，不会自动重放，以免重复执行请求、SQL 或命令。请先检查执行记录再决定是否重试。
 
-“测试连接”会从所选 Linux 环境实际调用 Windows 桥接程序，验证 MCP 握手和工具列表。主程序未运行、互操作被禁用或安装目录已移动时会报告失败；不会误报为已连接。Windows 正式版 MCP 地址默认为 http://127.0.0.1:4319/mcp，浏览器开发版为 4317，实际配置使用正在运行的主程序地址。
+“测试连接”会从所选环境实际启动 stdio 命令，验证 MCP 握手和工具列表。主程序未运行、互操作被禁用或安装目录已移动时会报告失败。工作台端口变化不影响 MCP 配置；数据库路径或可执行文件位置变化后需更新配置。旧版标准 HTTP 配置可在备份后升级为 stdio；含自定义字段或停用标记的配置请手动审阅。
 
 TRAE 的 WSL 桥接不提供一键导入，请使用支持 stdio 的客户端，或切换到 Windows 环境配置 Windows TRAE。
 

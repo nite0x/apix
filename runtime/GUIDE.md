@@ -74,13 +74,13 @@ Apix 的数据库连接直接填写主机、端口、库名、用户名和密码
 
 ## AI 连接
 
-MCP 使用 Streamable HTTP，连接地址：
+本地安装的 MCP 统一使用 stdio。保持 Runtime 运行，在工作台的“AI 工具”页选择目标系统，安装或复制相应配置。命令形式为：
 
 ```text
-http://127.0.0.1:4317/mcp
+apix-runtime mcp-stdio --socket <本机 socket 或命名管道>
 ```
 
-在支持 HTTP MCP 的客户端中添加这个地址。不同客户端的配置文件格式不同，以客户端支持的格式为准。正常的本机原生 MCP 客户端不需要浏览器 Origin；如果通过浏览器连接，需要在启动 Runtime 前用 `APIX_MCP_ALLOWED_ORIGINS` 配置允许的准确 Origin，多个用逗号分隔。
+页面会生成可执行文件的绝对路径和完整参数，不需要填写 IP 或端口。Linux/macOS 使用 Unix socket，Windows 使用当前用户命名管道；stdio 进程与工作台共享同一后端和数据库。工作台端口变化无需重装 MCP 配置；移动可执行文件或修改数据库路径后需要更新。标准旧版 HTTP 配置在安装时备份并升级；自定义或停用配置需手动审阅。TCP 上不再提供 `/mcp`。
 
 主要工具：
 
@@ -99,7 +99,7 @@ http://127.0.0.1:4317/mcp
 | 处理现有暂停规则 | `resume_flow_step`、`resume_request_step` |
 | 查看事件和单次操作结果 | `get_run_events`、`get_operation` |
 
-下面的 JSON 都是对应工具的参数，不是 HTTP MCP 协议报文。
+下面的 JSON 都是对应工具的参数，不是 MCP 协议报文。
 
 ## 成品验证示例
 

@@ -27,7 +27,7 @@ interface AIClient {
 }
 interface AIConfig {
   target: string;
-  endpoint: string;
+  transport: 'stdio';
   targets: Array<{ id: string; name: string; home: string }>;
   clients: AIClient[];
 }
@@ -234,8 +234,11 @@ export default function AIToolsPage() {
             }
           />
           <div className="text-sm">
-            <span className="text-muted-foreground">MCP 地址：</span>
-            <code className="break-all">{data?.endpoint || '正在读取…'}</code>
+            <span className="text-muted-foreground">MCP 连接方式：</span>
+            <code>stdio</code>
+            <p className="mt-1 text-muted-foreground">
+              AI 工具通过本地命令连接 Apix，无需配置 IP 或端口。使用时请保持 Apix 运行。
+            </p>
           </div>
         </CardContent>
       </Card>

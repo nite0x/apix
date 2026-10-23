@@ -60,7 +60,19 @@ try {
     const page = await fetch(url);
     assert.equal(page.status, 200);
     assert.match(await page.text(), /<html/i);
-    execFileSync(executable, ['mcp-probe', '--url', new URL('/mcp', url).href], { timeout: 15000, windowsHide: true, stdio: 'pipe' });
+    const configs = await (await fetch(new URL('/api/ai-tools', url))).json();
+    assert.equal(configs.transport, 'stdio');
+    assert.equal(configs.endpoint, undefined);
+    const config = configs.clients.find(client => client.id === 'cursor');
+    const entry = JSON.parse(config.snippet).mcpServers.apix;
+    assert.equal(entry.command, executable);
+    assert.equal(entry.url, undefined);
+    assert.deepEqual(entry.args.slice(0, 2), ['mcp-stdio', '--socket']);
+    const measured = JSON.parse(execFileSync(executable, ['mcp-probe', ...entry.args.slice(1)], { timeout: 15000, windowsHide: true, stdio: 'pipe' }));
+    assert.equal(measured.server_name, 'apix');
+    assert.ok(measured.tools_count > 0);
+    const tcpMCP = await fetch(new URL('/mcp', url), { method: 'POST', body: '{}' });
+    assert.notEqual(tcpMCP.status, 200);
     if (mode === 'shutdown') child.stdin.write('shutdown\n');
     else {
       if (mode === 'parent-pipes-closed') {

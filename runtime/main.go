@@ -13,8 +13,8 @@ import (
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "mcp-stdio" || os.Args[1] == "mcp-probe") {
-		if len(os.Args) != 4 || os.Args[2] != "--url" {
-			fmt.Fprintln(os.Stderr, "usage: apix-runtime mcp-stdio|mcp-probe --url http://127.0.0.1:4319/mcp")
+		if len(os.Args) != 4 || os.Args[2] != "--socket" {
+			fmt.Fprintln(os.Stderr, "usage: apix-runtime mcp-stdio|mcp-probe --socket <local socket or named pipe>")
 			os.Exit(2)
 		}
 		var err error

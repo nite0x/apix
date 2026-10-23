@@ -99,53 +99,11 @@ func (s *Installer) writeWSL(c Client, original, updated []byte, exists bool, st
 	}
 	return Result{Status: status, Path: c.Path, Backup: v.Backup}, nil
 }
-func (s *Installer) wslClient(t Target, id string) (Client, error) {
-	c := Client{ID: id, Status: "available", EnvironmentID: t.EnvironmentID, Command: t.bridge, Args: []string{"mcp-stdio", "--url", s.endpoint}}
-	entry := map[string]any{"command": c.Command, "args": c.Args}
-	root := "mcpServers"
-	switch id {
-	case "codex":
-		c.Name = "Codex"
-		dir := t.codex
-		if dir == "" {
-			dir = path.Join(t.Home, ".codex")
-		}
-		c.Path = path.Join(dir, "config.toml")
-		args, _ := json.Marshal(c.Args)
-		c.Snippet = fmt.Sprintf("[mcp_servers.apix]\ncommand = %q\nargs = %s\n", c.Command, args)
-		return c, nil
-	case "claude":
-		c.Name = "Claude Code"
-		c.Path = path.Join(t.Home, ".claude.json")
-		if t.claude != "" {
-			c.Path = path.Join(t.claude, ".claude.json")
-		}
-		entry["type"] = "stdio"
-	case "cursor":
-		c.Name = "Cursor"
-		c.Path = path.Join(t.Home, ".cursor", "mcp.json")
-	case "vscode":
-		c.Name = "VS Code / Copilot"
-		c.Path = path.Join(t.config, "Code", "User", "mcp.json")
-		root = "servers"
-		entry["type"] = "stdio"
-	case "trae":
-		c.Name = "TRAE"
-		c.Status = "external"
-		c.Snippet = "WSL 内请使用支持 stdio 的客户端连接 Apix。Windows TRAE 请切换至 Windows 环境安装 HTTP MCP。"
-		return c, nil
-	default:
-		return c, errors.New("不支持的 AI 工具")
-	}
-	raw, _ := json.MarshalIndent(map[string]any{root: map[string]any{"apix": entry}}, "", "  ")
-	c.Snippet = string(raw)
-	return c, nil
-}
-func probeWSL(ctx context.Context, t Target, endpoint string) (probeResult, error) {
+func probeWSL(ctx context.Context, t Target, socket string) (probeResult, error) {
 	// Launch the actual Windows bridge from the selected Linux environment.
 	// Disabled WSL interop therefore fails this test instead of giving a false pass.
 	var out limitedOutput
-	p, err := executionenv.Start(ctx, executionenv.Spec{EnvironmentID: t.EnvironmentID, Program: t.bridge, Args: []string{"mcp-probe", "--url", endpoint}}, &out, &out)
+	p, err := executionenv.Start(ctx, executionenv.Spec{EnvironmentID: t.EnvironmentID, Program: t.bridge, Args: []string{"mcp-probe", "--socket", socket}}, &out, &out)
 	if err != nil {
 		return probeResult{}, err
 	}
@@ -189,9 +147,6 @@ func (b *limitedOutput) Write(p []byte) (int, error) {
 func wslTarget(id string) bool { return strings.HasPrefix(id, "wsl:") }
 
 func (s *Installer) matches(c Client, entry map[string]any) bool {
-	if c.EnvironmentID == "" {
-		return entry["url"] == s.endpoint && entry["command"] == nil
-	}
 	if entry["url"] != nil || entry["command"] != c.Command {
 		return false
 	}

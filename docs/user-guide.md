@@ -1,6 +1,6 @@
 # Apix User Guide
 
-Apix runs as one local Web workspace at `http://127.0.0.1:4317/`. The same Go process provides the UI, REST API, and MCP endpoint.
+Apix runs as one local Web workspace at `http://127.0.0.1:4317/`. The same Go process provides the UI, REST API, and MCP tools. Local AI clients connect over stdio without an IP address or port.
 
 ## Startup
 
@@ -118,10 +118,10 @@ is needed. Rebuild and restart the Runtime after changing embedded Web assets.
 
 Apix 在 WSL 运行时会尝试识别 Windows 用户目录，提供独立的 **Windows** 安装环境；Linux 与 Windows 配置不会混用。无法识别时可以复制配置，在目标工具中手动添加。安装位置会显示在各工具卡片中。
 
-安装仅添加名为 `apix` 的 MCP 服务，保留已有设置和其他 MCP 服务。修改已有文件前，会在相同目录创建 `*.apix-backup-*` 备份；重复安装相同配置不会再次写入。遇到同名不同配置、停用配置、无效配置或符号链接时会停止安装，原文件保持不变，请先检查或手动合并。
+本地安装统一添加名为 `apix` 的 stdio MCP 服务，保留已有设置和其他 MCP 服务。修改已有文件前，会在相同目录创建 `*.apix-backup-*` 备份；重复安装相同配置不会再次写入。标准旧版 HTTP 配置可备份后升级为 stdio。遇到自定义同名配置、停用配置、无效配置或符号链接时会停止安装，请先检查或手动合并。
 
-安装后保持 Apix 运行，在 AI 工具中重新加载 MCP 或开启新会话，并确认启用 `apix`。安装后会自动验证 MCP 握手和工具列表，卡片显示连接成功或失败、可用工具数量、最近验证时间和耗时。已配置的工具在打开页面时也会自动验证；测试结果在本次 Apix 运行期间保留 5 分钟，可随时点击 **重新测试**。选择 Windows 安装环境时，验证请求实际从 Windows 发起；其他环境使用 Apix 所在系统发起请求。连接测试不会执行任何业务工具。
+安装后保持 Apix 运行，在 AI 工具中重新加载 MCP 或开启新会话，并确认启用 `apix`。安装后会在所选环境启动 stdio 命令，验证 MCP 握手和工具列表，卡片显示连接成功或失败、可用工具数量、最近验证时间和耗时。已配置的工具在打开页面时也会自动验证；测试结果在本次 Apix 运行期间保留 5 分钟，可随时点击 **重新测试**。连接测试不会执行任何业务工具。
 
-“已配置”仅表示配置文件已就绪，“连接成功”表示所选环境能够访问 Apix 的 MCP 服务；应用内的启用、信任和会话加载状态请在目标工具中确认。安装成功但连接失败时配置仍会保留，修复网络或启动 Apix 后可单独重试连接，无需重新安装。TRAE 导入需要在应用内确认，返回页面后自动验证所选环境的 MCP 服务，不能据此判断 TRAE 是否已完成导入。地址来自当前 Apix 监听地址；更改端口后需要同步更新工具里的配置。
+“已配置”仅表示配置文件已就绪，“连接成功”表示所选环境能够通过 stdio 使用 Apix 的 MCP 服务；应用内的启用、信任和会话加载状态请在目标工具中确认。安装成功但连接失败时配置仍会保留，修复命令路径或启动 Apix 后可单独重试。TRAE 导入需要在应用内确认，返回页面后自动验证所选环境的 MCP 服务，不能据此判断 TRAE 是否已完成导入。工作台端口变化不影响 MCP；移动程序或修改数据库路径后需要更新配置。
 
 配置格式参考：[Codex MCP](https://developers.openai.com/codex/mcp/)、[Claude Code MCP](https://code.claude.com/docs/en/mcp)、[Cursor MCP](https://cursor.com/docs/mcp)、[TRAE 安装链接](https://docs.trae.cn/ide_mcp-server-install-links)、[VS Code MCP](https://code.visualstudio.com/docs/agent-customization/mcp-servers)。

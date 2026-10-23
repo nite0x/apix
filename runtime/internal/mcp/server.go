@@ -89,9 +89,8 @@ func (s *Server) RegisterHTTPTools(service *httpapi.HTTPService) {
 	}
 }
 
-// HTTPHandler exposes the MCP server over the Streamable HTTP transport.
-// Mount it on a single route that accepts POST, GET, and DELETE (normally
-// /mcp). The Runtime stays independent from any individual AI client.
+// HTTPHandler provides MCP framing for the private local IPC listener.
+// The runtime stays independent from any individual stdio client.
 func (s *Server) HTTPHandler() http.Handler {
 	return s.http
 }

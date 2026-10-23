@@ -5,14 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/apix/apix/runtime/internal/localipc"
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,6 +32,23 @@ func TestBridgeFixture(t *testing.T) {
 	}
 	os.Exit(0)
 }
+func ipcServer(t *testing.T, handler http.Handler) (*httptest.Server, string) {
+	t.Helper()
+	socket, err := localipc.Address(filepath.Join(t.TempDir(), "apix.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := localipc.Listen(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := httptest.NewUnstartedServer(handler)
+	s.Listener.Close()
+	s.Listener = l
+	s.Start()
+	return s, socket
+}
+
 func TestStdioBridgeDiscoversAndCallsSameRuntime(t *testing.T) {
 	runtime := server.NewMCPServer("apix", "test", server.WithToolCapabilities(true))
 	var calls atomic.Int32
@@ -38,9 +56,9 @@ func TestStdioBridgeDiscoversAndCallsSameRuntime(t *testing.T) {
 		calls.Add(1)
 		return mcp.NewToolResultText(r.GetString("value", "")), nil
 	})
-	httpServer := httptest.NewServer(server.NewStreamableHTTPServer(runtime))
+	httpServer, socket := ipcServer(t, server.NewStreamableHTTPServer(runtime))
 	defer httpServer.Close()
-	cli, err := mcpclient.NewStdioMCPClient(testExecutable(), []string{"APIX_BRIDGE_FIXTURE=" + httpServer.URL + "/mcp"}, "-test.run=^TestBridgeFixture$")
+	cli, err := mcpclient.NewStdioMCPClient(testExecutable(), []string{"APIX_BRIDGE_FIXTURE=" + socket}, "-test.run=^TestBridgeFixture$")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,15 +85,15 @@ func TestStdioBridgeDiscoversAndCallsSameRuntime(t *testing.T) {
 		t.Fatalf("calls=%d result=%+v", calls.Load(), result)
 	}
 }
-func TestBridgeRejectsRemoteAndRedirectEndpoints(t *testing.T) {
+func TestBridgeRejectsNetworkEndpointsAndOtherServers(t *testing.T) {
 	for _, endpoint := range []string{"https://example.com/mcp", "http://192.168.1.1/mcp", "http://127.0.0.1/api", "http://127.0.0.1/mcp?x=1"} {
 		if _, _, err := Connect(context.Background(), endpoint); err == nil {
 			t.Fatal("accepted", endpoint)
 		}
 	}
-	server := httptest.NewServer(server.NewStreamableHTTPServer(server.NewMCPServer("other", "1")))
-	defer server.Close()
-	if _, _, err := Connect(context.Background(), server.URL+"/mcp"); err == nil || !strings.Contains(err.Error(), "not an Apix") {
+	s, socket := ipcServer(t, server.NewStreamableHTTPServer(server.NewMCPServer("other", "1")))
+	defer s.Close()
+	if _, _, err := Connect(context.Background(), socket); err == nil || !strings.Contains(err.Error(), "not an Apix") {
 		t.Fatal(err)
 	}
 }
@@ -154,9 +172,9 @@ func assertEcho(t *testing.T, result *mcp.CallToolResult, err error, value strin
 
 func TestBridgeReinitializesExpiredSessionAndRefreshesTools(t *testing.T) {
 	target := &switchableRuntime{handler: echoRuntime("first")}
-	httpServer := httptest.NewServer(target)
+	httpServer, socket := ipcServer(t, target)
 	defer httpServer.Close()
-	cli := bridgeClient(t, httpServer.URL+"/mcp")
+	cli := bridgeClient(t, socket)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	result, err := callEcho(ctx, cli)
@@ -174,9 +192,7 @@ func TestBridgeReinitializesExpiredSessionAndRefreshesTools(t *testing.T) {
 
 func TestBridgeSurvivesListenerDowntimeAndRepeatedRestarts(t *testing.T) {
 	target := &switchableRuntime{handler: echoRuntime("first")}
-	httpServer := httptest.NewServer(target)
-	address := httpServer.Listener.Addr().String()
-	endpoint := httpServer.URL + "/mcp"
+	httpServer, endpoint := ipcServer(t, target)
 	defer func() { httpServer.Close() }()
 	cli := bridgeClient(t, endpoint)
 	for i := 0; i < 2; i++ {
@@ -191,10 +207,10 @@ func TestBridgeSurvivesListenerDowntimeAndRepeatedRestarts(t *testing.T) {
 			}
 			answer <- err
 		}()
-		// Leave the actual TCP listener down through several retry attempts.
+		// Leave the local IPC listener down through several retry attempts.
 		time.Sleep(600 * time.Millisecond)
 		target.replace(echoRuntime("restarted"))
-		listener, err := net.Listen("tcp", address)
+		listener, err := localipc.Listen(endpoint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -211,7 +227,7 @@ func TestBridgeSurvivesListenerDowntimeAndRepeatedRestarts(t *testing.T) {
 func TestBridgeReconnectsWhileIdle(t *testing.T) {
 	var initializations atomic.Int32
 	target := &switchableRuntime{handler: echoRuntime("first")}
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	httpServer, socket := ipcServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		var message struct{ Method string }
@@ -222,7 +238,7 @@ func TestBridgeReconnectsWhileIdle(t *testing.T) {
 		target.ServeHTTP(w, r)
 	}))
 	defer httpServer.Close()
-	cli := bridgeClient(t, httpServer.URL+"/mcp")
+	cli := bridgeClient(t, socket)
 	target.replace(echoRuntime("idle-restart"))
 	deadline := time.Now().Add(6 * time.Second)
 	for initializations.Load() < 2 && time.Now().Before(deadline) {
@@ -247,7 +263,7 @@ func TestBridgeDoesNotReplayToolWhenResponseIsLost(t *testing.T) {
 	target := server.NewStreamableHTTPServer(runtime, server.WithStateful(true))
 	var loseResponse atomic.Bool
 	loseResponse.Store(true)
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	httpServer, socket := ipcServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		var message struct{ Method string }
@@ -264,7 +280,7 @@ func TestBridgeDoesNotReplayToolWhenResponseIsLost(t *testing.T) {
 		target.ServeHTTP(w, r)
 	}))
 	defer httpServer.Close()
-	cli := bridgeClient(t, httpServer.URL+"/mcp")
+	cli := bridgeClient(t, socket)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	result, err := callEcho(ctx, cli)
@@ -303,7 +319,7 @@ func TestBridgeCallCancellationDoesNotStopRecovery(t *testing.T) {
 func TestBridgeConcurrentCallsShareRecoveredSession(t *testing.T) {
 	target := &switchableRuntime{handler: echoRuntime("first")}
 	var initializations atomic.Int32
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	httpServer, socket := ipcServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		var message struct{ Method string }
@@ -314,7 +330,7 @@ func TestBridgeConcurrentCallsShareRecoveredSession(t *testing.T) {
 		target.ServeHTTP(w, r)
 	}))
 	defer httpServer.Close()
-	cli := bridgeClient(t, httpServer.URL+"/mcp")
+	cli := bridgeClient(t, socket)
 	target.replace(echoRuntime("concurrent"))
 	const count = 8
 	results := make(chan error, count)
@@ -347,7 +363,7 @@ func TestBridgePreservesToolErrorsWithoutReconnect(t *testing.T) {
 		return mcp.NewToolResultError("invalid business input"), nil
 	})
 	target := server.NewStreamableHTTPServer(runtime, server.WithStateful(true))
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	httpServer, socket := ipcServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		var message struct{ Method string }
@@ -358,7 +374,7 @@ func TestBridgePreservesToolErrorsWithoutReconnect(t *testing.T) {
 		target.ServeHTTP(w, r)
 	}))
 	defer httpServer.Close()
-	cli := bridgeClient(t, httpServer.URL+"/mcp")
+	cli := bridgeClient(t, socket)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for i := 0; i < 2; i++ {

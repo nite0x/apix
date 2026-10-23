@@ -11,8 +11,8 @@ import (
 	"flag"
 	"fmt"
 	"github.com/apix/apix/runtime/internal/executionenv"
+	"github.com/apix/apix/runtime/internal/localipc"
 	mcpclient "github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"io"
 	"net"
@@ -62,6 +62,10 @@ func TestWindowsRuntimeManagesWindowsWSLAndStdioAI(t *testing.T) {
 	}
 	endpoint := "http://" + freeAddress(t) + "/mcp"
 	dir := t.TempDir()
+	socket, err := localipc.Address(filepath.Join(dir, "apix.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	cmd := exec.Command(runtimePath)
 	cmd.Env = append(os.Environ(), "APIX_ADDR="+strings.TrimSuffix(strings.TrimPrefix(endpoint, "http://"), "/mcp"), "APIX_DB_PATH="+filepath.Join(dir, "apix.db"), "APIX_LOG_PATH="+filepath.Join(dir, "runtime.log"))
 	log, err := os.Create(filepath.Join(dir, "startup.log"))
@@ -99,10 +103,7 @@ func TestWindowsRuntimeManagesWindowsWSLAndStdioAI(t *testing.T) {
 	var cli *mcpclient.Client
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		cli, err = mcpclient.NewStreamableHttpClient(endpoint, transport.WithHTTPBasicClient(&http.Client{Transport: &http.Transport{Proxy: nil}}))
-		if err == nil {
-			err = cli.Start(ctx)
-		}
+		cli, err = mcpclient.NewStdioMCPClient(runtimePath, nil, "mcp-stdio", "--socket", socket)
 		if err == nil {
 			_, err = cli.Initialize(ctx, mcp.InitializeRequest{Params: mcp.InitializeParams{ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION, ClientInfo: mcp.Implementation{Name: "acceptance", Version: "1"}}})
 		}
@@ -188,14 +189,14 @@ func TestWindowsRuntimeManagesWindowsWSLAndStdioAI(t *testing.T) {
 	if !strings.Contains(string(logs), "WSL child ready") {
 		t.Fatal(string(logs))
 	}
-	// On NAT, HTTP from Linux cannot reach a Windows loopback listener. This client
-	// starts the real packaged Windows bridge from Linux and still uses that runtime.
+	// Start the packaged Windows stdio bridge from Linux. Both native and WSL
+	// clients use the same Windows named pipe and runtime, without TCP MCP.
 	bridgePath, err := executionenv.WSLPath(ctx, info.ID, runtimePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, user, _ := executionenv.Parse(info.ID)
-	ai, err := mcpclient.NewStdioMCPClient("wsl.exe", nil, "--distribution", *distro, "--user", user, "--exec", bridgePath, "mcp-stdio", "--url", endpoint)
+	ai, err := mcpclient.NewStdioMCPClient("wsl.exe", nil, "--distribution", *distro, "--user", user, "--exec", bridgePath, "mcp-stdio", "--socket", socket)
 	if err != nil {
 		t.Fatal(err)
 	}

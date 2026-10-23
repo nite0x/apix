@@ -47,11 +47,18 @@ and are appended to `startup.log`. Startup failures or unexpected backend exits
 show a native error dialog with diagnostics. Reopening focuses and restores the
 existing window rather than creating another backend.
 
-Desktop defaults to `127.0.0.1:4319` so saved MCP configurations survive restarts.
-The browser development entry stays on port 4317. `APIX_ADDR` can override the
-desktop port on `127.0.0.1`; `127.0.0.1:0` requests an ephemeral port for tests. Occupied ports
-fail explicitly; the shell never reuses or stops another listener. When using an
-ephemeral port, reinstall AI client configuration after every restart.
+Desktop workspace defaults to `127.0.0.1:4319`; browser development uses port 4317.
+`APIX_ADDR` can override the workspace port on `127.0.0.1`; `127.0.0.1:0` requests
+an ephemeral port for tests. Occupied ports fail explicitly.
+
+All local MCP installations use stdio. The AI tools page generates a command
+calling the installed sidecar with `mcp-stdio --socket <path>`. Bridges use Unix
+sockets on macOS/Linux and current-user named pipes on Windows to share the
+running backend. MCP opens no TCP listener; changing the workspace port does not
+change AI configuration. The IPC address follows the database path. Moving the
+executable or changing the database requires updating the client configuration.
+Browser development builds a persistent `release/apix-runtime-dev` executable so
+saved client commands survive development restarts.
 
 Data defaults preserve existing paths and the adjacent credentials key:
 

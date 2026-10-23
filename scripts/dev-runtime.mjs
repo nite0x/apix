@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import http from "node:http";
@@ -40,7 +40,11 @@ if (runtimeArgs.length === 0 && (await runtimeIsHealthy())) {
 }
 
 function startRuntime(args) {
-  const child = spawn("go", ["run", ".", ...args], {
+  // AI clients retain this path in their stdio configuration across restarts.
+  const binary = join(rootDir, "release", `apix-runtime-dev${process.platform === "win32" ? ".exe" : ""}`);
+  mkdirSync(dirname(binary), { recursive: true });
+  execFileSync("go", ["build", "-o", binary, "."], { cwd: runtimeDir, env: goEnv, stdio: "inherit" });
+  const child = spawn(binary, args, {
     cwd: runtimeDir,
     env: goEnv,
     stdio: "inherit"
